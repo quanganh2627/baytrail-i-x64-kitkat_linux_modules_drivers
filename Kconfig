@@ -1,1 +1,3 @@
 source "../modules/drivers/hwmon/Kconfig"
+source "../modules/drivers/modem_control/Kconfig"
+
