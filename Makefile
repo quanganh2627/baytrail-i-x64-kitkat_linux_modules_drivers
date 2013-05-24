@@ -1,3 +1,4 @@
+obj-$(CONFIG_GPS) 	        += gps/
 obj-$(CONFIG_HWMON)             += hwmon/
 obj-$(CONFIG_INPUT)             += input/
 obj-y				+= leds/
