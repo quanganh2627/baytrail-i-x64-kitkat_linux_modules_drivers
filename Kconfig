@@ -6,4 +6,4 @@ source "../modules/drivers/leds/Kconfig"
 source "../modules/drivers/power/Kconfig"
 source "../modules/drivers/staging/Kconfig"
 source "../modules/drivers/pinctrl/Kconfig"
-
+source "../modules/drivers/platform/x86/Kconfig"
