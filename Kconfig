@@ -1,4 +1,5 @@
 source "../modules/drivers/gps/Kconfig"
+source "../modules/drivers/hsi/Kconfig"
 source "../modules/drivers/hwmon/Kconfig"
 source "../modules/drivers/modem_control/Kconfig"
 source "../modules/drivers/misc/Kconfig"
