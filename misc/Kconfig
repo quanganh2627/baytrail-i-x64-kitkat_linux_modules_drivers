@@ -21,3 +21,4 @@ config UUID
 	 Driver for get UUID.
 
 source "../modules/drivers/misc/bcm-lpm/Kconfig"
+source "../modules/drivers/misc/ti-st/Kconfig"
