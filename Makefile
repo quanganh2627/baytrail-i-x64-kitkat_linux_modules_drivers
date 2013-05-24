@@ -8,3 +8,4 @@ obj-y				+= pinctrl/
 obj-y                           += platform/x86/
 obj-$(CONFIG_POWER_SUPPLY)	+= power/
 obj-$(CONFIG_STAGING)		+= staging/
+obj-$(CONFIG_SWITCH)		+= switch/
