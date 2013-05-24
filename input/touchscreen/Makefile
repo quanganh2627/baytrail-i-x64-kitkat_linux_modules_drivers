@@ -1,0 +1,1 @@
+obj-$(CONFIG_TOUCHSCREEN_ATMEL_MXT224)	+= atmel_mxt224.o
