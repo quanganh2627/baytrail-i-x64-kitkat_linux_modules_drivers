@@ -19,3 +19,5 @@ config UUID
 	default n
 	---help---
 	 Driver for get UUID.
+
+source "../modules/drivers/misc/bcm-lpm/Kconfig"
