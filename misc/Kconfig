@@ -3,3 +3,9 @@ config SCU_LOGGING
 	default n
 	---help---
 	 Driver that enable for debugging Intel SCU firmware fabric related error.
+
+config UUID
+	tristate "get uuid"
+	default n
+	---help---
+	 Driver for get UUID.
