@@ -1,0 +1,1 @@
+obj-$(CONFIG_SENSORS_L3G4200D_POLL)	+= l3g4200d_poll.o
