@@ -40,7 +40,6 @@
 #include <linux/uaccess.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
-#include <linux/earlysuspend.h>
 #include <linux/atmel_mxt224.h>
 
 /* Routines for memory access within a 16 bit address space */
@@ -1019,7 +1018,7 @@ static int mxt_write_block(struct i2c_client *client,
 		__le16	le_addr;
 		u8	data[I2C_MAX_BLKSZ];
 
-	} i2c_block_transfer __packed;
+	} i2c_block_transfer;
 
 	struct mxt_data *mxt;
 	dev_dbg(&client->dev, "Writing %d bytes to %d...", length, addr);
