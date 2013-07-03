@@ -94,6 +94,7 @@
 #define INSTERR_IND			0xf502
 #define ECCERR_IND			0xf504
 #define FATALERR_IND			0xf505
+#define INFORMATIVE_MSG_IND		0xf506
 #define FLAG_HILOW_MASK			8
 #define FAB_ID_MASK			7
 #define MAX_AGENT_IDX			15
@@ -582,7 +583,8 @@ static int dump_fwerr_log(char *buf, int size)
 		((err_status.data & 0xFFFF) == MEMERR_IND) ||
 		((err_status.data & 0xFFFF) == INSTERR_IND) ||
 		((err_status.data & 0xFFFF) == ECCERR_IND) ||
-		((err_status.data & 0xFFFF) == FATALERR_IND)) &&
+		((err_status.data & 0xFFFF) == FATALERR_IND) ||
+		((err_status.data & 0xFFFF) == INFORMATIVE_MSG_IND)) &&
 		(err_log.fields.fw_err_ind == FWERR_INDICATOR)) {
 
 		output_str(ret, buf, size, "HW WDT expired");
@@ -607,6 +609,10 @@ static int dump_fwerr_log(char *buf, int size)
 		case FATALERR_IND:
 			output_str(ret, buf, size,
 				   " following a FATAL Error exception.\n\n");
+			break;
+		case INFORMATIVE_MSG_IND:
+			output_str(ret, buf, size,
+				   " following an Informative Message.\n\n");
 			break;
 		default:
 			output_str(ret, buf, size, ".\n\n");
