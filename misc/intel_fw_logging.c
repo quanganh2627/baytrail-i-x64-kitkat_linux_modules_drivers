@@ -1192,7 +1192,7 @@ static struct platform_driver intel_fw_logging_driver = {
 		.owner = THIS_MODULE,
 		},
 	.probe = intel_fw_logging_probe,
-	.remove = __devexit_p(intel_fw_logging_remove),
+	.remove = intel_fw_logging_remove,
 	.id_table = intel_fw_logging_table,
 };
 
