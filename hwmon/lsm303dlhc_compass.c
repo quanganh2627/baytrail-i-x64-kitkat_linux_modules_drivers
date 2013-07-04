@@ -345,7 +345,7 @@ error_init_device:
 	return res;
 }
 
-static int __devexit lsm303cmp_remove(struct i2c_client *client)
+static int lsm303cmp_remove(struct i2c_client *client)
 {
 	struct lsm303cmp_driver_data *lsm303cmp;
 
@@ -415,7 +415,7 @@ static struct i2c_driver lsm303cmp_driver = {
 	},
 	.id_table = lsm303cmp_id,
 	.probe = lsm303cmp_probe,
-	.remove = __devexit_p(lsm303cmp_remove),
+	.remove = lsm303cmp_remove,
 };
 
 static int __init lsm303cmp_init(void)

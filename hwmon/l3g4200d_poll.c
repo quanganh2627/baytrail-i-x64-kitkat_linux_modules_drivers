@@ -811,7 +811,7 @@ static struct i2c_driver l3g4200d_driver = {
 #endif /* CONFIG_PM_SLEEP */
 	},
 	.probe = l3g4200d_probe,
-	.remove = __devexit_p(l3g4200d_remove),
+	.remove = l3g4200d_remove,
 	.id_table = l3g4200d_id,
 };
 

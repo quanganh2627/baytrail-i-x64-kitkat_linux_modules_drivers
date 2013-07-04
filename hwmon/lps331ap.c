@@ -414,7 +414,7 @@ static struct attribute_group lps331ap_attribute_group = {
 	.attrs = lps331ap_attributes
 };
 
-static int __devinit lps331ap_probe(struct i2c_client *client,
+static int lps331ap_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
 	int err;
@@ -470,7 +470,7 @@ fail_init:
 	return err;
 }
 
-static int __devexit lps331ap_remove(struct i2c_client *client)
+static int lps331ap_remove(struct i2c_client *client)
 {
 	struct lps331ap_data *lps331ap = i2c_get_clientdata(client);
 
@@ -528,7 +528,7 @@ static struct i2c_driver lps331ap_driver = {
 		.pm = &lps331ap_pm_ops,
 	},
 	.probe = lps331ap_probe,
-	.remove = __devexit_p(lps331ap_remove),
+	.remove = lps331ap_remove,
 	.id_table = lps331ap_id,
 };
 
