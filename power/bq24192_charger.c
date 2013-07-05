@@ -1492,6 +1492,7 @@ static void bq24192_task_worker(struct work_struct *work)
 	struct bq24192_chip *chip =
 	    container_of(work, struct bq24192_chip, chrg_task_wrkr.work);
 	int ret, jiffy = CHARGER_TASK_JIFFIES, vbatt = 0;
+	static int prev_health;
 	u8 vindpm = INPUT_SRC_VOLT_LMT_DEF;
 
 	dev_info(&chip->client->dev, "%s\n", __func__);
@@ -1560,6 +1561,15 @@ static void bq24192_task_worker(struct work_struct *work)
 		power_supply_changed(NULL);
 
 sched_task_work:
+	if ((POWER_SUPPLY_HEALTH_OVERHEAT  == bq24192_get_battery_health()) ||
+		(POWER_SUPPLY_HEALTH_OVERHEAT == prev_health)) {
+			power_supply_changed(&chip->usb);
+			prev_health = bq24192_get_battery_health();
+			dev_warn(&chip->client->dev,
+				"%s health status  %d",
+					__func__, prev_health);
+	}
+
 	schedule_delayed_work(&chip->chrg_task_wrkr, jiffy);
 }
 
