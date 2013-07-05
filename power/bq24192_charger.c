@@ -1297,19 +1297,9 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_MAX_TEMP:
 		chip->max_temp = val->intval;
-		ret =  intel_scu_ipc_iowrite8(MSIC_CHRTMPCTRL, chip->max_temp);
-		if (ret) {
-			dev_err(&chip->client->dev,
-				"IPC Failed with %d error\n", ret);
-		}
 		break;
 	case POWER_SUPPLY_PROP_MIN_TEMP:
 		chip->min_temp = val->intval;
-		ret =  intel_scu_ipc_iowrite8(MSIC_CHRTMPCTRL, chip->min_temp);
-		if (ret) {
-			dev_err(&chip->client->dev,
-				"IPC Failed with %d error\n", ret);
-		}
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		chip->cntl_state = val->intval;
