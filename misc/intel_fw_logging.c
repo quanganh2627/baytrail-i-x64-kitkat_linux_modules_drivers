@@ -408,9 +408,24 @@ static void __iomem *get_oshob_addr(void)
 	return oshob_addr; /* Return OSHOB base address */
 }
 
+static u8 caculate_checksum(u32 length)
+{
+	int i;
+	u8 checksum = 0;
+	u8 *array = (u8 *)log_buffer;
+
+	for (i = 0; i < length; i++)
+		checksum += array[i];
+
+	return ~checksum + 1;
+}
+
 static int fw_error_found(int use_legacytype)
 {
+	u8 checksum = 0;
+	u32 total_bytes, regid_cnt;
 	union error_log err_log;
+	union error_header err_header;
 
 	if (use_legacytype) {
 		err_log.data = log_buffer[FABRIC_ERR_SIGNATURE_IDX];
@@ -423,6 +438,24 @@ static int fw_error_found(int use_legacytype)
 	} else {
 		if (log_buffer[FABRIC_ERR_SIGNATURE_IDX1] != FABERR_INDICATOR1)
 			return 0;
+
+		err_header.data = log_buffer[FABRIC_ERR_HEADER];
+		checksum = err_header.fields.checksum;
+		err_header.fields.checksum = 0;
+		log_buffer[FABRIC_ERR_HEADER] = err_header.data;
+
+		/* Figure out how many bytes in the log data */
+		regid_cnt = (err_header.fields.num_flag_regs +
+			err_header.fields.num_err_regs) / 4;
+		regid_cnt += (err_header.fields.num_flag_regs +
+			err_header.fields.num_err_regs) % 4 ? 1 : 0;
+
+		total_bytes = 4 * 4 + 4 * 2 * err_header.fields.num_flag_regs +
+			4 * 3 * err_header.fields.num_err_regs + 4 * regid_cnt;
+
+		if (caculate_checksum(total_bytes) != checksum)
+			return 0;
+
 		return 1;
 	}
 }
@@ -703,8 +736,7 @@ out:
 	return ret;
 }
 
-static int dump_scu_extented_trace(char *buf, int size, int log_offset,
-				   int *read)
+static int dump_scu_extented_trace(char *buf, int size, int log_offset, int *read)
 {
 	int ret = 0;
 	int i;
@@ -730,35 +762,48 @@ static int dump_scu_extented_trace(char *buf, int size, int log_offset,
 		if (buf && (size - ret < 18))
 			break;
 	}
+
 	return ret;
 }
 
+static char *cmd_type_str[] = {
+	"Idle",
+	"Write",
+	"Read",
+	"ReadEx",
+	"ReadLinked",
+	"WriteNonPost",
+	"WriteConditional",
+	"Broadcast"
+};
+
 static char *error_type_str[] = {
-	"",
+	"Unknown",
 	"Unsupported Command",
 	"Address Hole",
-	"",
+	"Unknown",
 	"Inband Error",
-	"",
-	"",
+	"Unknown",
+	"Unknown",
 	"Request Timeout, Not Accepted",
 	"Request Timeout, No Response",
 	"Request Timeout, Data not accepted",
-	"",
-	"",
-	"",
-	"",
-	"",
-	""
+	"Unknown",
+	"Unknown",
+	"Unknown",
+	"Unknown",
+	"Unknown",
+	"Unknown"
 };
 
 static int new_dump_fwerr_log(char *buf, int size)
 {
 	u8 id = 0;
 	char *ptr;
+	u32 fabric_id;
 	union error_header err_header;
 	union error_scu_version err_scu_ver;
-	int error_type;
+	int error_type, cmd_type, init_id, is_multi, is_secondary;
 
 	u16 scu_minor_ver, scu_major_ver;
 	u32 reg_ids = 0, error_typ = log_buffer[FABRIC_ERR_ERRORTYPE];
@@ -817,8 +862,7 @@ static int new_dump_fwerr_log(char *buf, int size)
 		id = (reg_ids & 0xFF);
 		reg_ids >>= 8;
 		if (num_flag_status) {
-			ptr = get_element_flagsts_detail(
-				id, log_buffer[offset], log_buffer[offset+1]);
+			ptr = get_element_flagsts_detail(id);
 			output_str(ret, buf, size, "* %s\n", ptr);
 			ret += get_fabric_error_cause_detail(
 				buf + ret, size - ret, id,
@@ -829,20 +873,37 @@ static int new_dump_fwerr_log(char *buf, int size)
 			offset += 2;
 			num_flag_status--;
 		} else {
-			ptr = get_element_errorlog_detail(
-				id, log_buffer[offset], log_buffer[offset+1],
-				log_buffer[offset+2]);
+			ptr = get_element_errorlog_detail(id, &fabric_id);
 			output_str(ret, buf, size, "* %s\n", ptr);
 			output_str(ret, buf, size, "Lower ErrLog DW: 0x%08X\n",
-				   log_buffer[offset]);
+					log_buffer[offset]);
+
+			cmd_type = log_buffer[offset] & 7;
+			output_str(ret, buf, size, "\tCommand Type: %s\n",
+						cmd_type_str[cmd_type]);
+
+			init_id = (log_buffer[offset] >> 8) & 0xFF;
+			ptr = get_initiator_id_str(init_id, fabric_id);
+			output_str(ret, buf, size, "\tInit ID: %s\n", ptr);
+
 			error_type = (log_buffer[offset] >> 24) & 0xF;
 			output_str(ret, buf, size, "\tError Type: %s\n",
-				   error_type_str[error_type]);
+					error_type_str[error_type]);
+
+			is_secondary = (log_buffer[offset] >> 30) & 1;
+			output_str(ret, buf, size, "\tSecondary error: %s\n",
+						is_secondary ? "Yes" : "No");
+
+			is_multi = (log_buffer[offset] >> 31) & 1;
+			output_str(ret, buf, size, "\tMultiple errors: %s\n",
+						is_multi ? "Yes" : "No");
+
 			output_str(ret, buf, size, "Upper ErrLog DW: 0x%08X\n",
-				   log_buffer[offset + 1]);
+					log_buffer[offset + 1]);
 			output_str(ret, buf, size,
-				   "Associated 32bit Address: 0x%08X\n\n",
-				   log_buffer[offset + 2]);
+					"Associated 32bit Address: 0x%08X\n\n",
+					log_buffer[offset + 2]);
+
 			offset += 3;
 			num_err_logs--;
 		}
@@ -911,8 +972,9 @@ static irqreturn_t recoverable_faberror_irq(int irq, void *ignored)
 
 	use_legacytype = \
 		(intel_mid_identify_cpu() != INTEL_MID_CPU_CHIP_TANGIER);
-	if (!fw_error_found(use_legacytype)) {
-		pr_info("No stored new SCU errors found in SRAM, bogus interrupt\n");
+
+	if (use_legacytype || !fw_error_found(use_legacytype)) {
+		pr_info("No valid stored new SCU errors found in SRAM, bogus interrupt\n");
 		return IRQ_HANDLED;
 	}
 
@@ -950,10 +1012,12 @@ static int fw_logging_crash_on_boot(void)
 	read_fwerr_log(log_buffer, oshob_base);
 	use_legacytype = \
 		(intel_mid_identify_cpu() != INTEL_MID_CPU_CHIP_TANGIER);
+
 	if (!fw_error_found(use_legacytype)) {
-		pr_info("No stored legacy SCU errors found in SRAM\n");
+		pr_info("No valid stored SCU errors found in SRAM\n");
 		goto out;
 	}
+
 	if (use_legacytype) {
 		length = dump_fwerr_log(NULL, 0);
 

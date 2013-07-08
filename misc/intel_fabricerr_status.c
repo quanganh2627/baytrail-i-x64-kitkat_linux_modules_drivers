@@ -1067,6 +1067,21 @@ static char *Scu_ErrorTypes[] = {
 	"Unknown"
 };
 
+#define BEGIN_MAIN_FABRIC_REGID		16
+#define END_MAIN_FABRIC_REGID		35
+#define BEGIN_SEC_FABRIC_REGID		84
+#define END_SEC_FABRIC_REGID		99
+#define BEGIN_AUDIO_FABRIC_REGID	71
+#define END_AUDIO_FABRIC_REGID		83
+#define BEGIN_GP_FABRIC_REGID		58
+#define END_GP_FABRIC_REGID			70
+#define BEGIN_SC_FABRIC_REGID		36
+#define END_SC_FABRIC_REGID			57
+#define SC_FABRIC_PSH_T0_REGID		18
+#define SC_FABRIC_PSH_I0_REGID		19
+#define SC_FABRIC_ARC_T0_REGID		20
+#define SC_FABRIC_ARC_I0_REGID		21
+
 static char *FabricFlagStatusErrLogDetail[] = {
 	"Main Fabric Flag Status",
 	"Audio Fabric Flag Status",
@@ -1326,14 +1341,118 @@ static char *FabricFlagStatusErrLogDetail[] = {
 	""
 };
 
-char *get_element_errorlog_detail(
-	u8 id, u32 first_dword, u32 second_dword, u32 third_dword)
+#define MAX_FULLCHIP_INITID_VAL		16
+#define MAX_SECONDARY_INITID_VAL	19
+#define MAX_AUDIO_INITID_VAL		5
+#define MAX_SC_INITID_VAL			9
+#define MAX_GP_INITID_VAL			2
+
+static char *init_id_str_fullchip_tng[] = {
+	"iosf2ocp_i0 (thread 0)",
+	"iosf2ocp_i0 (thread 1)",
+	"iosf2ocp_i0 (thread 2)",
+	"iosf2ocp_i0 (thread 3)",
+	"sdf2mnf_i0 (thread 0)",
+	"sdf2mnf_i0 (thread 1)",
+	"sdf2mnf_i0 (thread 2)",
+	"sdf2mnf_i0 (thread 3)",
+	"sdf2mnf_i0 (thread 4)",
+	"sdf2mnf_i0 (thread 5)",
+	"sdf2mnf_i0 (thread 6)",
+	"sdf2mnf_i0 (thread 7)",
+	"usb3_i0",
+	"usb3_i1",
+	"mfth_i0",
+	"cha_i0",
+	"otg_i0"
+};
+
+static char *init_id_str_secondary_tng[] = {
+	"mnf2sdf_i0 (thread 0)",
+	"mnf2sdf_i0 (thread 1)",
+	"sdio0_i0",
+	"gpf2sdf_i0 (thread 0)",
+	"gpf2sdf_i0 (thread 1)",
+	"emmc01_i0",
+	"emmc01_i1",
+	"scf2sdf_i0 (thread 0)",
+	"scf2sdf_i0 (thread 1)",
+	"scf2sdf_i0 (thread 2)",
+	"scf2sdf_i0 (thread 3)",
+	"sdio1_i0",
+	"adf2sdf_i0 (thread 0)",
+	"adf2sdf_i0 (thread 1)",
+	"adf2sdf_i0 (thread 2)",
+	"hsi_i0 (thread 0)",
+	"hsi_i0 (thread 1)",
+	"mph_i0",
+	"sfth_i0",
+	"dfxsctap_i0"
+};
+
+static char *init_id_str_audio_tng[] = {
+	"sdfadf_i0",
+	"pif2ocp_i0",
+	"adma0_i0",
+	"adma0_i1",
+	"adma1_i0",
+	"adma1_i1"
+};
+
+static char *init_id_str_sc_tng[] = {
+	"ilb_i0",
+	"sdf2scf_i0 (thread 0)",
+	"sdf2scf_i0 (thread 1)",
+	"scdma_i0",
+	"scdma_i1",
+	"arc_i0 (thread 0)",
+	"arc_i0 (thread 1)",
+	"arc_i0 (thread 2)",
+	"uart_i0",
+	"psh_i0"
+};
+
+static char *init_id_str_gp_tng[] = {
+	"sd2gpf_i0",
+	"gpdma_i0",
+	"gpdma_i1"
+};
+
+static char *init_id_str_unknown = "unknown";
+
+char *get_element_errorlog_detail(u8 id, u32 *fabric_type)
 {
+	if (id >= BEGIN_MAIN_FABRIC_REGID && id <= END_MAIN_FABRIC_REGID &&
+		id != SC_FABRIC_PSH_T0_REGID && id != SC_FABRIC_PSH_I0_REGID &&
+		id != SC_FABRIC_ARC_T0_REGID && id != SC_FABRIC_ARC_I0_REGID)
+		*fabric_type = FAB_ID_FULLCHIP;
+
+	else if (id >= BEGIN_SEC_FABRIC_REGID &&
+		 id <= END_SEC_FABRIC_REGID)
+		*fabric_type = FAB_ID_SECONDARY;
+
+	else if (id >= BEGIN_AUDIO_FABRIC_REGID &&
+		 id <= END_AUDIO_FABRIC_REGID)
+		*fabric_type = FAB_ID_AUDIO;
+
+	else if (id >= BEGIN_GP_FABRIC_REGID &&
+			id <= END_GP_FABRIC_REGID)
+		*fabric_type = FAB_ID_GP;
+
+	else if ((id >= BEGIN_SC_FABRIC_REGID &&
+			id <= END_SC_FABRIC_REGID) ||
+			id == SC_FABRIC_PSH_T0_REGID ||
+			id == SC_FABRIC_PSH_I0_REGID ||
+			id == SC_FABRIC_ARC_T0_REGID ||
+			id == SC_FABRIC_ARC_I0_REGID)
+		*fabric_type = FAB_ID_SC;
+	else
+		*fabric_type = FAB_ID_UNKNOWN;
+
 	return FabricFlagStatusErrLogDetail[id];
 }
 
-char *get_element_flagsts_detail(
-	u8 id, u32 first_dword, u32 second_dword)
+char *get_element_flagsts_detail(u8 id)
 {
 	return FabricFlagStatusErrLogDetail[id];
 }
@@ -1357,6 +1476,50 @@ char *get_errortype_str(u16 error_type)
 		return Scu_ErrorTypes[KERN_WDOG_FIRED];
 	default:
 		return Scu_ErrorTypes[UNKNOWN_ERRTYPE];
+	}
+}
+
+char *get_initiator_id_str(int init_id, u32 fabric_id)
+{
+	switch (fabric_id) {
+
+	case FAB_ID_FULLCHIP:
+
+		if (init_id > MAX_FULLCHIP_INITID_VAL)
+			return init_id_str_unknown;
+
+		return init_id_str_fullchip_tng[init_id];
+
+	case FAB_ID_AUDIO:
+
+		if (init_id > MAX_AUDIO_INITID_VAL)
+			return init_id_str_unknown;
+
+		return init_id_str_audio_tng[init_id];
+
+	case FAB_ID_SECONDARY:
+
+		if (init_id > MAX_SECONDARY_INITID_VAL)
+			return init_id_str_unknown;
+
+		return init_id_str_secondary_tng[init_id];
+
+	case FAB_ID_GP:
+
+		if (init_id > MAX_GP_INITID_VAL)
+			return init_id_str_unknown;
+
+		return init_id_str_gp_tng[init_id];
+
+	case FAB_ID_SC:
+
+		if (init_id > MAX_SC_INITID_VAL)
+			return init_id_str_unknown;
+
+		return init_id_str_sc_tng[init_id];
+
+	default:
+		return init_id_str_unknown;
 	}
 }
 
