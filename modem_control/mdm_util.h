@@ -26,6 +26,8 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/acpi.h>
+#include <linux/acpi_gpio.h>
 #include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/fs.h>

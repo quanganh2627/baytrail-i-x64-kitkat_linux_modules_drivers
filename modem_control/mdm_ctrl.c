@@ -499,7 +499,8 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 					ret);
 			break;
 		}
-		pr_err(DRVNAME": WAIT_FOR_STATE 0x%x ! \r\n", cmd_params.param);
+		pr_err(DRVNAME": WAIT_FOR_STATE 0x%x ! \r\n",
+			cmd_params.param);
 
 		ret = wait_event_interruptible_timeout(drv->event,
 				drv->modem_state == cmd_params.param,
@@ -662,8 +663,6 @@ static const struct file_operations mdm_ctrl_ops = {
 	.unlocked_ioctl	= mdm_ctrl_dev_ioctl
 };
 
-
-
 /**
  *  mdm_ctrl_module_init - initialises the Modem Control driver
  *
@@ -684,6 +683,9 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	pr_info(DRVNAME ": Getting device infos");
 	/* Pre-initialisation: Retrieve platform device data*/
 	mdm_ctrl_get_device_info(new_drv, pdev);
+
+	/* HERE new_drv variable must contain all modem specifics
+	(mdm name, cpu name, pmic, GPIO, early power on/off */
 
 	if (new_drv->is_mdm_ctrl_disabled) {
 		/* KW fix can't happen. */
@@ -845,6 +847,14 @@ out:
 	return 0;
 }
 
+/* FOR ACPI HANDLING */
+static struct acpi_device_id mdm_ctrl_acpi_ids[] = {
+	/* ACPI IDs here */
+	{ "MCD0001", 0 },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, mdm_ctrl_acpi_ids);
+
 static const struct platform_device_id mdm_ctrl_id_table[] = {
 	{ DEVICE_NAME, 0 },
 	{ },
@@ -858,6 +868,8 @@ static struct platform_driver mcd_driver = {
 	.driver		= {
 		.name	= DRVNAME,
 		.owner	= THIS_MODULE,
+		/* FOR ACPI HANDLING */
+		.acpi_match_table = ACPI_PTR(mdm_ctrl_acpi_ids),
 	},
 	.id_table	= mdm_ctrl_id_table,
 };

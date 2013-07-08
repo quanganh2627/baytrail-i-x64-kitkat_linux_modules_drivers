@@ -277,10 +277,17 @@ struct mdm_ctrl_pdata *modem_ctrl_create_pdata(struct platform_device *pdev)
 	struct mdm_ctrl_pdata *pdata = NULL;
 	struct mdm_ctrl_device_info *mid_info = NULL;
 	struct modem_base_info *mb_info = NULL ;
+	struct mdm_ctrl_pmic_data *pmic_data = NULL;
 
 	if (!pdev->dev.platform_data) {
-		pr_err(DRVNAME": No registered info found. Disabling driver.");
-		return NULL;
+		pr_info("%s: No platform data available, checking ACPI...",
+			__func__);
+		/* FOR ACPI HANDLING */
+		if (retrieve_modem_platform_data(pdev)) {
+		  pr_err("%s: No registered info found. Disabling driver.",
+			 __func__);
+		  return NULL;
+		}
 	}
 
 	mb_info = pdev->dev.platform_data;
@@ -328,10 +335,16 @@ struct mdm_ctrl_pdata *modem_ctrl_create_pdata(struct platform_device *pdev)
 	/* Modem is supported, fill in the pdata structure with it */
 	pdata->modem = mb_info->id;
 
+	pmic_data = (struct mdm_ctrl_pmic_data *) mb_info->pmic;
+	if (!pmic_data) {
+		pr_err(DRVNAME": No available PMIC Data!\n");
+		goto Free_mid_info;
+	};
+
 	/* Check if the PMIC is supported.
 	 * Then provide register adresses and values.
 	 */
-	switch (mb_info->pmic) {
+	switch (pmic_data->id) {
 	case MFLD_PMIC:
 		pdata->chipctrl = 0x0E0;
 		pdata->chipctrlon = 0x4;
@@ -356,8 +369,16 @@ struct mdm_ctrl_pdata *modem_ctrl_create_pdata(struct platform_device *pdev)
 		pdata->pre_pwr_down_delay = 650;
 		pdata->pwr_down_duration = 20000;
 		break;
+	case BYT_PMIC:
+		pdata->chipctrl = pmic_data->chipctrl;
+		pdata->chipctrlon = pmic_data->chipctrlon;
+		pdata->chipctrloff = pmic_data->chipctrloff;
+		pdata->chipctrl_mask = pmic_data->chipctrl_mask;
+		pdata->pre_pwr_down_delay = 650;
+		pdata->pwr_down_duration = 20000;
+		break;
 	default:
-		pr_err(DRVNAME": PMIC not supported %d", mb_info->pmic);
+		pr_err(DRVNAME": PMIC not supported %d", pmic_data->id);
 		goto Free_mid_info;
 	}
 
@@ -374,7 +395,6 @@ Error:
 	pdata = NULL;
 Out:
 	return pdata;
-
 }
 
 /**
