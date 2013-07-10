@@ -325,7 +325,7 @@ psh_if_err:
 	return ret;
 }
 
-static int __devexit psh_remove(struct i2c_client *client)
+static int psh_remove(struct i2c_client *client)
 {
 	struct psh_ia_priv *ia_data =
 			(struct psh_ia_priv *)dev_get_drvdata(&client->dev);
