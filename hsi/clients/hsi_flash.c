@@ -325,7 +325,7 @@ static void hsi_flash_start_stop_rx(struct hsi_client *cl, unsigned long state)
 }
 #endif /* NEW_HSI_CORE_IF */
 
-static int __devinit hsi_flash_probe(struct device *dev)
+static int hsi_flash_probe(struct device *dev)
 {
 	struct hsi_flash_client_data *cl_data = &hsi_flash_cl_data;
 	struct hsi_flash_channel *channel = cl_data->channels;
@@ -347,7 +347,7 @@ static int __devinit hsi_flash_probe(struct device *dev)
 	return 0;
 }
 
-static int __devexit hsi_flash_remove(struct device *dev)
+static int hsi_flash_remove(struct device *dev)
 {
 	struct hsi_client *cl = to_hsi_client(dev);
 	struct hsi_flash_client_data *cl_data = hsi_client_drvdata(cl);
