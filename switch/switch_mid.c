@@ -128,7 +128,7 @@ err_switch_dev_register:
 	return ret;
 }
 
-static int __devexit mid_switch_remove(struct platform_device *pdev)
+static int mid_switch_remove(struct platform_device *pdev)
 {
 	struct mid_switch_data *switch_data = platform_get_drvdata(pdev);
 
@@ -141,7 +141,7 @@ static int __devexit mid_switch_remove(struct platform_device *pdev)
 
 static struct platform_driver mid_switch_driver = {
 	.probe		= mid_switch_probe,
-	.remove		= __devexit_p(mid_switch_remove),
+	.remove		= mid_switch_remove,
 	.driver		= {
 		.name	= "switch-mid",
 		.owner	= THIS_MODULE,
