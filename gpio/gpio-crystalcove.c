@@ -258,7 +258,7 @@ static void crystalcove_gpio_dbg_show(struct seq_file *s,
 	}
 }
 
-static int __devinit crystalcove_gpio_probe(struct platform_device *pdev)
+static int crystalcove_gpio_probe(struct platform_device *pdev)
 {
 	int irq = platform_get_irq(pdev, 0);
 	struct crystalcove_gpio *cg = &gpio_info;
