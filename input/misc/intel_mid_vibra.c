@@ -351,7 +351,7 @@ static int vibra_init_ext_drv(struct vibra_info *info)
 	return 0;
 }
 
-static int __devinit intel_mid_vibra_probe(struct pci_dev *pci,
+static int intel_mid_vibra_probe(struct pci_dev *pci,
 			const struct pci_device_id *pci_id)
 {
 	struct vibra_info *info;
@@ -447,7 +447,7 @@ out:
 	return ret;
 }
 
-static void __devexit intel_mid_vibra_remove(struct pci_dev *pci)
+static void intel_mid_vibra_remove(struct pci_dev *pci)
 {
 	struct vibra_info *info = pci_get_drvdata(pci);
 	gpio_free(info->gpio_pwm);
@@ -471,7 +471,7 @@ static struct pci_driver vibra_driver = {
 	.name = INTEL_VIBRA_DRV_NAME,
 	.id_table = intel_vibra_ids,
 	.probe = intel_mid_vibra_probe,
-	.remove = __devexit_p(intel_mid_vibra_remove),
+	.remove = intel_mid_vibra_remove,
 #ifdef CONFIG_PM
 	.driver = {
 		.pm = &intel_mid_vibra_pm_ops,
