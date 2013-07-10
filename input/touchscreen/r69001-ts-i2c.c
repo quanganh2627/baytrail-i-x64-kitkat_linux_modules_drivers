@@ -323,7 +323,7 @@ static void r69001_set_mode(struct r69001_ts_data *ts, u8 mode, u16 poll_time)
 }
 
 
-static int __devinit
+static int
 r69001_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	struct r69001_ts_data *ts;
@@ -403,7 +403,7 @@ err1:
 	return error;
 }
 
-static int __devexit r69001_ts_remove(struct i2c_client *client)
+static int r69001_ts_remove(struct i2c_client *client)
 {
 	struct r69001_ts_data *ts = i2c_get_clientdata(client);
 
@@ -422,7 +422,7 @@ MODULE_DEVICE_TABLE(i2c, r69001_ts_id);
 
 static struct i2c_driver r69001_ts_driver = {
 	.probe = r69001_ts_probe,
-	.remove = __devexit_p(r69001_ts_remove),
+	.remove = r69001_ts_remove,
 	.id_table = r69001_ts_id,
 	.driver = {
 		.name = R69001_TS_NAME,
