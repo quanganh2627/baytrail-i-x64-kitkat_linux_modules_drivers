@@ -234,7 +234,7 @@ exit:
 	return ret;
 }
 
-static int __devexit intel_mid_gps_remove(struct platform_device *pdev)
+static int intel_mid_gps_remove(struct platform_device *pdev)
 {
 	if (strcmp(dev_name(&pdev->dev), DRIVER_NAME) == 0)
 		intel_mid_gps_deinit(pdev);
@@ -263,7 +263,7 @@ static const struct platform_device_id gps_id_table[] = {
 
 static struct platform_driver intel_mid_gps_driver = {
 	.probe		= intel_mid_gps_probe,
-	.remove		= __devexit_p(intel_mid_gps_remove),
+	.remove		= intel_mid_gps_remove,
 	.driver		= {
 		.name	= DRIVER_NAME,
 		.owner	= THIS_MODULE,
