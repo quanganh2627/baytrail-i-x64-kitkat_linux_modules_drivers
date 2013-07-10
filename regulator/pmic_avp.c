@@ -370,7 +370,7 @@ static struct regulator_desc intel_pmic_desc[] = {
 	},
 };
 
-static int __devinit avp_pmic_probe(struct platform_device *pdev)
+static int avp_pmic_probe(struct platform_device *pdev)
 {
 	struct intel_pmic_info *pdata = dev_get_platdata(&pdev->dev);
 	int i;
@@ -402,7 +402,7 @@ static int __devinit avp_pmic_probe(struct platform_device *pdev)
 	return INTEL_REGULATOR_ERR;
 }
 
-static int __devexit avp_pmic_remove(struct platform_device *pdev)
+static int avp_pmic_remove(struct platform_device *pdev)
 {
 	regulator_unregister(platform_get_drvdata(pdev));
 	return 0;
@@ -421,7 +421,7 @@ static struct platform_driver avp_pmic_driver = {
 		.owner = THIS_MODULE,
 	},
 	.probe = avp_pmic_probe,
-	.remove = __devexit_p(avp_pmic_remove),
+	.remove = avp_pmic_remove,
 	.id_table = avp_id_table,
 };
 static int __init avp_pmic_init(void)
