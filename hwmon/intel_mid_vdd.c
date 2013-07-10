@@ -841,7 +841,7 @@ static struct platform_driver mid_volt_drop_detect_driver = {
 		.pm = &msic_vdd_pm_ops,
 		},
 	.probe = mid_vdd_probe,
-	.remove = __devexit_p(mid_vdd_remove),
+	.remove = mid_vdd_remove,
 	.id_table = vdd_id_table,
 };
 
