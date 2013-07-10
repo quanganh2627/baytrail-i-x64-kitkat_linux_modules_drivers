@@ -226,6 +226,7 @@ static char *fabric_names[] = {
 	"\nSecondary Chip Fabric [error]\n\n",
 	"\nGP Fabric [error]\n\n",
 	"\nSC Fabric [error]\n\n",
+	"\nSC1 Fabric [error]\n\n",
 	"\nUnknown Fabric [error]\n\n"
 };
 

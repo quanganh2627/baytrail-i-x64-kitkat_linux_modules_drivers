@@ -425,7 +425,7 @@ static char *Audio_FlagStatusLow32_tng[] = {
 	"",					/* bit 8 */
 	"",					/* bit 9 */
 	"pifocp_i0 (IA Response Timeout)",	/* bit 10 */
-	"adma0_i0 (IA Response Timeout)"	/* bit 11 */
+	"adma0_i0 (IA Response Timeout)",	/* bit 11 */
 	"adma0_i1 (IA Response Timeout)",	/* bit 12 */
 	"adma1_i0 (IA Response Timeout)",	/* bit 13 */
 	"adma1_i1 (IA Response Timeout)",	/* bit 14 */
