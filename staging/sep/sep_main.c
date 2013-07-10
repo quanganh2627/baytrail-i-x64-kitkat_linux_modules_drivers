@@ -4809,8 +4809,8 @@ static struct notifier_block sep_notifier = {
  *Attempt to set up and configure a SEP device that has been
  *discovered by the PCI layer. Allocates all required resources.
  */
-static int __devinit sep_probe(struct pci_dev *pdev,
-	const struct pci_device_id *ent)
+static int sep_probe(struct pci_dev *pdev,
+		const struct pci_device_id *ent)
 {
 	int error = 0;
 	struct sep_device *sep = NULL;
