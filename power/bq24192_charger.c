@@ -1322,13 +1322,12 @@ static int bq24192_usb_get_property(struct power_supply *psy,
 	enum bq24192_chrgr_stat charging;
 
 	dev_dbg(&chip->client->dev, "%s %d\n", __func__, psp);
-	if (mutex_is_locked(&chip->event_lock)) {
-		dev_dbg(&chip->client->dev,
-			"%s : mutex is already acquired",
-				__func__);
-	}
-	if (!mutex_trylock(&chip->event_lock))
-		return -EBUSY;
+	if (system_state != SYSTEM_RUNNING) {
+		if (!mutex_trylock(&chip->event_lock))	
+			return -EBUSY;
+		} else
+			mutex_lock(&chip->event_lock);
+
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
 		val->intval = (chip->cable_type !=
@@ -1435,7 +1434,7 @@ static irqreturn_t bq24192_irq_isr(int irq, void *devid)
 static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 {
 	struct bq24192_chip *chip = (struct bq24192_chip *)devid;
-	int reg_status, reg_fault;
+	int reg_status, reg_fault, temp;
 
 	dev_info(&chip->client->dev,
 		"IRQ Handled for charger interrupt: %d\n", irq);
@@ -1473,7 +1472,22 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 			dev_info(&chip->client->dev, "No charger connected\n");
 	}
 	/*updating health status when interrupt occurs*/
-	power_supply_changed(&chip->usb);
+	temp = fg_chip_get_property(POWER_SUPPLY_PROP_TEMP);
+
+	if (temp == -ENODEV || temp == -EINVAL) {
+		dev_err(&chip->client->dev,
+			"%s Failed to read batt temp\n", __func__);
+	}
+
+	temp /= 10;
+
+	if ((temp <= chip->min_temp) ||
+		(temp >= chip->max_temp)) {
+			/*updating health status when the
+				status change interrupt occurs*/
+				power_supply_changed(&chip->usb);
+	}
+
 	return IRQ_HANDLED;
 }
 
@@ -1551,6 +1565,7 @@ static void bq24192_task_worker(struct work_struct *work)
 		power_supply_changed(NULL);
 
 sched_task_work:
+
 	if ((POWER_SUPPLY_HEALTH_OVERHEAT  == bq24192_get_battery_health()) ||
 		(POWER_SUPPLY_HEALTH_OVERHEAT == prev_health)) {
 			power_supply_changed(&chip->usb);
@@ -1558,6 +1573,12 @@ sched_task_work:
 			dev_warn(&chip->client->dev,
 				"%s health status  %d",
 					__func__, prev_health);
+	}
+
+	if (BQ24192_CHRGR_STAT_BAT_FULL == bq24192_is_charging(chip)) {
+		power_supply_changed(&chip->usb);
+		dev_warn(&chip->client->dev,
+			"%s battery full", __func__);
 	}
 
 	schedule_delayed_work(&chip->chrg_task_wrkr, jiffy);
