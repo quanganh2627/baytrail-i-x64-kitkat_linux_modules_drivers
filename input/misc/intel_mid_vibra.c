@@ -251,39 +251,23 @@ static ssize_t vibra_show_pwm_ontime_div(struct device *dev,
 	return sprintf(buf, "0x%X\n", info->pwm.part.pwmtd);
 }
 
-static struct device_attribute vibra_attrs[] = {
-	__ATTR(vibrator, S_IRUGO | S_IWUSR,
-	       vibra_show_vibrator, vibra_set_vibrator),
-	__ATTR(pwm_baseunit, S_IRUGO | S_IWUSR,
-	       vibra_show_pwm_baseunit, vibra_set_pwm_baseunit),
-	__ATTR(pwm_ontime_div, S_IRUGO | S_IWUSR,
-	       vibra_show_pwm_ontime_div, vibra_set_pwm_ontime_div),
+static DEVICE_ATTR(vibrator, S_IRUGO | S_IWUSR,
+		   vibra_show_vibrator, vibra_set_vibrator);
+static DEVICE_ATTR(pwm_baseunit, S_IRUGO | S_IWUSR,
+		   vibra_show_pwm_baseunit, vibra_set_pwm_baseunit);
+static DEVICE_ATTR(pwm_ontime_div, S_IRUGO | S_IWUSR,
+	           vibra_show_pwm_ontime_div, vibra_set_pwm_ontime_div);
+
+static const struct attribute *vibra_attrs[] = {
+	&dev_attr_vibrator.attr,
+	&dev_attr_pwm_baseunit.attr,
+	&dev_attr_pwm_ontime_div.attr,
+	0,
 };
 
-static int vibra_register_sysfs(struct vibra_info *info)
-{
-	int r, i;
-
-	for (i = 0; i < ARRAY_SIZE(vibra_attrs); i++) {
-		r = device_create_file(info->dev, &vibra_attrs[i]);
-		if (r)
-			goto fail;
-	}
-	return 0;
-fail:
-	while (i--)
-		device_remove_file(info->dev, &vibra_attrs[i]);
-
-	return r;
-}
-
-static void vibra_unregister_sysfs(struct vibra_info *info)
-{
-	int i;
-
-	for (i = ARRAY_SIZE(vibra_attrs) - 1; i >= 0; i--)
-		device_remove_file(info->dev, &vibra_attrs[i]);
-}
+static const struct attribute_group vibra_attr_group = {
+	.attrs = vibra_attrs,
+};
 
 /*** Module ***/
 #if CONFIG_PM
@@ -311,7 +295,6 @@ static const struct dev_pm_ops intel_mid_vibra_pm_ops = {
 	.runtime_suspend = intel_vibra_runtime_suspend,
 	.runtime_resume = intel_vibra_runtime_resume,
 };
-
 #endif
 
 /* vibra_init_ext_drv: initializes the ext drv and auto calibrates it one time
@@ -360,6 +343,7 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 			const struct pci_device_id *pci_id)
 {
 	struct vibra_info *info;
+	struct device *dev = &pci->dev;
 	struct mid_vibra_pdata *data;
 	int ret = 0;
 
@@ -424,7 +408,8 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	info->name = "intel_mid:vibrator";
 	mutex_init(&info->lock);
 
-	if (vibra_register_sysfs(info) < 0) {
+	ret = sysfs_create_group(&dev->kobj, &vibra_attr_group);
+	if (ret) {
 		pr_err("could not register sysfs files\n");
 		goto do_unmap_shim;
 	}
@@ -457,7 +442,7 @@ static void intel_mid_vibra_remove(struct pci_dev *pci)
 	struct vibra_info *info = pci_get_drvdata(pci);
 	gpio_free(info->gpio_pwm);
 	gpio_free(info->gpio_en);
-	vibra_unregister_sysfs(info);
+	sysfs_remove_group(&info->dev->kobj, &vibra_attr_group);
 	iounmap(info->shim);
 	pci_release_regions(pci);
 	pci_disable_device(pci);
