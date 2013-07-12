@@ -498,7 +498,7 @@ static void dlp_ctrl_complete_rx(struct hsi_msg *msg)
 		/* Ready ? if not, just save the OPEN_CONN request params */
 		spin_lock_irqsave(&ctrl_ctx->open_lock, flags);
 		state = dlp_ctrl_get_channel_state(hsi_channel);
-		if (state != DLP_CH_STATE_OPENED) {
+		if ((state != DLP_CH_STATE_OPENING) && (state != DLP_CH_STATE_OPENED)) {
 			struct dlp_hsi_channel *hsi_ch;
 
 			hsi_ch = &dlp_drv.channels_hsi[hsi_channel];
@@ -507,8 +507,8 @@ static void dlp_ctrl_complete_rx(struct hsi_msg *msg)
 
 			response = -1;
 
-			pr_debug(DRVNAME ": HSI CH%d OPEN_CONN received (postponed)\n",
-					params.channel);
+			pr_debug(DRVNAME ": HSI CH%d OPEN_CONN received (postponed) when state is %d\n",
+					params.channel, state);
 			goto push_rx;
 		} else
 			spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
