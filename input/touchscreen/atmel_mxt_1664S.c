@@ -1249,6 +1249,13 @@ static int mxt_check_reg_init(struct mxt_data *data)
 			ret = 0;
 			goto release;
 		} else {
+			char *buf = kzalloc(cfg->size + 1, GFP_KERNEL);
+			if (buf) {
+				strncpy(buf, cfg->data, cfg->size);
+				dev_err(dev, "cfg->data:%s, data_pos:%d, ret:%d\n",
+						buf, data_pos, ret);
+				kfree(buf);
+			}
 			dev_info(dev, "Config CRC 0x%06X: does not match file 0x%06X\n",
 				 data->config_crc, config_crc);
 		}
@@ -1399,6 +1406,15 @@ static int mxt_check_reg_init(struct mxt_data *data)
 release_mem:
 	kfree(config_mem);
 release:
+	if (ret) {
+		char *buf = kzalloc(cfg->size+1, GFP_KERNEL);
+		if (buf) {
+			strncpy(buf, cfg->data, cfg->size);
+			dev_err(dev, "cfg->data:%s, data_pos:%d, ret:%d\n",
+					buf, data_pos, ret);
+			kfree(buf);
+		}
+	}
 	release_firmware(cfg);
 	return ret;
 }
