@@ -1089,7 +1089,7 @@ static inline int bq24192_enable_charging(
 	dev_warn(&chip->client->dev, "%s:%d %d\n", __func__, __LINE__, val);
 
 	ret = program_timers(chip, CHRG_TIMER_EXP_CNTL_WDT160SEC, true);
-	if (ret) {
+	if (ret < 0) {
 		dev_err(&chip->client->dev,
 				"program_timers failed: %d\n", ret);
 		return ret;
@@ -1105,7 +1105,7 @@ static inline int bq24192_enable_charging(
 
 	ret = bq24192_write_reg(chip->client, BQ24192_INPUT_SRC_CNTL_REG,
 				regval);
-	if (ret) {
+	if (ret < 0) {
 		dev_err(&chip->client->dev,
 				"inlmt programming failed: %d\n", ret);
 		return ret;
@@ -1128,10 +1128,40 @@ static inline int bq24192_enable_charging(
 					BQ24192_POWER_ON_CFG_REG,
 					ret, CHR_CFG_BIT_POS,
 					CHR_CFG_BIT_LEN);
-	if (val)
+	if (val) {
 		/* Schedule the charger task worker now */
-		schedule_delayed_work(&chip->chrg_task_wrkr,
-						0);
+		schedule_delayed_work(&chip->chrg_task_wrkr, 0);
+
+		/*
+		 * Prevent system from entering s3 while charger is connected
+		 */
+		if (!wake_lock_active(&chip->wakelock))
+			wake_lock(&chip->wakelock);
+	} else {
+		/* Release the wake lock */
+		if (wake_lock_active(&chip->wakelock))
+			wake_unlock(&chip->wakelock);
+
+		/*
+		 * Cancel the worker since it need not run when charging is not
+		 * happening
+		 */
+		cancel_delayed_work_sync(&chip->chrg_full_wrkr);
+
+		/* Read the status to know about input supply */
+		ret = bq24192_read_reg(chip->client, BQ24192_SYSTEM_STAT_REG);
+		if (ret < 0) {
+			dev_warn(&chip->client->dev,
+				"read reg failed %s\n", __func__);
+		}
+
+		/* If no charger connected, cancel the workers */
+		if (!(ret & SYSTEM_STAT_VBUS_OTG)) {
+			dev_info(&chip->client->dev, "NO charger connected\n");
+			cancel_delayed_work_sync(&chip->chrg_task_wrkr);
+		}
+	}
+
 	return ret;
 }
 
@@ -1163,7 +1193,7 @@ static inline int bq24192_set_cv(struct bq24192_chip *chip, int cv)
 	regval = chrg_volt_to_reg(cv);
 
 	return bq24192_write_reg(chip->client, BQ24192_CHRG_VOLT_CNTL_REG,
-					regval |  CHRG_VOLT_CNTL_VRECHRG);
+					regval & ~CHRG_VOLT_CNTL_VRECHRG);
 }
 
 static inline int bq24192_set_inlmt(struct bq24192_chip *chip, int inlmt)
@@ -1243,7 +1273,7 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ENABLE_CHARGING:
 		ret = bq24192_enable_charging(chip, val->intval);
 
-		if (ret)
+		if (ret < 0)
 			dev_err(&chip->client->dev,
 				"Error(%d) in %s charging", ret,
 				(val->intval ? "enable" : "disable"));
@@ -1258,7 +1288,7 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ENABLE_CHARGER:
 		ret = bq24192_enable_charger(chip, val->intval);
 
-		if (ret) {
+		if (ret < 0) {
 			dev_err(&chip->client->dev,
 			"Error(%d) in %s charger", ret,
 			(val->intval ? "enable" : "disable"));
@@ -1447,6 +1477,8 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 	if (reg_status < 0)
 		dev_err(&chip->client->dev, "STATUS register read failed:\n");
 
+	dev_info(&chip->client->dev, "STATUS reg %x\n", reg_status);
+
 	reg_status &= SYSTEM_STAT_CHRG_DONE;
 
 	if (reg_status == SYSTEM_STAT_CHRG_DONE) {
@@ -1462,6 +1494,7 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 	if (reg_fault < 0)
 		dev_err(&chip->client->dev, "FAULT register read failed:\n");
 
+	dev_info(&chip->client->dev, "FAULT reg %x\n", reg_fault);
 	if (reg_fault & FAULT_STAT_WDT_TMR_EXP) {
 		dev_warn(&chip->client->dev, "WDT expiration fault\n");
 		if (chip->is_charging_enabled) {
@@ -2057,7 +2090,6 @@ static int __init bq24192_rpmsg_init(void)
 {
 	return register_rpmsg_driver(&bq24192_rpmsg);
 }
-
 module_init(bq24192_rpmsg_init);
 
 static void __exit bq24192_rpmsg_exit(void)
