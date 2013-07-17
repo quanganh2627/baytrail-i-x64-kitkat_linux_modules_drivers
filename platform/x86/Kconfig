@@ -9,3 +9,13 @@ config GPIO_INTEL_MSIC
 	  output pins.
 	  Say Y here to support GPIO via the SCU IPC interface
 	  on Intel MID platforms.
+
+config INTEL_MID_OSNIB_ILB
+        tristate "cmos osnib driver for Intel BYT platforms"
+        default n
+        ---help---
+			This driver adds OSNIB support using CMOS.
+			OSNIB is used to share flags between firmware and kernel.
+			This is only valid when no SCU is present.
+
+			If unsure, say N.

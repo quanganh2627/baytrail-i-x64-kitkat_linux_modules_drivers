@@ -1,1 +1,2 @@
 obj-$(CONFIG_GPIO_INTEL_MSIC)	+= intel_msic_gpio.o
+obj-$(CONFIG_INTEL_MID_OSNIB_ILB)	+= intel_mid_osnib_ilb.o
