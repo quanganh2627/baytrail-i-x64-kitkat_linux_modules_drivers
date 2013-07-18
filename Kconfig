@@ -1,4 +1,3 @@
-source "../modules/drivers/gpio/Kconfig"
 source "../modules/drivers/gps/Kconfig"
 source "../modules/drivers/hsi/Kconfig"
 source "../modules/drivers/hwmon/Kconfig"
