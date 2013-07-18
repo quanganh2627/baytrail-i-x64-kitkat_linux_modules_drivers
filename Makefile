@@ -1,4 +1,3 @@
-obj-y                           += gpio/
 obj-$(CONFIG_GPS) 	        += gps/
 obj-y 		                += hsi/
 obj-$(CONFIG_HWMON)             += hwmon/
