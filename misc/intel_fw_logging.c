@@ -853,6 +853,12 @@ static int new_dump_fwerr_log(char *buf, int size)
 	for (i = 0; i < offset; i++)
 		output_str(ret, buf, size, "DW%d:0x%08x\n", i, log_buffer[i]);
 
+	if (offset < MAX_NUM_LOGDWORDS + MAX_NUM_LOGDWORDS_EXTENDED)
+		for (i = offset;
+			i < MAX_NUM_LOGDWORDS + MAX_NUM_LOGDWORDS_EXTENDED;
+			i++)
+			output_str(ret, buf, size, "DW%d:0x%08x\n",
+			   i, log_buffer[i]);
 	return ret;
 }
 
