@@ -400,7 +400,8 @@ static ssize_t dlp_flash_dev_read(struct file *filp,
 	while ((msg = dlp_boot_rx_dequeue(ch_ctx))) {
 		/* Check if we have enough of space in the user buffer */
 		to_copy = MIN(msg->actual_len, available);
-		if ((copied + to_copy) > available) {
+		/* In case no more buffer at user space for the read */
+		if (to_copy == 0){
 			/* Put the msg back in the RX queue */
 			dlp_boot_rx_queue_head(ch_ctx, msg);
 
