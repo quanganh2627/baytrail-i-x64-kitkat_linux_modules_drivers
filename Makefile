@@ -1,8 +1,10 @@
+obj-y                           += gpio/
 obj-$(CONFIG_GPS) 	        += gps/
 obj-y 		                += hsi/
 obj-$(CONFIG_HWMON)             += hwmon/
 obj-$(CONFIG_INPUT)             += input/
 obj-y				+= leds/
+obj-y				+= mfd/
 obj-y				+= misc/
 obj-$(CONFIG_MDM_CTRL)		+= modem_control/
 obj-y				+= nfc/
