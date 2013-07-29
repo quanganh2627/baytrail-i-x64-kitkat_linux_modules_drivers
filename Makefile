@@ -1,6 +1,7 @@
 obj-$(CONFIG_GPS) 	        += gps/
 obj-y 		                += hsi/
 obj-$(CONFIG_HWMON)             += hwmon/
+obj-y				+= i2c/
 obj-$(CONFIG_INPUT)             += input/
 obj-y				+= leds/
 obj-y				+= misc/
