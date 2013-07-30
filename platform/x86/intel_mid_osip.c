@@ -115,14 +115,6 @@ int get_force_shutdown_occured()
 }
 EXPORT_SYMBOL(get_force_shutdown_occured);
 
-int get_shutdown_power_supply_supplied()
-{
-	pr_info("%s, shutdown_power_supply_supplied=%d\n",
-		__func__, shutdown_power_supply_supplied);
-	return shutdown_power_supply_supplied;
-}
-EXPORT_SYMBOL(get_shutdown_power_supply_supplied);
-
 int emmc_match(struct device *dev, void *data)
 {
 	if (strcmp(dev_name(dev), EMMC_OSIP_BLKDEVICE) == 0)
@@ -261,16 +253,6 @@ bd_put:
 #define SIGNED_RECOVERY_ATTR	0x0C
 #define SIGNED_POSCOS_ATTR	0x10
 
-static int shutdown_power_supply_is_supplied()
-{
-	shutdown_power_supply_supplied = power_supply_is_system_supplied();
-
-	pr_info("%s, power_supply_supplied=%d\n",
-		__func__, shutdown_power_supply_supplied);
-
-	return shutdown_power_supply_supplied;
-}
-
 static int osip_reboot_notifier_call(struct notifier_block *notifier,
 				     unsigned long what, void *data)
 {
@@ -281,63 +263,34 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 	u8 rbt_reason;
 #endif
 
-	/* If system power off with charger connected, set the Reboot
-	   Reason to COS */
+	pr_info("%s: notified [%s] command\n", __func__, cmd);
+
 	if (what != SYS_RESTART) {
 		if (what == SYS_HALT || what == SYS_POWER_OFF) {
 			pr_info("%s(): sys power off ...\n", __func__);
 
-			if (shutdown_power_supply_is_supplied()) {
-				if ((intel_mid_identify_cpu() ==
-				INTEL_MID_CPU_CHIP_TANGIER) &&
-				get_force_shutdown_occured()) {
-					pr_warn("[SHTDWN] %s, charger connected and force shutdown occured",
-					    __func__);
-					pr_warn("[SHTDWN] %s, Executing COLD_OFF...\n",
-					    __func__);
-					ret = rpmsg_send_generic_simple_command(
-							    RP_COLD_OFF, 0);
-					if (ret)
-						pr_err("%s(): COLD_OFF ipc failed for force shutdown\n",
-							__func__);
-				} else {
-					pr_warn("[SHTDWN] %s, Shutdown overload switching to COS because a charger is plugged in\n",
-					    __func__);
-					pr_info("charger connected ...\n");
-#ifdef DEBUG
-					intel_scu_ipc_read_osnib_rr(
-						&rbt_reason);
-#endif
-					ret_ipc = intel_scu_ipc_write_osnib_rr(
-						SIGNED_COS_ATTR);
-					if (ret_ipc < 0)
-						pr_err("%s cannot write reboot reason in OSNIB\n",
-							__func__);
-#ifdef DEBUG
-					intel_scu_ipc_read_osnib_rr(
-						&rbt_reason);
-#endif
-				}
-			} else {
-				pr_warn("[SHTDWN] %s, Shutdown without charger plugged in\n",
+			if (get_force_shutdown_occured())
+				pr_warn("[SHTDWN] %s: Force shutdown occured\n",
 					__func__);
-								/*
-				 * PNW and CLVP depend on watchdog driver to
-				 * send COLD OFF message to SCU.
-				 * SCU watchdog is not available from TNG A0,
-				 * so SCU FW provides a new IPC message to shut
-				 * down the system.
-				 */
-				if (intel_mid_identify_cpu() ==
-					INTEL_MID_CPU_CHIP_TANGIER) {
-					pr_err("[SHTDWN] %s, executing COLD_OFF...\n",
-						__func__);
-					ret = rpmsg_send_generic_simple_command(
-						RP_COLD_OFF, 0);
-					if (ret)
-						pr_err("%s(): COLD_OFF ipc failed\n",
-								 __func__);
-				}
+			else
+				pr_warn("[SHTDWN] %s, Not in force shutdown\n",
+					__func__);
+			/*
+			* PNW and CLVP depend on watchdog driver to
+			* send COLD OFF message to SCU.
+			* SCU watchdog is not available from TNG A0,
+			* so SCU FW provides a new IPC message to shut
+			* down the system.
+			*/
+			if (intel_mid_identify_cpu() ==
+			    INTEL_MID_CPU_CHIP_TANGIER) {
+				    pr_err("[SHTDWN] %s, executing COLD_OFF...\n",
+					    __func__);
+				    ret = rpmsg_send_generic_simple_command(
+					    RP_COLD_OFF, 0);
+				    if (ret)
+					    pr_err("%s(): COLD_OFF ipc failed\n",
+						    __func__);
 			}
 		} else {
 			pr_warn("[SHTDWN] %s, invalid value\n", __func__);
@@ -353,21 +306,29 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 #endif
 		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_RECOVERY_ATTR);
 		if (ret_ipc < 0)
-			pr_err("%s cannot write reboot reason in OSNIB\n",
+			pr_err("%s cannot write Recovery reboot reason in OSNIB\n",
 				__func__);
 		ret = NOTIFY_OK;
 	} else if (data && 0 == strncmp(cmd, "bootloader", 11)) {
 		pr_warn("[SHTDWN] %s, rebooting into Fastboot\n", __func__);
 		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_POS_ATTR);
 		if (ret_ipc < 0)
-			pr_err("%s cannot write reboot reason in OSNIB\n",
+			pr_err("%s cannot write Fastboot reboot reason in OSNIB\n",
+				__func__);
+		ret = NOTIFY_OK;
+	} else if (data && 0 == strncmp(cmd, "charging", 9)) {
+		pr_warn("[SHTDWN] %s: rebooting into Charging\n", __func__);
+		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_COS_ATTR);
+		if (ret_ipc < 0)
+			pr_err("%s cannot write Fastboot reboot reason in OSNIB\n",
 				__func__);
 		ret = NOTIFY_OK;
 	} else {
+		/* By default, reboot to Android. */
 		pr_warn("[SHTDWN] %s, rebooting into Android\n", __func__);
 		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_MOS_ATTR);
 		if (ret_ipc < 0)
-			pr_err("%s cannot write reboot reason in OSNIB\n",
+			pr_err("%s cannot write Android reboot reason in OSNIB\n",
 				 __func__);
 		ret = NOTIFY_OK;
 	}
