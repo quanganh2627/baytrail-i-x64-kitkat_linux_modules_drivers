@@ -1904,7 +1904,7 @@ static int bq24192_probe(struct i2c_client *client,
 
 	/* Program the safety charge temperature threshold with default value*/
 	ret =  intel_scu_ipc_iowrite8(MSIC_CHRTMPCTRL,
-				(CHRTMPCTRL_TMPH_60 | CHRTMPCTRL_TMPL_00));
+				(CHRTMPCTRL_TMPH_45 | CHRTMPCTRL_TMPL_00));
 	if (ret) {
 		dev_err(&chip->client->dev,
 				"IPC Failed with %d error\n", ret);
