@@ -46,6 +46,7 @@
 #include <linux/platform_device.h>
 #include <linux/ip.h>
 #include <net/addrconf.h>
+#include <linux/sched/rt.h>
 
 #include <asm/uaccess.h>
 #include <asm/unaligned.h>
@@ -3763,8 +3764,8 @@ dhd_preinit_ioctls(dhd_pub_t *dhd)
 			dhd_pkt_filter_enable = FALSE;
 #endif
 #ifdef SET_RANDOM_MAC_SOFTAP
-		SRANDOM32((uint)jiffies);
-		rand_mac = RANDOM32();
+		prandom_seed((uint)jiffies);
+		rand_mac = prandom_u32();
 		iovbuf[0] = 0x02;			   /* locally administered bit */
 		iovbuf[1] = 0x1A;
 		iovbuf[2] = 0x11;

@@ -181,16 +181,15 @@ enum wl_cfgp2p_status {
 #define WL_CFG80211_P2P_DEV_IF
 #endif 
 
-#if defined(WL_ENABLE_P2P_IF) && (0 || (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0)))
-#error Disable 'WL_ENABLE_P2P_IF', if 'WL_CFG80211_P2P_DEV_IF' is enabled \
-	or kernel version is 3.8.0 or above
-#endif 
-
 #if !defined(WLP2P) && defined(WL_ENABLE_P2P_IF)
 #error WLP2P not defined
 #endif 
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+#define bcm_struct_cfgdev	struct wireless_dev
+#else
 #define bcm_struct_cfgdev	struct net_device
+#endif
 
 extern void
 wl_cfgp2p_listen_expired(unsigned long data);

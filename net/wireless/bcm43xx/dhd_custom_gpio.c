@@ -104,11 +104,9 @@ int dhd_customer_oob_irq_map(unsigned long *irq_flags_ptr)
 		WL_ERROR(("%s: Error on gpio_direction_input\n", __func__));
 		return 1;
 	}
-	if (intel_mid_identify_cpu() != INTEL_MID_CPU_CHIP_VALLEYVIEW2) {
-		if (gpio_set_debounce(host_oob_irq, 0) < 0) {
-			WL_ERROR(("%s: Error on gpio_set_debounce\n", __func__));
-			return 1;
-		}
+	if (gpio_set_debounce(host_oob_irq, 0) < 0) {
+		WL_ERROR(("%s: Error on gpio_set_debounce\n", __func__));
+		return 1;
 	}
 	host_oob_irq = gpio_to_irq(host_oob_irq);
 
