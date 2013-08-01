@@ -714,16 +714,12 @@ int psh_ia_common_init(struct device *dev, struct psh_ia_priv **data)
 
 	psh_ia_data->reset_in_progress = 0;
 
-	switch (intel_mid_identify_cpu()) {
-	case INTEL_MID_CPU_CHIP_VALLEYVIEW2:
-		break;
-	default:
-		ia_lbuf_read_init(&psh_ia_data->lbuf,
-					page_address(psh_ia_data->pg),
-					BUF_IA_DDR_SIZE,
-					ia_update_finished);
-		break;
-	}
+#ifdef CONFIG_SENSORS_PSH_MRLD
+	ia_lbuf_read_init(&psh_ia_data->lbuf,
+				page_address(psh_ia_data->pg),
+				BUF_IA_DDR_SIZE,
+				ia_update_finished);
+#endif
 
 	psh_ia_data->circ.buf = kmalloc(CIRC_SIZE, GFP_KERNEL);
 	if (!psh_ia_data->circ.buf) {
