@@ -569,4 +569,4 @@ static int __init vlv_gpio_init(void)
 	return pnp_register_driver(&vlv_gpio_pnp_driver);
 }
 
-fs_initcall(vlv_gpio_init);
+subsys_initcall(vlv_gpio_init);
