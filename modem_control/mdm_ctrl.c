@@ -1,19 +1,21 @@
-/*
- * linux/drivers/modem_control/mdm_ctrl.c
+/**
+ * linux/modules/drivers/modem_control/mdm_ctrl.c
  *
  * Version 1.0
  *
  * This code allows to power and reset IMC modems.
  * There is a list of commands available in include/linux/mdm_ctrl.h
- * Very first version of this code only supports the following modems :
+ * Current version supports the following modems :
  * - IMC6260
+ * - IMC6360
  * - IMC7160
+ * - IMC7260
  * There is no guarantee for other modems
  *
  *
- * Intel Mobile Communication protocol driver for modem boot
+ * Intel Mobile driver for modem powering.
  *
- * Copyright (C) 2012 Intel Corporation. All rights reserved.
+ * Copyright (C) 2013 Intel Corporation. All rights reserved.
  *
  * Contact: Faouaz Tenoutit <faouazx.tenoutit@intel.com>
  *          Frederic Berat <fredericx.berat@intel.com>
@@ -47,9 +49,9 @@
  ****************************************************************************/
 
 /**
- * This function handle the modem reset/coredump:
+ *  mdm_ctrl_handle_hangup - This function handle the modem reset/coredump
+ *  @work: a reference to work queue element
  *
- * @work: a reference to work queue element
  */
 static void mdm_ctrl_handle_hangup(struct work_struct *work)
 {
@@ -72,8 +74,11 @@ static void mdm_ctrl_handle_hangup(struct work_struct *work)
 
 
 /**
- * mdm_ctrl_coredump_it	-	Modem has signaled a core dump
+ *  mdm_ctrl_coredump_it - Modem has signaled a core dump
+ *  @irq: IRQ number
+ *  @data: mdm_ctrl driver reference
  *
+ *  Schedule a work to handle CORE_DUMP depending on current modem state.
  */
 static irqreturn_t mdm_ctrl_coredump_it(int irq, void *data)
 {
@@ -102,8 +107,11 @@ out:
 }
 
 /**
- * mdm_ctrl_reset_it -	Modem has changed reset state
+ *  mdm_ctrl_reset_it - Modem has changed reset state
+ *  @irq: IRQ number
+ *  @data: mdm_ctrl driver reference
  *
+ *  Change current state and schedule work to handle unexpected resets.
  */
 static irqreturn_t mdm_ctrl_reset_it(int irq, void *data)
 {
@@ -120,6 +128,9 @@ static irqreturn_t mdm_ctrl_reset_it(int irq, void *data)
 		goto out;
 	}
 
+	/* If reset is ongoing we expect falling if applicable and rising
+	 * edge.
+	 */
 	reset_ongoing = mdm_ctrl_get_reset_ongoing(drv);
 	if (reset_ongoing) {
 		pr_err(DRVNAME": RESET_OUT 0x%x\r\n", value);
@@ -154,18 +165,19 @@ out:
 }
 
 /**
- *
+ *  mdm_ctrl_free_gpios - Gpio freeding
+ *  @drv: Reference to the driver structure
  *
  */
-static int mdm_ctrl_free_gpios(struct mdm_ctrl *drv)
+static void mdm_ctrl_free_gpios(struct mdm_ctrl *drv)
 {
 	if (drv->irq_cdump > 0)
-		free_irq(drv->irq_cdump, NULL);
+		free_irq(drv->irq_cdump, drv);
 
 	drv->irq_cdump = 0;
 
 	if (drv->irq_reset > 0)
-		free_irq(drv->irq_reset, NULL);
+		free_irq(drv->irq_reset, drv);
 
 	drv->irq_reset = 0;
 
@@ -173,27 +185,22 @@ static int mdm_ctrl_free_gpios(struct mdm_ctrl *drv)
 	gpio_free(drv->gpio_rst_out);
 	gpio_free(drv->gpio_pwr_on);
 	gpio_free(drv->gpio_rst_bbn);
-
-	return 0;
 }
 
 /**
- * @brief Configure IRQs & GPIOs
+ * mdm_ctrl_configure_gpio - Configure IRQs & GPIOs
+ * @gpio: GPIO to configure
+ * @direction: GPIO direction - 0: IN | 1: OUT
  *
- * @param ch_ctx
- * @param dev
- *
- * @return
  */
-static inline int
-mdm_ctrl_configure_gpio(int gpio,
-			int direction,
-			int value,
-			const char *desc)
+static inline int mdm_ctrl_configure_gpio(int gpio,
+		int direction,
+		int value,
+		const char *desc)
 {
 	int ret;
 
-	ret = gpio_request(gpio, "ifxHSIModem");
+	ret = gpio_request(gpio, "ModemControl");
 
 	if (direction)
 		ret += gpio_direction_output(gpio, value);
@@ -202,8 +209,8 @@ mdm_ctrl_configure_gpio(int gpio,
 
 	if (ret) {
 		pr_err(DRVNAME": Unable to configure GPIO%d (%s)",
-			 gpio,
-			 desc);
+				gpio,
+				desc);
 		ret = -ENODEV;
 	}
 
@@ -211,16 +218,14 @@ mdm_ctrl_configure_gpio(int gpio,
 }
 
 /**
- * @brief This function is:
- *	- requesting all needed gpios
- *	- requesting all needed irqs
- *	- registering irqs callbacks
+ *  mdm_ctrl_setup_irq_gpio - Setup GPIO and IRQ
+ *  @drv: Reference to the driver structure
  *
- * @param ch_ctx : Channel context
- * @param dev : Device driver info
+ *  - Request all needed gpios
+ *  - Request all needed irqs
+ *  - Register irqs callbacks
  */
-static int
-mdm_ctrl_setup_irq_gpio(struct mdm_ctrl *drv)
+static int mdm_ctrl_setup_irq_gpio(struct mdm_ctrl *drv)
 {
 	int ret;
 
@@ -257,7 +262,7 @@ mdm_ctrl_setup_irq_gpio(struct mdm_ctrl *drv)
 			drv);
 	if (ret) {
 		pr_err(DRVNAME": IRQ request failed for GPIO%d (RST_OUT)",
-			 drv->gpio_rst_out);
+				drv->gpio_rst_out);
 		ret = -ENODEV;
 		goto free_ctx2;
 	}
@@ -276,11 +281,12 @@ mdm_ctrl_setup_irq_gpio(struct mdm_ctrl *drv)
 
 	ret = request_irq(drv->irq_cdump,
 			mdm_ctrl_coredump_it,
-			IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND, DRVNAME,
+			IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND,
+			DRVNAME,
 			drv);
 	if (ret) {
 		pr_err(DRVNAME": IRQ request failed for GPIO%d (CORE DUMP)",
-			drv->gpio_cdump);
+				drv->gpio_cdump);
 		ret = -ENODEV;
 		goto free_all;
 	}
@@ -302,7 +308,7 @@ free_all:
 
 free_ctx2:
 	if (drv->irq_reset > 0)
-		free_irq(drv->irq_reset, NULL);
+		free_irq(drv->irq_reset, drv);
 
 	drv->irq_reset = 0;
 	gpio_free(drv->gpio_rst_out);
@@ -315,16 +321,16 @@ free_ctx4:
 }
 
 /**
- * @brief This function will clear the hangup reasons
- *
- * @return 0
+ *  clear_hangup_reasons - Clear the hangup reasons flag
  */
-static int clear_hangup_reasons(void)
+static void clear_hangup_reasons(void)
 {
 	mdm_drv->hangup_causes = MDM_CTRL_NO_HU;
-	return 0;
 }
 
+/**
+ *  get_hangup_reasons - Hangup reason flag accessor
+ */
 static int get_hangup_reasons(void)
 {
 	return mdm_drv->hangup_causes;
@@ -337,10 +343,14 @@ static int get_hangup_reasons(void)
  *
  ****************************************************************************/
 
-/*
- * Called when a process tries to open the device file
+/**
+ *  mdm_ctrl_dev_open - Manage device access
+ *  @inode: The node
+ *  @filep: Reference to file
+ *
+ *  Called when a process tries to open the device file
  */
-static int mdm_ctrl_dev_open(struct inode *inode, struct file *filp)
+static int mdm_ctrl_dev_open(struct inode *inode, struct file *filep)
 {
 	mutex_lock(&mdm_drv->lock);
 	/* Only ONE instance of this device can be opened */
@@ -350,7 +360,7 @@ static int mdm_ctrl_dev_open(struct inode *inode, struct file *filp)
 	}
 
 	/* Save private data for futur use */
-	filp->private_data = mdm_drv;
+	filep->private_data = mdm_drv;
 
 	/* Set the open flag */
 	mdm_ctrl_set_opened(mdm_drv, 1);
@@ -358,12 +368,16 @@ static int mdm_ctrl_dev_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-/*
- * Called when a process closes the device file.
+/**
+ *  mdm_ctrl_dev_close - Reset open state
+ *  @inode: The node
+ *  @filep: Reference to file
+ *
+ *  Called when a process closes the device file.
  */
-static int mdm_ctrl_dev_close(struct inode *inode, struct file *filp)
+static int mdm_ctrl_dev_close(struct inode *inode, struct file *filep)
 {
-	struct mdm_ctrl *drv = filp->private_data;
+	struct mdm_ctrl *drv = filep->private_data;
 
 	/* Set the open flag */
 	mutex_lock(&drv->lock);
@@ -374,19 +388,15 @@ static int mdm_ctrl_dev_close(struct inode *inode, struct file *filp)
 
 
 /**
- * @brief
+ *  mdm_ctrl_dev_ioctl - Process ioctl requests
+ *  @filep: Reference to file that stores private data.
+ *  @cmd: Command that should be executed.
+ *  @arg: Command's arguments.
  *
- * @param filep
- * @param cmd
- * @param arg
- *
- * @return
  */
-long mdm_ctrl_dev_ioctl(struct file *filp,
-		unsigned int cmd,
-		unsigned long arg)
+long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
-	struct mdm_ctrl *drv = filp->private_data;
+	struct mdm_ctrl *drv = filep->private_data;
 	struct mdm_ctrl_cmd cmd_params;
 	long ret = 0;
 	unsigned int mdm_state;
@@ -398,14 +408,17 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 
 	switch (cmd) {
 	case MDM_CTRL_POWER_OFF:
+		/* Unconditionnal power off */
 		drv->mdm_ctrl_power_off(drv);
 		break;
 
 	case MDM_CTRL_POWER_ON:
+		/* Only allowed when modem is OFF or in unkown state */
 		if ((mdm_state == MDM_CTRL_STATE_OFF) ||
-			(mdm_state == MDM_CTRL_STATE_UNKNOWN))
-				drv->mdm_ctrl_cold_boot(drv);
-		 else
+				(mdm_state == MDM_CTRL_STATE_UNKNOWN))
+			drv->mdm_ctrl_cold_boot(drv);
+		else
+			/* Specific log in COREDUMP state */
 			if (mdm_state == MDM_CTRL_STATE_COREDUMP)
 				pr_err(DRVNAME": Power ON not allowed (coredump)");
 			else
@@ -413,6 +426,7 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 		break;
 
 	case MDM_CTRL_WARM_RESET:
+		/* Allowed in any state unless OFF */
 		if (mdm_state != MDM_CTRL_STATE_OFF)
 			drv->mdm_ctrl_normal_warm_reset(drv);
 		else
@@ -420,6 +434,7 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 		break;
 
 	case MDM_CTRL_FLASHING_WARM_RESET:
+		/* Allowed in any state unless OFF */
 		if (mdm_state != MDM_CTRL_STATE_OFF)
 			drv->mdm_ctrl_flashing_warm_reset(drv);
 		else
@@ -427,6 +442,7 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 		break;
 
 	case MDM_CTRL_COLD_RESET:
+		/* Allowed in any state unless OFF */
 		if (mdm_state != MDM_CTRL_STATE_OFF)
 			drv->mdm_ctrl_cold_reset(drv);
 		else
@@ -444,20 +460,23 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 			goto out;
 		}
 
-		/* FIXME: Allow any state ? */
+		/* Filtering states. Allow any state ? */
 		param &=
 			(MDM_CTRL_STATE_OFF |
-			MDM_CTRL_STATE_COLD_BOOT |
-			MDM_CTRL_STATE_WARM_BOOT |
-			MDM_CTRL_STATE_COREDUMP |
-			MDM_CTRL_STATE_IPC_READY|
-			MDM_CTRL_STATE_FW_DOWNLOAD_READY);
+			 MDM_CTRL_STATE_COLD_BOOT |
+			 MDM_CTRL_STATE_WARM_BOOT |
+			 MDM_CTRL_STATE_COREDUMP |
+			 MDM_CTRL_STATE_IPC_READY|
+			 MDM_CTRL_STATE_FW_DOWNLOAD_READY);
 
 		mdm_ctrl_launch_work(drv, param);
 		flush_workqueue(drv->change_state_wq);
 		break;
 
 	case MDM_CTRL_GET_STATE:
+		/* Return supposed current state.
+		 * Real state can be different.
+		 */
 		param = mdm_state;
 
 		ret = copy_to_user((void __user *)arg,
@@ -471,6 +490,7 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 		break;
 
 	case MDM_CTRL_WAIT_FOR_STATE:
+		/* Actively wait for state untill timeout */
 		ret = copy_from_user(&cmd_params,
 				(void __user *)arg,
 				sizeof(cmd_params));
@@ -479,16 +499,20 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 					ret);
 			break;
 		}
-		pr_err(DRVNAME": WAIT_FOR_STATE 0x%x ! \r\n", cmd_params.param);
+		pr_err(DRVNAME": WAIT_FOR_STATE 0x%x ! \r\n",
+			cmd_params.param);
 
 		ret = wait_event_interruptible_timeout(drv->event,
-			drv->modem_state == cmd_params.param,
-			msecs_to_jiffies(cmd_params.timeout));
+				drv->modem_state == cmd_params.param,
+				msecs_to_jiffies(cmd_params.timeout));
 		if (!ret)
 			pr_err(DRVNAME": WAIT_FOR_STATE timed out ! \r\n");
 		break;
 
 	case MDM_CTRL_GET_HANGUP_REASONS:
+		/* Return last hangup reason. Can be cumulative
+		 * if they were not cleared since last hangup.
+		 */
 		param = get_hangup_reasons();
 
 		ret = copy_to_user((void __user *)arg,
@@ -508,6 +532,7 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 		break;
 
 	case MDM_CTRL_SET_POLLED_STATES:
+		/* Set state to poll on. */
 		/* Read the user command params */
 		ret = copy_from_user(&param,
 				(void *)arg,
@@ -518,12 +543,18 @@ long mdm_ctrl_dev_ioctl(struct file *filp,
 			return ret;
 		}
 		drv->polled_states = param;
+		/* Poll is active ? */
 		if (waitqueue_active(&drv->wait_wq)) {
 			flush_workqueue(drv->change_state_wq);
 			mdm_state = mdm_ctrl_get_state(drv);
+			/* Check if current state is awaited */
 			if (mdm_state)
 				drv->polled_state_reached = ((mdm_state & param)
-								== mdm_state);
+						== mdm_state);
+
+			/* Waking up the wait work queue to handle any
+			 * polled state reached.
+			 */
 			wake_up(&drv->wait_wq);
 		} else {
 			/* Assume that mono threaded client are probably
@@ -549,22 +580,35 @@ out:
 }
 
 /**
- * Called when a process, which already opened the dev file, attempts to
- * read from it.
+ *  mdm_ctrl_dev_read - Device read function
+ *  @filep: Reference to file
+ *  @data: User data
+ *  @count: Bytes read.
+ *  @ppos: Reference to position in file.
+ *
+ *  Called when a process, which already opened the dev file, attempts to
+ *  read from it. Not allowed.
  */
-static ssize_t mdm_ctrl_dev_read(struct file *filp,
-				char __user *data,
-				size_t count,
-				loff_t *ppos)
+static ssize_t mdm_ctrl_dev_read(struct file *filep,
+		char __user *data,
+		size_t count,
+		loff_t *ppos)
 {
 	pr_err(DRVNAME": Nothing to read\r\n");
 	return -EINVAL;
 }
 
 /**
- * Called when a process writes to dev file
+ *  mdm_ctrl_dev_write - Device write function
+ *  @filep: Reference to file
+ *  @data: User data
+ *  @count: Bytes read.
+ *  @ppos: Reference to position in file.
+ *
+ *  Called when a process writes to dev file.
+ *  Not allowed.
  */
-static ssize_t mdm_ctrl_dev_write(struct file *filp,
+static ssize_t mdm_ctrl_dev_write(struct file *filep,
 		const char __user *data,
 		size_t count,
 		loff_t *ppos)
@@ -575,31 +619,32 @@ static ssize_t mdm_ctrl_dev_write(struct file *filp,
 
 
 /**
- * @brief
+ *  mdm_ctrl_dev_poll - Poll function
+ *  @filep: Reference to file storing private data
+ *  @pt: Reference to poll table structure
  *
- * @param filp
- * @param wait
- *
- * @return
+ *  Flush the change state workqueue to ensure there is no new state pending.
+ *  Relaunch the poll wait workqueue.
+ *  Return POLLHUP|POLLRDNORM if any of the polled states was reached.
  */
-static unsigned int mdm_ctrl_dev_poll(struct file *filp,
+static unsigned int mdm_ctrl_dev_poll(struct file *filep,
 		struct poll_table_struct *pt)
 {
-	struct mdm_ctrl *drv = filp->private_data;
+	struct mdm_ctrl *drv = filep->private_data;
 	unsigned int ret = 0;
 
 	/* Wait event change */
 	flush_workqueue(drv->change_state_wq);
-	poll_wait(filp, &drv->wait_wq, pt);
+	poll_wait(filep, &drv->wait_wq, pt);
 
 	/* State notify */
 	if (drv->polled_state_reached ||
-		(mdm_ctrl_get_state(drv) & drv->polled_states)) {
+			(mdm_ctrl_get_state(drv) & drv->polled_states)) {
 
 		drv->polled_state_reached = false;
 		ret |= POLLHUP|POLLRDNORM;
 		pr_info(DRVNAME ": POLLHUP occured. Current state = 0x%x\r\n",
-			 mdm_ctrl_get_state(drv));
+				mdm_ctrl_get_state(drv));
 	}
 
 	return ret;
@@ -618,19 +663,16 @@ static const struct file_operations mdm_ctrl_ops = {
 	.unlocked_ioctl	= mdm_ctrl_dev_ioctl
 };
 
-
-
 /**
- * mdm_ctrl_module_init - initialises the Modem Boot driver
+ *  mdm_ctrl_module_init - initialises the Modem Control driver
  *
- * Returns 0 on success or an error code
  */
-static int __init mdm_ctrl_module_init(void)
+static int mdm_ctrl_module_probe(struct platform_device *pdev)
 {
 	int ret;
 	struct mdm_ctrl *new_drv;
 
-	/* Allocate channel struct data */
+	/* Allocate modem struct data */
 	new_drv = kzalloc(sizeof(struct mdm_ctrl), GFP_KERNEL);
 	if (!new_drv) {
 		pr_err(DRVNAME ": Out of memory(new_drv)");
@@ -640,7 +682,10 @@ static int __init mdm_ctrl_module_init(void)
 
 	pr_info(DRVNAME ": Getting device infos");
 	/* Pre-initialisation: Retrieve platform device data*/
-	mdm_ctrl_get_device_info(new_drv);
+	mdm_ctrl_get_device_info(new_drv, pdev);
+
+	/* HERE new_drv variable must contain all modem specifics
+	(mdm name, cpu name, pmic, GPIO, early power on/off */
 
 	if (new_drv->is_mdm_ctrl_disabled) {
 		/* KW fix can't happen. */
@@ -661,7 +706,7 @@ static int __init mdm_ctrl_module_init(void)
 	INIT_WORK(&new_drv->change_state_work, mdm_ctrl_set_state);
 	/* Create a high priority ordered workqueue to change modem state */
 	new_drv->change_state_wq =
-		 create_singlethread_workqueue(DRVNAME "-cs_wq");
+		create_singlethread_workqueue(DRVNAME "-cs_wq");
 
 	if (!new_drv->change_state_wq) {
 		pr_err(DRVNAME ": Unable to create set state workqueue");
@@ -718,7 +763,7 @@ static int __init mdm_ctrl_module_init(void)
 	mdm_ctrl_launch_work(new_drv, MDM_CTRL_STATE_OFF);
 	flush_workqueue(new_drv->change_state_wq);
 
-	mdm_ctrl_get_gpio(new_drv);
+	mdm_ctrl_set_gpio(new_drv);
 
 	if (mdm_ctrl_setup_irq_gpio(new_drv))
 		goto del_dev;
@@ -730,11 +775,11 @@ static int __init mdm_ctrl_module_init(void)
 	init_timer(&mdm_drv->flashing_timer);
 
 	/* Modem power off sequence */
-	if (new_drv->pdata->early_pwr_off)
+	if (new_drv->pdata->cpu_data->early_pwr_off)
 		mdm_drv->mdm_ctrl_power_off(new_drv);
 
 	/* Modem cold boot sequence */
-	if (new_drv->pdata->early_pwr_on)
+	if (new_drv->pdata->cpu_data->early_pwr_on)
 		mdm_drv->mdm_ctrl_cold_boot(new_drv);
 
 	return 0;
@@ -765,12 +810,12 @@ out:
 }
 
 /**
- * dlp_driver_exit - frees the resources taken by the boot driver
+ *  mdm_ctrl_module_exit - Frees the resources taken by the control driver
  */
-static void __exit mdm_ctrl_module_exit(void)
+static int mdm_ctrl_module_remove(struct platform_device *pdev)
 {
 	if (!mdm_drv)
-		return;
+		return 0;
 
 	if (mdm_drv->pdata->is_mdm_ctrl_disabled)
 		goto out;
@@ -781,35 +826,71 @@ static void __exit mdm_ctrl_module_exit(void)
 	/* Delete the modem hangup worqueue */
 	destroy_workqueue(mdm_drv->hu_wq);
 
-	/* Unregister the device */
-	cdev_del(&mdm_drv->cdev);
-	unregister_chrdev_region(mdm_drv->tdev, 1);
-	class_destroy(mdm_drv->class);
-
 	/* Free IRQs & GPIOs */
-	free_irq(mdm_drv->irq_cdump, NULL);
-	free_irq(mdm_drv->irq_reset, NULL);
-
-	gpio_free(mdm_drv->gpio_cdump);
-	gpio_free(mdm_drv->gpio_rst_out);
-	gpio_free(mdm_drv->gpio_pwr_on);
-	gpio_free(mdm_drv->gpio_rst_bbn);
+	mdm_ctrl_free_gpios(mdm_drv);
 
 	del_timer(&mdm_drv->flashing_timer);
-
 	mutex_destroy(&mdm_drv->lock);
 
+	/* Unregister the device */
+	device_destroy(mdm_drv->class, mdm_drv->tdev);
+	class_destroy(mdm_drv->class);
+	cdev_del(&mdm_drv->cdev);
+	unregister_chrdev_region(mdm_drv->tdev, 1);
+
 out:
-	/* Free the boot driver context */
+	/* Free the driver context */
+	kfree(mdm_drv->pdata->device_data);
+	kfree(mdm_drv->pdata);
 	kfree(mdm_drv);
 	mdm_drv = NULL;
+	return 0;
+}
+
+/* FOR ACPI HANDLING */
+static struct acpi_device_id mdm_ctrl_acpi_ids[] = {
+	/* ACPI IDs here */
+	{ "MCD0001", 0 },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, mdm_ctrl_acpi_ids);
+
+static const struct platform_device_id mdm_ctrl_id_table[] = {
+	{ DEVICE_NAME, 0 },
+	{ },
+};
+
+MODULE_DEVICE_TABLE(platform, mdm_ctrl_id_table);
+
+static struct platform_driver mcd_driver = {
+	.probe		= mdm_ctrl_module_probe,
+	.remove		= __devexit_p(mdm_ctrl_module_remove),
+	.driver		= {
+		.name	= DRVNAME,
+		.owner	= THIS_MODULE,
+		/* FOR ACPI HANDLING */
+		.acpi_match_table = ACPI_PTR(mdm_ctrl_acpi_ids),
+	},
+	.id_table	= mdm_ctrl_id_table,
+};
+
+static int __init mdm_ctrl_module_init(void)
+{
+	return platform_driver_register(&mcd_driver);
+}
+
+static void __exit mdm_ctrl_module_exit(void)
+{
+	platform_driver_unregister(&mcd_driver);
 }
 
 module_init(mdm_ctrl_module_init);
 module_exit(mdm_ctrl_module_exit);
 
 /**
- * mdm_ctrl_modem_reset - Reset modem
+ *  mdm_ctrl_modem_reset - Reset modem
+ *
+ *  Debug and integration purpose.
  */
 static int mdm_ctrl_modem_reset(const char *val, struct kernel_param *kp)
 {
@@ -824,3 +905,4 @@ MODULE_AUTHOR("Faouaz Tenoutit <faouazx.tenoutit@intel.com>");
 MODULE_AUTHOR("Frederic Berat <fredericx.berat@intel.com>");
 MODULE_DESCRIPTION("Intel Modem control driver");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:"DEVICE_NAME);

@@ -605,9 +605,6 @@ static int dlp_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		return NETDEV_TX_BUSY;
 	}
 
-	if (skb_padto(skb, ETH_ZLEN))
-		return NETDEV_TX_OK;
-
 	skb = dlp_net_aligne_skb(skb);
 	if (!skb)
 		return NETDEV_TX_OK;

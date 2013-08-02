@@ -1,14 +1,18 @@
-/*
+/**
  * linux/drivers/modem_control/imc_7x6x.c
  *
- * Version 0.2
+ * Version 1.0
  *
- * This code includes power sequences for IMC 6260 modems.
+ * This code includes power sequences for IMC 7060 modems and its derivative.
+ * That includes :
+ *	- XMM6360
+ *	- XMM7160
+ *	- XMM7260
  * There is no guarantee for other modems.
  *
- * Intel Mobile Communication protocol driver for modem boot
+ * Intel Mobile driver for modem powering.
  *
- * Copyright (C) 2012 Intel Corporation. All rights reserved.
+ * Copyright (C) 2013 Intel Corporation. All rights reserved.
  *
  * Contact: Faouaz Tenoutit <faouazx.tenoutit@intel.com>
  *          Frederic Berat <fredericx.berat@intel.com>
@@ -40,20 +44,19 @@
  ****************************************************************************/
 
 /**
- * Perform a modem cold boot sequence:
+ *  mdm_ctrl_cold_boot_7x6x - Perform a modem cold boot sequence
+ *  @drv: Reference to the driver structure
  *
  *  - Set to HIGH the PWRDWN_N to switch ON the modem
  *  - Set to HIGH the RESET_BB_N
  *  - Do a pulse on ON1
- *
- * @ch_ctx: a reference to related channel context
  */
 int mdm_ctrl_cold_boot_7x6x(struct mdm_ctrl *drv)
 {
 
 	struct mdm_ctrl_pdata *pdata = drv->pdata;
 	struct mdm_ctrl_device_info *mid_info =
-			(struct mdm_ctrl_device_info *)pdata->device_data;
+		(struct mdm_ctrl_device_info *)pdata->device_data;
 
 	int ret = 0;
 	u16 addr = pdata->chipctrl;
@@ -72,14 +75,24 @@ int mdm_ctrl_cold_boot_7x6x(struct mdm_ctrl *drv)
 	mdm_ctrl_set_reset_ongoing(drv, 1);
 	spin_unlock_irqrestore(&drv->state_lck, flags);
 
-	if (pdata->chipctrl_mask) {
-		/* Get the current register value in order to not override it */
-		ret = intel_scu_ipc_readv(&addr, &def_value, 1);
-		if (ret) {
-			pr_err(DRVNAME ": ipc_readv() failed (ret: %d)", ret);
-			goto out;
+	/* If register value for power on and power off are the same,
+	 * that means that power off is an electrical reset. Then, no need
+	 * to reset again.
+	 */
+	if (pdata->chipctrlon != pdata->chipctrloff) {
+		/* Based on chipctrl_mask value we decide if we need to read
+		 * the current register value.
+		 */
+		if (pdata->chipctrl_mask) {
+			/* Get the current register value in order to not
+			 * override it
+			 */
+			ret = intel_scu_ipc_readv(&addr, &def_value, 1);
+			if (ret) {
+				pr_err(DRVNAME ": ipc_readv() failed %d", ret);
+				goto out;
+			}
 		}
-
 		/* Write the new register value (CHIPCNTRL_ON) */
 		/* Will hard reset the modem */
 		data = (def_value & pdata->chipctrl_mask) | pdata->chipctrlon;
@@ -93,7 +106,6 @@ int mdm_ctrl_cold_boot_7x6x(struct mdm_ctrl *drv)
 		/* Wait before RESET_PWRDN_N to be 1 */
 		usleep_range(pdata->pwr_down_duration,
 				pdata->pwr_down_duration);
-
 	}
 
 	/* Toggle the RESET_BB_N */
@@ -108,24 +120,25 @@ int mdm_ctrl_cold_boot_7x6x(struct mdm_ctrl *drv)
 	gpio_set_value(drv->gpio_pwr_on, 0);
 
 	mdm_ctrl_launch_timer(&drv->flashing_timer,
-				mid_info->pre_cflash_delay,
-				MDM_TIMER_FLASH_ENABLE);
+			mid_info->pre_cflash_delay,
+			MDM_TIMER_FLASH_ENABLE);
 out:
 	return ret;
 }
 
 /**
- * Perform a modem cold reset:
+ *  mdm_ctrl_cold_reset_7x6x - Perform a modem cold reset
+ *  @drv: Reference to the driver structure
  *
- * - Set the RESET_BB_N to low (better SIM protection)
- * - Set the EXT1P35VREN field to low  during 20ms (CHIPCNTRL PMIC register)
- * - set the EXT1P35VREN field to high during 10ms (CHIPCNTRL PMIC register)
+ *  - Set the RESET_BB_N to low (better SIM protection)
+ *  - Set the EXT1P35VREN field to low  during 20ms (CHIPCNTRL PMIC register)
+ *  - set the EXT1P35VREN field to high during 10ms (CHIPCNTRL PMIC register)
  */
 int mdm_ctrl_cold_reset_7x6x(struct mdm_ctrl *drv)
 {
 	struct mdm_ctrl_pdata *pdata = drv->pdata;
 	struct mdm_ctrl_device_info *mid_info =
-			(struct mdm_ctrl_device_info *)pdata->device_data;
+		(struct mdm_ctrl_device_info *)pdata->device_data;
 
 	int ret = 0;
 	u16 addr = pdata->chipctrl;
@@ -144,6 +157,9 @@ int mdm_ctrl_cold_reset_7x6x(struct mdm_ctrl *drv)
 	mdm_ctrl_set_reset_ongoing(drv, 1);
 	spin_unlock_irqrestore(&drv->state_lck, flags);
 
+	/* Based on chipctrl_mask value we decide if we need to read
+	 * the current register value.
+	 */
 	if (pdata->chipctrl_mask) {
 		/* Get the current register value in order to not override it */
 		ret = intel_scu_ipc_readv(&addr, &def_value, 1);
@@ -159,8 +175,9 @@ int mdm_ctrl_cold_reset_7x6x(struct mdm_ctrl *drv)
 	/* Wait before doing the pulse on ON1 */
 	usleep_range(pdata->pre_pwr_down_delay, pdata->pre_pwr_down_delay);
 
-	/* Write the new register value (CHIPCNTRL_ON) */
-	/* Will hard reset the modem */
+	/* Write the new register value (CHIPCNTRL_ON).
+	 * Will hard reset the modem.
+	 */
 	data = (def_value & pdata->chipctrl_mask) | pdata->chipctrlon;
 	ret =  intel_scu_ipc_writev(&addr, &data, 1);
 	if (ret) {
@@ -182,20 +199,24 @@ int mdm_ctrl_cold_reset_7x6x(struct mdm_ctrl *drv)
 	usleep_range(mid_info->on_duration, mid_info->on_duration);
 	gpio_set_value(drv->gpio_pwr_on, 0);
 
+	/* Launch timer with cold reset delay
+	 * to switch in FW_DOWNLOAD_READY state
+	 */
 	mdm_ctrl_launch_timer(&drv->flashing_timer,
-				mid_info->pre_cflash_delay,
-				MDM_TIMER_FLASH_ENABLE);
+			mid_info->pre_cflash_delay,
+			MDM_TIMER_FLASH_ENABLE);
 out:
 	return ret;
 }
 
 /**
- *  Perform a silent modem warm reset sequence:
+ *  mdm_ctrl_silent_warm_reset_7x6x - Perform a silent modem warm reset
+ *				      sequence
+ *  @drv: Reference to the driver structure
  *
  *  - Do a pulse on the RESET_BB_N
  *  - No struct modification
  *  - debug purpose only
- * @ch_ctx: a reference to related channel context
  */
 int mdm_ctrl_silent_warm_reset_7x6x(struct mdm_ctrl *drv)
 {
@@ -209,11 +230,11 @@ int mdm_ctrl_silent_warm_reset_7x6x(struct mdm_ctrl *drv)
 }
 
 /**
- *  Perform a normal modem warm reset sequence:
+ *  mdm_ctrl_normal_warm_reset_7x6x - Perform a normal modem warm reset
+ *				      sequence
+ *  @drv: Reference to the driver structure *
  *
  *  - Do a pulse on the RESET_BB_N
- *
- * @ch_ctx: a reference to related channel context
  */
 int mdm_ctrl_normal_warm_reset_7x6x(struct mdm_ctrl *drv)
 {
@@ -235,19 +256,19 @@ int mdm_ctrl_normal_warm_reset_7x6x(struct mdm_ctrl *drv)
 	mdm_ctrl_silent_warm_reset_7x6x(drv);
 
 	mdm_ctrl_launch_timer(&drv->flashing_timer,
-				mid_info->pre_wflash_delay,
-				MDM_TIMER_FLASH_ENABLE);
+			mid_info->pre_wflash_delay,
+			MDM_TIMER_FLASH_ENABLE);
 
 	return 0;
 }
 
 /**
- *  Perform a normal modem warm reset sequence:
+ *  mdm_ctrl_flashing_warm_reset_7x6x - Perform a normal modem warm reset
+ *					sequence
+ *  @drv: Reference to the driver structure
  *
  *  - Do a pulse on the RESET_BB_N
  *  - Wait before return
- *
- * @ch_ctx: a reference to related channel context
  */
 int mdm_ctrl_flashing_warm_reset_7x6x(struct mdm_ctrl *drv)
 {
@@ -274,11 +295,11 @@ int mdm_ctrl_flashing_warm_reset_7x6x(struct mdm_ctrl *drv)
 }
 
 /**
- *  Perform the modem switch OFF sequence:
- *		- Set to low the ON1
- *		- Write the PMIC reg
+ *  mdm_ctrl_power_off_7x6x - Perform the modem switch OFF sequence
+ *  @drv: Reference to the driver structure
  *
- * @ch_ctx: a reference to related channel context
+ *  - Set to low the ON1
+ *  - Write the PMIC reg
  */
 int mdm_ctrl_power_off_7x6x(struct mdm_ctrl *drv)
 {
@@ -327,7 +348,6 @@ int mdm_ctrl_power_off_7x6x(struct mdm_ctrl *drv)
 	/* Safety sleep. Avoid to directly call power on. */
 	usleep_range(pdata->pwr_down_duration, pdata->pwr_down_duration);
 
- out:
+out:
 	return ret;
 }
-

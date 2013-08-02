@@ -2,11 +2,9 @@
  * linux/drivers/modem_control/mdm_util.h
  *
  * mdm_util.h
- * Generic functions header.
+ * Utilities functions header.
  *
- * Intel Mobile Communication modem boot driver
- *
- * Copyright (C) 2012 Intel Corporation. All rights reserved.
+ * Copyright (C) 2013 Intel Corporation. All rights reserved.
  *
  * Contact: Faouaz Tenoutit <faouazx.tenoutit@intel.com>
  *          Frederic Berat <fredericx.berat@intel.com>
@@ -28,6 +26,9 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/acpi.h>
+#include <linux/acpi_gpio.h>
+#include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
@@ -71,7 +72,7 @@
  * @rst_ongoing: Stating that a reset is ongoing
  * @wq: Modem Reset/Coredump worqueue
  * @hangup_work: Modem Reset/Coredump work
-*/
+ */
 struct mdm_ctrl {
 	/* Char device registration */
 	int major;
@@ -152,11 +153,12 @@ void mdm_ctrl_enable_flashing(unsigned long int param);
 void mdm_ctrl_disable_flashing(unsigned long int param);
 
 void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
-				unsigned int timer_type);
+		unsigned int timer_type);
 
 inline void mdm_ctrl_set_reset_ongoing(struct mdm_ctrl *drv, int ongoing);
 inline int mdm_ctrl_get_reset_ongoing(struct mdm_ctrl *drv);
 
-void mdm_ctrl_get_gpio(struct mdm_ctrl *drv);
-void mdm_ctrl_get_device_info(struct mdm_ctrl *drv);
+void mdm_ctrl_set_gpio(struct mdm_ctrl *drv);
+void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
+		struct platform_device *pdev);
 #endif /* _MDM_UTIL_H */
