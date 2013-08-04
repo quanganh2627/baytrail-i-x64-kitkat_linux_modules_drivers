@@ -7,3 +7,4 @@ obj-$(CONFIG_SENSORS_LSM303_MAG)	+= lsm303dlhc_compass.o
 obj-$(CONFIG_SENSORS_MID_VDD)		+= intel_mid_vdd.o
 obj-$(CONFIG_SENSORS_PSH_MRLD)		+= psh_ia_common.o psh.o
 obj-$(CONFIG_SENSORS_PSH_BYT)		+= psh_ia_common.o psh_byt.o
+obj-$(CONFIG_GENERAL_SENSOR)            += sensor_general.o

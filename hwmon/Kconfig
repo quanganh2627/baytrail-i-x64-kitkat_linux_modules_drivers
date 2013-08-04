@@ -98,4 +98,22 @@ config SENSORS_PSH_BYT
           For more information, please refer to the driver
           source code.
 
+config GENERAL_SENSOR
+       tristate  "General Sensor Driver"
+       depends on I2C && INPUT
+       default n
+       help
+          A general sensor driver, support most of sensors which
+          based on i2c and input interface. it will instantiate
+          i2c drivers accroding to user config.
+          Say y here to enable.
+
+config GENERAL_SENSOR_DEBUG
+       bool "Debug option for General Sensor Driver"
+       depends on GENERAL_SENSOR
+       default y
+       help
+          debug option for general sensor driver.
+          Say y here to enable.
+
 endchoice
