@@ -76,6 +76,7 @@ static void dma_exit_common(struct uart_hsu_port *up)
 			DMA_TO_DEVICE);
 }
 
+#ifdef CONFIG_INTEL_MID_DMAC
 static bool dw_dma_chan_filter(struct dma_chan *chan, void *param)
 {
 	struct dw_dma_priv *dw_dma = param;
@@ -483,6 +484,21 @@ exit:
 	clear_bit(flag_rx_pending, &up->flags);
 }
 
+struct hsu_dma_ops dw_dma_ops = {
+	.init =		dw_dma_init,
+	.exit =		dw_dma_exit,
+	.suspend =	dw_dma_suspend,
+	.resume	=	dw_dma_resume,
+	.start_tx =	dw_dma_start_tx,
+	.stop_tx =	dw_dma_stop_tx,
+	.start_rx =	dw_dma_start_rx,
+	.stop_rx =	dw_dma_stop_rx,
+};
+
+#else
+struct hsu_dma_ops dw_dma_ops;
+
+#endif
 
 /* Intel DMA ops */
 
@@ -683,17 +699,6 @@ static int intel_dma_suspend(struct uart_hsu_port *up)
 
 	return 0;
 }
-
-struct hsu_dma_ops dw_dma_ops = {
-	.init =		dw_dma_init,
-	.exit =		dw_dma_exit,
-	.suspend =	dw_dma_suspend,
-	.resume	=	dw_dma_resume,
-	.start_tx =	dw_dma_start_tx,
-	.stop_tx =	dw_dma_stop_tx,
-	.start_rx =	dw_dma_start_rx,
-	.stop_rx =	dw_dma_stop_rx,
-};
 
 struct hsu_dma_ops intel_dma_ops = {
 	.init =		intel_dma_init,
