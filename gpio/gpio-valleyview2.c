@@ -171,7 +171,6 @@ void lnw_gpio_set_alt(int gpio, int alt)
 	struct gpio_bank_pnp *bank;
 	struct vlv_gpio *vg = NULL;
 	void __iomem *reg;
-	unsigned long flags;
 	int value;
 	u32 offset;
 	int i;
@@ -193,11 +192,9 @@ void lnw_gpio_set_alt(int gpio, int alt)
 
 	reg = vlv_gpio_reg(&vg->chip, offset, VV_CONF0_REG);
 
-	spin_lock_irqsave(&vg->lock, flags);
 	value = readl(reg) & (~VV_PIN_MUX);
 	value = value | (alt & VV_PIN_MUX);
 	writel(value, reg);
-	spin_unlock_irqrestore(&vg->lock, flags);
 }
 EXPORT_SYMBOL_GPL(lnw_gpio_set_alt);
 
@@ -376,12 +373,10 @@ static void vlv_gpio_irq_dispatch(struct vlv_gpio *vg)
 {
 	u32 base, pin, mask;
 	void __iomem *reg;
-	unsigned long flags;
 	u32 pending;
 
 	for (base = 0; base < vg->chip.ngpio; base += 32) {
 		reg = vlv_gpio_reg(&vg->chip, base, VV_INT_STAT_REG);
-		spin_lock_irqsave(&vg->lock, flags);
 		pending = readl(reg);
 		while (pending) {
 			pin = __ffs(pending);
@@ -390,7 +385,6 @@ static void vlv_gpio_irq_dispatch(struct vlv_gpio *vg)
 			generic_handle_irq(vg->irq_base + base + pin);
 			pending = readl(reg);
 		}
-		spin_unlock_irqrestore(&vg->lock, flags);
 	}
 }
 
