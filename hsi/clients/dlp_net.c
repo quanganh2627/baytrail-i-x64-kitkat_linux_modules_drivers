@@ -256,6 +256,17 @@ static void dlp_net_complete_rx(struct hsi_msg *pdu)
 		ptr++;
 		offset = (*ptr);
 
+		/* Check the offset is valid */
+		if (unlikely(offset > SKB_DATAREF_MASK)) {
+			pr_err(DRVNAME ": Invalid PDU offset 0x%08x\n", offset);
+			/* Dump the first 64 bytes */
+			print_hex_dump(KERN_DEBUG,
+				DRVNAME"_NET_RX", DUMP_PREFIX_OFFSET,
+				16, 4,
+				sg_virt(pdu->sgt.sgl), 64, 0);
+			goto recycle;
+		}
+
 		/* Get the size & address */
 		ptr++;
 		more_packets = (*ptr) & DLP_HDR_MORE_DESC;
