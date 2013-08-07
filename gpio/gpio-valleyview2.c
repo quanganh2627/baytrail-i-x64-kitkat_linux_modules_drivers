@@ -138,6 +138,7 @@ struct vlv_gpio {
 	void __iomem		*reg_base;
 	unsigned		*gpio_to_pad;
 	int			irq_base;
+	unsigned		*gpio_conf;
 };
 
 static void __iomem *vlv_gpio_reg(struct gpio_chip *chip, unsigned offset,
@@ -229,33 +230,62 @@ int gpio_get_alt(int gpio)
 }
 EXPORT_SYMBOL_GPL(gpio_get_alt);
 
+static void vlv_update_irq_type(struct vlv_gpio *vg, unsigned type, void __iomem *reg)
+{
+	u32 value;
+
+	value = readl(reg);
+	value &= ~(VV_DIRECT_IRQ | VV_TRIG_POS |
+			VV_TRIG_NEG | VV_TRIG_LVL);
+
+	if (type & IRQ_TYPE_EDGE_BOTH) {
+		if (type & IRQ_TYPE_EDGE_RISING)
+			value |= VV_TRIG_POS;
+		else
+			value &= ~VV_TRIG_POS;
+
+		if (type & IRQ_TYPE_EDGE_FALLING)
+			value |= VV_TRIG_NEG;
+		else
+			value &= ~VV_TRIG_NEG;
+	}
+	else if(type & IRQ_TYPE_LEVEL_MASK) {
+		value |= VV_TRIG_LVL;
+		if (type & IRQ_TYPE_LEVEL_HIGH)
+			value |= VV_TRIG_POS;
+		else
+			value &= ~VV_TRIG_POS;
+
+		if (type & IRQ_TYPE_LEVEL_LOW)
+			value |= VV_TRIG_NEG;
+		else
+			value &= ~VV_TRIG_NEG;
+	}
+
+	writel(value, reg);
+}
+
 static int vlv_irq_type(struct irq_data *d, unsigned type)
 {
 	struct vlv_gpio *vg = irq_data_get_irq_chip_data(d);
 	u32 offset = d->irq - vg->irq_base;
-	u32 value;
-	unsigned long flags;
 	void __iomem *reg = vlv_gpio_reg(&vg->chip, offset, VV_CONF0_REG);
+	unsigned long flags;
+	unsigned *gpio_conf = vg->gpio_conf + offset;
 
 	if (offset >= vg->chip.ngpio)
 		return -EINVAL;
 
 	spin_lock_irqsave(&vg->lock, flags);
-	value = readl(reg);
-	value &= ~(VV_DIRECT_IRQ | VV_TRIG_POS |
-			VV_TRIG_NEG | VV_TRIG_LVL);
 
-	if (type & IRQ_TYPE_EDGE_RISING)
-		value |= VV_TRIG_POS;
-	else
-		value &= ~VV_TRIG_POS;
+	*gpio_conf = type;
 
-	if (type & IRQ_TYPE_EDGE_FALLING)
-		value |= VV_TRIG_NEG;
-	else
-		value &= ~VV_TRIG_NEG;
+	vlv_update_irq_type(vg, type, reg);
 
-	writel(value, reg);
+	if (type & IRQ_TYPE_EDGE_BOTH)
+		__irq_set_handler_locked(d->irq, handle_edge_irq);
+	else if (type & IRQ_TYPE_LEVEL_MASK)
+		__irq_set_handler_locked(d->irq, handle_level_irq);
 
 	spin_unlock_irqrestore(&vg->lock, flags);
 
@@ -400,10 +430,44 @@ static void vlv_gpio_irq_handler(unsigned irq, struct irq_desc *desc)
 
 static void vlv_irq_unmask(struct irq_data *d)
 {
+	struct vlv_gpio *vg = irq_data_get_irq_chip_data(d);
+	u32 offset = d->irq - vg->irq_base;
+	void __iomem *reg = vlv_gpio_reg(&vg->chip, offset, VV_CONF0_REG);
+	unsigned long flags;
+	unsigned type, *gpio_conf = vg->gpio_conf;
+
+
+	if (offset >= vg->chip.ngpio)
+		return;
+
+	spin_lock_irqsave(&vg->lock, flags);
+
+	type = gpio_conf[offset];
+
+	vlv_update_irq_type(vg, type, reg);
+
+	spin_unlock_irqrestore(&vg->lock, flags);
 }
 
 static void vlv_irq_mask(struct irq_data *d)
 {
+	struct vlv_gpio *vg = irq_data_get_irq_chip_data(d);
+	u32 offset = d->irq - vg->irq_base;
+	u32 value;
+	unsigned long flags;
+	void __iomem *reg = vlv_gpio_reg(&vg->chip, offset, VV_CONF0_REG);
+
+	if (offset >= vg->chip.ngpio)
+		return;
+
+	spin_lock_irqsave(&vg->lock, flags);
+
+	value = readl(reg);
+	value &= ~(VV_DIRECT_IRQ | VV_TRIG_POS |
+			VV_TRIG_NEG | VV_TRIG_LVL);
+	writel(value, reg);
+
+	spin_unlock_irqrestore(&vg->lock, flags);
 }
 
 static int vlv_irq_wake(struct irq_data *d, unsigned on)
@@ -467,6 +531,12 @@ vlv_gpio_pnp_probe(struct pnp_dev *pdev, const struct pnp_device_id *id)
 			vg->chip.ngpio = bank->ngpio;
 			vg->gpio_to_pad = bank->to_pad;
 			bank->vg = vg;
+			vg->gpio_conf = kzalloc(sizeof(unsigned)*vg->chip.ngpio, GFP_KERNEL);
+			if (vg->gpio_conf == NULL) {
+				dev_err(&pdev->dev, "can't allocate gpio_conf data");
+				kfree(vg);
+				return -ENOMEM;
+			}
 			break;
 		}
 	}
