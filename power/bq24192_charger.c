@@ -256,13 +256,14 @@ struct bq24192_chip {
 	int batt_status;
 	int bat_health;
 	int cntl_state;
-	int online;
 	int irq;
 	bool is_charger_enabled;
 	bool is_charging_enabled;
 	bool votg;
 	bool is_pwr_good;
 	bool boost_mode;
+	bool online;
+	bool present;
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -1270,6 +1271,12 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 
 	switch (psp) {
 
+	case POWER_SUPPLY_PROP_PRESENT:
+		chip->present = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_ONLINE:
+		chip->online = val->intval;
+		break;
 	case POWER_SUPPLY_PROP_ENABLE_CHARGING:
 		ret = bq24192_enable_charging(chip, val->intval);
 
@@ -1360,12 +1367,10 @@ static int bq24192_usb_get_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
-		val->intval = (chip->cable_type !=
-					POWER_SUPPLY_CHARGER_TYPE_NONE);
+		val->intval = chip->present;
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
-		val->intval = (chip->cable_type !=
-				POWER_SUPPLY_CHARGER_TYPE_NONE) ? true : false;
+		val->intval = chip->online;
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		val->intval = bq24192_get_charger_health();
@@ -1899,7 +1904,7 @@ static int bq24192_probe(struct i2c_client *client,
 
 	/* Program the safety charge temperature threshold with default value*/
 	ret =  intel_scu_ipc_iowrite8(MSIC_CHRTMPCTRL,
-				(CHRTMPCTRL_TMPH_60 | CHRTMPCTRL_TMPL_00));
+				(CHRTMPCTRL_TMPH_45 | CHRTMPCTRL_TMPL_00));
 	if (ret) {
 		dev_err(&chip->client->dev,
 				"IPC Failed with %d error\n", ret);

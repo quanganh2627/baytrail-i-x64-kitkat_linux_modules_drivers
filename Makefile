@@ -1,3 +1,4 @@
+obj-y                           += gpio/
 obj-$(CONFIG_GPS) 	        += gps/
 obj-y 		                += hsi/
 obj-$(CONFIG_HWMON)             += hwmon/
@@ -13,3 +14,4 @@ obj-$(CONFIG_POWER_SUPPLY)	+= power/
 obj-$(CONFIG_REGULATOR)         += regulator/
 obj-$(CONFIG_STAGING)		+= staging/
 obj-$(CONFIG_SWITCH)		+= switch/
+obj-y               		+= hsu/

@@ -42,3 +42,19 @@ config INTEL_MID_OSIP_DEBUG_FS
 	  This has to be disabled if we have secure boot enabled by default.
 
 	  If unsure, say N.
+
+config INTEL_PSH_IPC
+	bool "Intel PSH IPC Support"
+	depends on X86_INTEL_MID && X86_MRFLD
+	---help---
+	  PSH(Platform Services Hub) is a low frequence IA core on Tangier Platform,
+	  whose power consumption is quite low. PSH runs RTOS software inside itself,
+	  which independently controls and collects sensor data, pre-processes the data,
+	  and communicates with Atom. Thus ATOM side could be put into low power mode
+	  with more time, while all the sensor data are collected without any lost.
+
+	  PSH IPC is used as a  bridge for OS sensor service to control and access PSH
+	  sensors communications between kernel and PSH. This is not needed for PC-type
+	  machines.
+
+	  Say Y here to get Intel PSH IPC support.

@@ -32,8 +32,8 @@
 char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword);
 char *get_errortype_str(u16 error_type);
 int errorlog_element_type(u8 id_type);
-char *get_element_errorlog_detail(
-	u8 id, u32 first_dword, u32 second_dword, u32 third_dword);
-char *get_element_flagsts_detail(u8 id, u32 first_dword, u32 second_dword);
+char *get_element_errorlog_detail(u8 id, u32 *fabric_type);
+char *get_element_flagsts_detail(u8 id);
+char *get_initiator_id_str(int init_id, u32 fabric_id);
 
 #endif /* __INTEL_FABRICID_DEF_H */
