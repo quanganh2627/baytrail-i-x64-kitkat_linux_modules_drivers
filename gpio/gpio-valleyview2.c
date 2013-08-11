@@ -349,7 +349,7 @@ static int vlv_gpio_direction_output(struct gpio_chip *chip,
 	spin_lock_irqsave(&vg->lock, flags);
 
 	reg_val = readl(reg) | (VV_DIR_MASK | !!value);
-	reg_val &= ~(VV_OUTPUT_EN | !value);
+	reg_val &= ~(VV_DIR_MASK | !value);
 	writel(reg_val, reg);
 
 	spin_unlock_irqrestore(&vg->lock, flags);
