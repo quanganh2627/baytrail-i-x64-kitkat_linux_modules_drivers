@@ -2659,10 +2659,10 @@ hsi_pio_timeout_try:
 
 		timeout_clr |= timeout_mask;
 
-		spin_lock_irqsave(&intel_hsi->hw_lock, flags);
 		while ((hsi_ioread32(intel_hsi, ARASAN_REG(HSI_STATUS)) &
 			ARASAN_RX_NOT_EMPTY(i)) &&
 			   (msg_status == HSI_STATUS_PROCEEDING)) {
+			spin_lock_irqsave(&intel_hsi->hw_lock, flags);
 			if (likely(pio_ctx->blk->length > 0)) {
 				buf = sg_virt(pio_ctx->blk) + pio_ctx->offset*4;
 				*buf = hsi_ioread32(intel_hsi,
@@ -2682,8 +2682,8 @@ hsi_pio_timeout_try:
 					msg_status =
 						HSI_STATUS_COMPLETED;
 			}
+			spin_unlock_irqrestore(&intel_hsi->hw_lock, flags);
 		}
-		spin_unlock_irqrestore(&intel_hsi->hw_lock, flags);
 
 		spin_lock_irqsave(&intel_hsi->sw_lock, flags);
 		msg->status = msg_status;
@@ -3189,7 +3189,6 @@ static int hsi_mid_setup(struct hsi_client *cl)
  */
 static int hsi_mid_flush(struct hsi_client *cl)
 	__acquires(&intel_hsi->sw_lock) __releases(&intel_hsi->sw_lock)
-	__acquires(&intel_hsi->hw_lock) __releases(&intel_hsi->hw_lock)
 {
 	struct hsi_port *port = hsi_get_port(cl);
 	struct intel_controller *intel_hsi = hsi_port_drvdata(port);
@@ -3223,22 +3222,24 @@ static int hsi_mid_flush(struct hsi_client *cl)
 		hsi_flush_queue(&intel_hsi->tx_queue[i], cl, intel_hsi);
 	for (i = 0; i < hsi_rx_channel_count(intel_hsi); i++)
 		hsi_flush_queue(&intel_hsi->rx_queue[i], cl, intel_hsi);
-	hsi_cleanup_dma(intel_hsi, cl);
+	if (intel_hsi->suspend_state == DEVICE_READY)
+		hsi_cleanup_dma(intel_hsi, cl);
 	hsi_flush_queue(&intel_hsi->fwd_queue, cl, intel_hsi);
 
-	/* Flush all RX HW FIFO which do not have any SW message queued */
-	for (i = 0; i < hsi_rx_channel_count(intel_hsi); i++) {
-		spin_lock_irqsave(&intel_hsi->sw_lock, flags);
-		if (list_empty(&intel_hsi->rx_queue[i])) {
-			spin_lock_irqsave(&intel_hsi->hw_lock, flags);
-			while (hsi_ioread32(intel_hsi, ARASAN_REG(HSI_STATUS)) &
-					ARASAN_RX_NOT_EMPTY(i))
-				hsi_ioread32(intel_hsi,
+	/* Flush all RX HW FIFO which do not have any SW message queued
+         * Don't flush if the device is not waken up yet: everything will
+         * be cleared at next TTY port open (HSI reset)
+         */
+	if (intel_hsi->suspend_state == DEVICE_READY) {
+		for (i = 0; i < hsi_rx_channel_count(intel_hsi); i++) {
+			if (list_empty(&intel_hsi->rx_queue[i])) {
+				while (hsi_ioread32(intel_hsi, ARASAN_REG(HSI_STATUS)) &
+						ARASAN_RX_NOT_EMPTY(i))
+					hsi_ioread32(intel_hsi,
 						ARASAN_CHN_REG(RX_DATA, i));
-			spin_unlock_irqrestore(&intel_hsi->hw_lock, flags);
-		} else
-			unforce = 1;
-		spin_unlock_irqrestore(&intel_hsi->sw_lock, flags);
+			} else
+				unforce = 1;
+		}
 	}
 
 	spin_lock_irqsave(&intel_hsi->sw_lock, flags);
