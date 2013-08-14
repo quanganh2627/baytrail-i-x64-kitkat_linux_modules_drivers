@@ -42,14 +42,22 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/wakelock.h>
+#include <linux/version.h>
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+#include <linux/usb/otg.h>
+#include <linux/platform_data/intel_mid_remoteproc.h>
+#else
 #include <linux/usb/penwell_otg.h>
+#include <asm/intel_mid_remoteproc.h>
+#endif
+
 #include <linux/rpmsg.h>
 
 #include <asm/intel_mid_gpadc.h>
 #include <asm/intel_scu_ipc.h>
 #include <asm/intel_scu_pmic.h>
 #include <asm/intel_mid_rpmsg.h>
-#include <asm/intel_mid_remoteproc.h>
 
 #define DRV_NAME "bq24192_charger"
 #define DEV_NAME "bq24192"
@@ -1702,7 +1710,11 @@ static inline int register_otg_notification(struct bq24192_chip *chip)
 	/*
 	 * Get the USB transceiver instance
 	 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+	chip->transceiver = usb_get_phy(USB_PHY_TYPE_USB2);
+#else
 	chip->transceiver = usb_get_transceiver();
+#endif
 	if (!chip->transceiver) {
 		dev_err(&chip->client->dev, "Failed to get the USB transceiver\n");
 		return -EINVAL;
