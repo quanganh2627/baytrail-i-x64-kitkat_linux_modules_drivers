@@ -38,8 +38,6 @@
 #include <linux/input/intel_mid_vibra.h>
 #include <asm/intel-mid.h>
 
-
-
 union sst_pwmctrl_reg {
 	struct {
 		u32 pwmtd:8;
@@ -135,10 +133,17 @@ static void vibra_enable(struct vibra_info *info)
 	pr_debug("Enable gpio\n");
 	mutex_lock(&info->lock);
 	pm_runtime_get_sync(&info->pci->dev);
+
+	/* Enable the EN line */
+	gpio_set_value(info->gpio_en, 1);
+
+	/* Wait for 850us per spec, give 100us buffer */
+	usleep_range(950, 1000);
+
+	/* Enable the Trigger line */
 	lnw_gpio_set_alt(info->gpio_pwm, info->alt_fn);
 	vibra_pwm_configure(info, true);
-	gpio_set_value(info->gpio_pwm, 1);
-	gpio_set_value(info->gpio_en, 1);
+
 	info->enabled = true;
 	mutex_unlock(&info->lock);
 }

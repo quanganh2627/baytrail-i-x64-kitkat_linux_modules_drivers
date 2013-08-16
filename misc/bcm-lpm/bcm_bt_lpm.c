@@ -26,13 +26,15 @@
 #include <linux/rfkill.h>
 #include <linux/platform_device.h>
 #include <linux/wakelock.h>
-#include <asm/bcm_bt_lpm.h>
 #include <linux/interrupt.h>
 #include <linux/pm_runtime.h>
+#include <linux/delay.h>
 #include <asm/intel-mid.h>
 #include <asm/intel_mid_hsu.h>
 
-#ifdef CONFIG_ACPI
+#ifndef CONFIG_ACPI
+#include <asm/bcm_bt_lpm.h>
+#else
 #include <linux/acpi.h>
 #include <linux/acpi_gpio.h>
 

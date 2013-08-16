@@ -28,6 +28,8 @@ static struct kobject *osnib_kobj;
 
 static struct cmos_osnib osnib_buffer;
 
+static int osnib_cmos_base_address = 0;
+
 enum cpuid_regs {
 	CR_EAX = 0,
 	CR_ECX,
@@ -163,7 +165,7 @@ void intel_mid_ilb_write_osnib_field(struct cmos_osnib *osnib,
 	b = (u8 *) osnib;
 	*(b + offset) = value;
 
-	CMOS_WRITE(value, OSNIB_CMOS_BASE_ADDR + offset);
+	CMOS_WRITE(value, osnib_cmos_base_address + offset);
 }
 
 void intel_mid_ilb_write_osnib(struct cmos_osnib *osnib)
@@ -187,7 +189,7 @@ void intel_mid_ilb_write_osnib_checksum(struct cmos_osnib *osnib)
 u8 intel_mid_ilb_read_osnib_field(struct cmos_osnib *osnib,
 		int offset)
 {
-	return CMOS_READ(OSNIB_CMOS_BASE_ADDR + offset);
+	return CMOS_READ(osnib_cmos_base_address + offset);
 }
 
 
@@ -201,7 +203,8 @@ int intel_mid_ilb_read_osnib(struct cmos_osnib *osnib)
 	for (i = 0; i < OSNIB_INTEL_SIZE ; i++, b++)
 		*b = intel_mid_ilb_read_osnib_field(osnib, i);
 
-	intel_mid_ilb_dump_osnib(osnib);
+	if (intel_mid_ilb_is_osnib_valid(osnib) == false)
+		intel_mid_ilb_dump_osnib(osnib);
 
 	return intel_mid_ilb_is_osnib_valid(osnib);
 }
@@ -214,6 +217,41 @@ void intel_mid_ilb_dump_osnib(struct cmos_osnib *osnib)
 	b = (u8 *) osnib;
 	for (i = 0; i < OSNIB_INTEL_SIZE ; i++, b++)
 		pr_err("OSNIB: byte %d = 0x%02x\n", i, *b);
+}
+
+static bool intel_mid_ilb_check_magic()
+{
+	char magic[4];
+	magic[0] = CMOS_READ(osnib_cmos_base_address);
+	magic[1] = CMOS_READ(osnib_cmos_base_address + 1);
+	magic[2] = CMOS_READ(osnib_cmos_base_address + 2);
+	magic[3] = CMOS_READ(osnib_cmos_base_address + 3);
+
+	pr_info("Magic value of OSNIB (@=%x): %c %c %c %c\n",
+		osnib_cmos_base_address,
+		magic[0], magic[1], magic[2], magic[3]);
+
+	if (magic[0] == 'N' && magic[2] == 'B' && magic[3] == '\0') {
+		/* WA : This is a good magic, even if letter 'I' is missing */
+		if (magic[1] != 'I') {
+			pr_info("OSNIB : Fixing known issue\n");
+			CMOS_WRITE('I', osnib_cmos_base_address + 1);
+		}
+		pr_info("OSNIB : Magic is OK\n");
+		return true;
+	}
+	return false;
+}
+
+void intel_mid_ilb_reset_magic(struct cmos_osnib *osnib)
+{
+
+	pr_err("Reset MAGIC value of OSNIB\n");
+	osnib->header.magic[0] = 'N';
+	osnib->header.magic[1] = 'I';
+	osnib->header.magic[2] = 'B';
+	osnib->header.magic[3] = '\0';
+	intel_mid_ilb_write_osnib(osnib);
 }
 
 void intel_mid_ilb_reset_osnib(struct cmos_osnib *osnib)
@@ -350,6 +388,26 @@ static int __init intel_mid_ilb_osnib_init(void)
 
 	if (register_reboot_notifier(&osnib_ilb_reboot_notifier))
 		pr_warning("%s: can't register reboot_notifier\n", __func__);
+
+	/*
+	 * WA : detect OSIB base address
+	 * Two possible address (following IA version : 0xE and 0x10
+	 */
+
+	/* First we try to read the magic at new location (+2 bytes).
+	   If found, then we have new version
+	*/
+	osnib_cmos_base_address = OSNIB_CMOS_BASE_ADDR +2;
+	if (intel_mid_ilb_check_magic()) {
+		pr_info("%s: Found OSNIB at address 0x%02x\n", __func__,
+						osnib_cmos_base_address);
+	} else {
+		/* We must have old version */
+		osnib_cmos_base_address = OSNIB_CMOS_BASE_ADDR;
+		if (intel_mid_ilb_check_magic())
+			pr_info("%s: Found OSNIB at address 0x%02x\n", __func__,
+						osnib_cmos_base_address);
+	}
 
 	if (!intel_mid_ilb_read_osnib(&osnib_buffer))
 		intel_mid_ilb_reset_osnib(&osnib_buffer);

@@ -14,3 +14,4 @@ config TOUCHSCREEN_R69001_I2C
 		Say Y here if you have a R69001 touchscreen
 		If unsure, say N.
 
+source "../modules/drivers/input/touchscreen/rmi4/Kconfig"
