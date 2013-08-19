@@ -751,6 +751,9 @@ static int dump_scu_extented_trace(char *buf, int size, int log_offset, int *rea
 	start = log_offset / sizeof(u32);
 	end = log_buffer_sz / sizeof(u32);
 	for (i = start; i < end; i++) {
+		/* Make sure we get only full lines */
+		if (buf && (size - ret < 18))
+			break;
 		/*
 		 * "EW:" to separate lines from "DW:" lines
 		 * elsewhere in this file.
@@ -758,9 +761,6 @@ static int dump_scu_extented_trace(char *buf, int size, int log_offset, int *rea
 		output_str(ret, buf, size, "EW%d:0x%08x\n", i,
 			   *(log_buffer + i));
 		*read += sizeof(u32);
-		/* Make sure we get only full lines */
-		if (buf && (size - ret < 18))
-			break;
 	}
 
 	return ret;
@@ -954,9 +954,10 @@ static int intel_fw_logging_proc_read(char *buffer, char **start, off_t offset,
 		} else {
 			ret = dump_scu_extented_trace(buffer, count,
 					      offset, &read);
-			if (!read || offset + read > sram_buf_sz)
-				*peof = 1;
 		}
+		if (offset + read >= MAX_NUM_ALL_LOGDWORDS * sizeof(u32) + sram_buf_sz)
+			*peof = 1;
+
 		*start = (void *) read;
 	}
 	return ret;
