@@ -807,7 +807,6 @@ extern uint dhd_pktgen_len;
 extern char fw_path[MOD_PARAM_PATHLEN];
 extern char nv_path[MOD_PARAM_PATHLEN];
 extern char nv_id[30];
-extern int chip_id;
 
 #define MOD_PARAM_INFOLEN	512
 #ifdef SOFTAP
