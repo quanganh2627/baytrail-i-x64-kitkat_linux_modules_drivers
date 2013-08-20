@@ -232,7 +232,8 @@ static void serial_set_alt(int index)
 
 	pm_runtime_get_sync(up->dev);
 	disable_irq(up->port.irq);
-	disable_irq(phsu->dma_irq);
+	if (!phsu->irq_port_and_dma)
+		disable_irq(phsu->dma_irq);
 	serial_sched_stop(up);
 	if (up->use_dma && up->hw_type == HSU_INTEL) {
 		txc->uport = up;
@@ -245,7 +246,8 @@ static void serial_set_alt(int index)
 		cfg->hw_set_rts(up->index, 0);
 	set_bit(flag_set_alt, &up->flags);
 	serial_sched_start(up);
-	enable_irq(phsu->dma_irq);
+	if (!phsu->irq_port_and_dma)
+		enable_irq(phsu->dma_irq);
 	enable_irq(up->port.irq);
 	pm_runtime_put(up->dev);
 }
@@ -260,13 +262,15 @@ static void serial_clear_alt(int index)
 
 	pm_runtime_get_sync(up->dev);
 	disable_irq(up->port.irq);
-	disable_irq(phsu->dma_irq);
+	if (!phsu->irq_port_and_dma)
+		disable_irq(phsu->dma_irq);
 	serial_sched_stop(up);
 	if (cfg->hw_set_rts)
 		cfg->hw_set_rts(up->index, 1);
 	clear_bit(flag_set_alt, &up->flags);
 	serial_sched_start(up);
-	enable_irq(phsu->dma_irq);
+	if (!phsu->irq_port_and_dma)
+		enable_irq(phsu->dma_irq);
 	enable_irq(up->port.irq);
 	pm_runtime_put(up->dev);
 }
@@ -898,12 +902,34 @@ static void check_modem_status(struct uart_hsu_port *up)
 		wake_up_interruptible(&up->port.state->port.delta_msr_wait);
 }
 
+static void hsu_dma_chan_handler(struct hsu_port *hsu, int index)
+{
+	unsigned long flags;
+	struct uart_hsu_port *up = hsu->chans[index * 2].uport;
+	struct hsu_dma_chan *txc = up->txc;
+	struct hsu_dma_chan *rxc = up->rxc;
+
+	up->dma_irq_num++;
+	if (unlikely(!up->use_dma
+		|| !test_bit(flag_startup, &up->flags))) {
+		chan_readl(txc, HSU_CH_SR);
+		chan_readl(rxc, HSU_CH_SR);
+		return;
+	}
+	if (!phsu->irq_port_and_dma)
+		disable_irq_nosync(phsu->dma_irq);
+	spin_lock_irqsave(&up->port.lock, flags);
+	serial_sched_cmd(up, qcmd_dma_irq);
+	spin_unlock_irqrestore(&up->port.lock, flags);
+}
+
 /*
  * This handles the interrupt from one port.
  */
 static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 {
 	struct uart_hsu_port *up = dev_id;
+	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 	unsigned long flags;
 	u8 lsr;
 
@@ -936,6 +962,11 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 
 	/* DesignWare HW's DMA mode still needs the port irq */
 	if (up->use_dma && up->hw_type == HSU_INTEL) {
+		if (phsu->irq_port_and_dma) {
+			phsu->int_sts = mfd_readl(phsu, HSU_GBL_DMAISR);
+			if (phsu->int_sts & (3 << (up->index * 2)))
+				hsu_dma_chan_handler(phsu, up->index);
+		}
 		lsr = serial_in(up, UART_LSR);
 		spin_lock_irqsave(&up->port.lock, flags);
 		check_modem_status(up);
@@ -957,32 +988,13 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 
 static irqreturn_t hsu_dma_irq(int irq, void *dev_id)
 {
-	struct uart_hsu_port *up;
 	struct hsu_port *hsu = dev_id;
 	int i;
-	unsigned long flags;
-	struct hsu_dma_chan *txc;
-	struct hsu_dma_chan *rxc;
 
 	hsu->int_sts = mfd_readl(hsu, HSU_GBL_DMAISR);
-
 	for (i = 0; i < 3; i++) {
-		if (hsu->int_sts & (3 << (i * 2))) {
-			up = hsu->chans[i * 2].uport;
-			txc = up->txc;
-			rxc = up->rxc;
-			up->dma_irq_num++;
-			if (unlikely(!up->use_dma
-				|| !test_bit(flag_startup, &up->flags))) {
-				chan_readl(txc, HSU_CH_SR);
-				chan_readl(rxc, HSU_CH_SR);
-				continue;
-			}
-			disable_irq_nosync(phsu->dma_irq);
-			spin_lock_irqsave(&up->port.lock, flags);
-			serial_sched_cmd(up, qcmd_dma_irq);
-			spin_unlock_irqrestore(&up->port.lock, flags);
-		}
+		if (hsu->int_sts & (3 << (i * 2)))
+			hsu_dma_chan_handler(hsu, i);
 	}
 
 	return IRQ_HANDLED;
@@ -1774,16 +1786,19 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 				&& serial_in(up, UART_FOR) & 0x7F)
 			goto busy;
 
-		if ((chan_readl(up->rxc, HSU_CH_D0SAR) - up->rxbuf.dma_addr)
-			&& up->hw_type == HSU_INTEL)
-			goto busy;
+		if (up->hw_type == HSU_INTEL) {
+			if (chan_readl(up->rxc, HSU_CH_D0SAR) >
+					up->rxbuf.dma_addr)
+				goto busy;
+		}
 	}
 
 	if (cfg->hw_set_rts)
 		cfg->hw_set_rts(up->index, 1);
 
 	disable_irq(up->port.irq);
-	disable_irq(phsu->dma_irq);
+	if (!phsu->irq_port_and_dma)
+		disable_irq(phsu->dma_irq);
 
 	if (cfg->hw_set_rts)
 		usleep_range(up->byte_delay, up->byte_delay);
@@ -1825,7 +1840,8 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 		hsu_regs_context(up, context_save);
 	if (cfg->preamble && cfg->hw_suspend_post)
 		cfg->hw_suspend_post(up->index);
-	enable_irq(phsu->dma_irq);
+	if (!phsu->irq_port_and_dma)
+		enable_irq(phsu->dma_irq);
 	if (up->hw_type == HSU_DW)
 		enable_irq(up->port.irq);
 	return 0;
@@ -1836,7 +1852,8 @@ err:
 	enable_irq(up->port.irq);
 	if (up->use_dma && up->hw_type == HSU_INTEL)
 		intel_dma_do_rx(up, 0);
-	enable_irq(phsu->dma_irq);
+	if (!phsu->irq_port_and_dma)
+		enable_irq(phsu->dma_irq);
 	serial_sched_start(up);
 	spin_lock_irqsave(&up->port.lock, flags);
 	serial_sched_cmd(up, qcmd_get_msr);
@@ -2091,7 +2108,8 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 				status = chan_readl(rxc, HSU_CH_SR);
 				intel_dma_do_rx(up, status);
 			}
-			enable_irq(phsu->dma_irq);
+			if (!phsu->irq_port_and_dma)
+				enable_irq(phsu->dma_irq);
 			break;
 		case qcmd_cmd_off:
 			set_bit(flag_cmd_off, &up->flags);
@@ -2154,7 +2172,7 @@ static int serial_port_setup(struct uart_hsu_port *up,
 	snprintf(up->name, sizeof(up->name) - 1, "%s_p", cfg->name);
 	up->index = index;
 
-	if ((hsu_dma_enable & (1 << index)) && up->hw_type == HSU_INTEL)
+	if (hsu_dma_enable & (1 << index))
 		up->use_dma = 1;
 	else
 		up->use_dma = 0;
@@ -2397,11 +2415,18 @@ static int serial_hsu_dma_probe(struct pci_dev *pdev,
 
 		dchan++;
 	}
-	phsu->dma_irq = pdev->irq;
-	ret = request_irq(pdev->irq, hsu_dma_irq, 0, "hsu dma", phsu);
-	if (ret) {
-		dev_err(&pdev->dev, "can not get IRQ\n");
-		goto err;
+
+	/* TNG chip from B0 stepping */
+	if (intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER &&
+		pdev->revision >= 0x1) {
+		phsu->irq_port_and_dma = 1;
+	} else {
+		phsu->dma_irq = pdev->irq;
+		ret = request_irq(pdev->irq, hsu_dma_irq, 0, "hsu dma", phsu);
+		if (ret) {
+			dev_err(&pdev->dev, "can not get IRQ\n");
+			goto err;
+		}
 	}
 	pci_set_drvdata(pdev, phsu);
 	return 0;

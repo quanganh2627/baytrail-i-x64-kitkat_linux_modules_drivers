@@ -184,6 +184,7 @@ struct hsu_port {
 	int dma_irq;
 	int int_sts;
 	int port_num;
+	int irq_port_and_dma;
 	struct hsu_port_cfg	*configs[HSU_PORT_MAX];
 	void __iomem	*reg;
 	struct uart_hsu_port	port[HSU_PORT_MAX];
