@@ -879,7 +879,7 @@ MODULE_DEVICE_TABLE(platform, mdm_ctrl_id_table);
 
 static struct platform_driver mcd_driver = {
 	.probe = mdm_ctrl_module_probe,
-	.remove = __devexit_p(mdm_ctrl_module_remove),
+	.remove = mdm_ctrl_module_remove,
 	.driver = {
 		   .name = DRVNAME,
 		   .owner = THIS_MODULE,
