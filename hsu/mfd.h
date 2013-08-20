@@ -128,6 +128,7 @@ struct uart_hsu_port {
 	unsigned char		fcr;
 	/* intel_hsu's clk param */
 	unsigned int		mul;
+	unsigned int		div;
 	unsigned int		ps;
 
 	/* Buffered value due to runtime PM and sharing IRQ */

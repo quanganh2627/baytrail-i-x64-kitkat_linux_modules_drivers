@@ -1251,6 +1251,59 @@ static void serial_hsu_shutdown(struct uart_port *port)
 	mutex_unlock(&lock);
 }
 
+/* calculate mul,div for low fref e.g. TNG B0 38.4M
+ * finally the fref will swith to high fref e.g. 100M
+*/
+static bool calc_for_low_fref(u32 clock, u32 baud, u32 *mul, u32 *div)
+{
+	if (clock == 38400) {
+		switch (baud) {
+		case 3500000:
+			/* ps: 10 */
+			*mul = 350;
+			*div = 384;
+			break;
+		case 3000000:
+			/* ps: 12 */
+			*mul = 360;
+			*div = 384;
+			break;
+		case 2500000:
+			/* ps: 12 */
+			*mul = 300;
+			*div = 384;
+			break;
+		case 2000000:
+			/* ps: 16 */
+			*mul = 320;
+			*div = 384;
+			break;
+		case 1843200:
+			/* ps: 16 */
+			*mul = 294912;
+			*div = 384000;
+			break;
+		case 1500000:
+			/* ps: 16 */
+			*mul = 240;
+			*div = 384;
+			break;
+		case 1000000:
+			/* ps: 16 */
+			*mul = 160;
+			*div = 384;
+			break;
+		case 500000:
+			/* ps: 16 */
+			*mul = 80;
+			*div = 384;
+			break;
+		}
+		return true;
+	} else
+		return false;
+}
+
 static void
 serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 		       struct ktermios *old)
@@ -1261,7 +1314,7 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 	unsigned char cval, fcr = 0;
 	unsigned long flags;
 	unsigned int baud, quot, clock, bits;
-	u32 ps = 0, mul = 0, m = 0, n = 0;
+	u32 ps = 0, mul = 0, div = 0x3D09, m = 0, n = 0;
 
 	switch (termios->c_cflag & CSIZE) {
 	case CS5:
@@ -1315,15 +1368,16 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 			clock = cfg->hw_get_clk();
 		else
 			clock = 50000;
-		/* ps = 16 is prefered, if not have to use 12 */
-		if (baud * 16 > clock * 1000)
-			ps = 0xc;
+		/* ps = 16 is prefered, if not have to use 12, l0 */
+		if (baud * 16 <= clock * 1000)
+			ps = 16;
+		else if (baud * 12 <= clock * 1000)
+			ps = 12;
+		else if (baud * 10 <= clock * 1000)
+			ps = 10;
 		else
-			ps = 0x10;
-
-		if (clock == 19200 && baud > 1600000)
-			pr_err("clock 19.2M but port %d baud > 1.6M\n",
-				up->index);
+			pr_err("port:%d baud:%d is too high for clock:%u M\n",
+				up->index, baud, clock / 1000);
 
 		switch (baud) {
 		case 3500000:
@@ -1335,11 +1389,13 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 		case 1000000:
 		case 500000:
 			quot = 1;
-			/*
-			 * mul = baud * 0x3d09 * ps / 1000 / clock
-			 * change the formula order to avoid overflow
-			 */
-			mul = (0x3d09 * ps / 100) * (baud / 100) * 10 / clock;
+			if (!calc_for_low_fref(clock, baud, &mul, &div))
+				/*
+				 * mul = baud * 0x3d09 * ps / 1000 / clock
+				 * change the formula order to avoid overflow
+				 */
+				mul = (0x3d09 * ps / 100) * (baud / 100)
+					* 10 / clock;
 			break;
 		default:
 			/* Use uart_get_divisor to get quot for other baud rates
@@ -1447,15 +1503,17 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 	up->lcr = cval;					/* Save LCR */
 
 	serial_out(up, UART_LCR, cval | UART_LCR_DLAB);	/* set DLAB */
-	serial_out(up, UART_DLL, quot & 0xff);		/* LS of divisor */
-	serial_out(up, UART_DLM, quot >> 8);		/* MS of divisor */
+	serial_out(up, UART_DLL, up->dll);		/* LS of divisor */
+	serial_out(up, UART_DLM, up->dlm);		/* MS of divisor */
 	serial_out(up, UART_LCR, cval);			/* reset DLAB */
 
 	if (up->hw_type == HSU_INTEL) {
 		up->mul	= mul;
+		up->div = div;
 		up->ps	= ps;
-		serial_out(up, UART_MUL, mul);			/* set MUL */
-		serial_out(up, UART_PS, ps);			/* set PS */
+		serial_out(up, UART_MUL, up->mul);	/* set MUL */
+		serial_out(up, UART_DIV, up->div);	/* set DIV */
+		serial_out(up, UART_PS, up->ps);	/* set PS */
 	} else {
 		if (m != up->m || n != up->n) {
 			dw_set_clk(up, m, n);
@@ -1757,6 +1815,7 @@ static void hsu_regs_context(struct uart_hsu_port *up, int op)
 
 		if (up->hw_type == HSU_INTEL) {
 			serial_out(up, UART_MUL, up->mul);
+			serial_out(up, UART_DIV, up->div);
 			serial_out(up, UART_PS, up->ps);
 		} else
 			dw_set_clk(up, up->m, up->n);
@@ -2288,9 +2347,7 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	else
 		clock = 50000;
 	uclk = clock * 1000 / (115200 * 16); /* 16 is default ps */
-	if (uclk >= 32)
-		uclk = 32;
-	else if (uclk >= 24)
+	if (uclk >= 24)
 		uclk = 24;
 	else if (uclk >= 16)
 		uclk = 16;
@@ -2300,7 +2357,7 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 		uclk = 1;
 
 	if (up->hw_type == HSU_INTEL)
-		up->port.uartclk = 115200 * 24 * 16;
+		up->port.uartclk = 115200 * uclk * 16;
 	else
 		up->port.uartclk = 115200 * 32 * 16;
 
