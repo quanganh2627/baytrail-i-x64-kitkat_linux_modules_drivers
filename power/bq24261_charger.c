@@ -40,6 +40,7 @@
 #include <linux/power/bq24261_charger.h>
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
+#include <linux/wakelock.h>
 
 #include <asm/intel_scu_ipc.h>
 
@@ -313,6 +314,7 @@ struct bq24261_charger {
 	bool is_hw_chrg_term;
 	char model_name[MODEL_NAME_SIZE];
 	char manufacturer[DEV_MANUFACTURER_NAME_SIZE];
+	struct wake_lock chrgr_en_wakelock;
 };
 
 enum bq2426x_model_num {
@@ -954,6 +956,19 @@ static int bq24261_usb_set_property(struct power_supply *psy,
 
 	case POWER_SUPPLY_PROP_PRESENT:
 		chip->present = val->intval;
+		/*If charging capable cable is present, then
+		hold the charger wakelock so that the target
+		does not enter suspend mode when charging is
+		in progress.
+		If charging cable has been removed, then
+		unlock the wakelock to allow the target to
+		enter the sleep mode*/
+		if (!wake_lock_active(&chip->chrgr_en_wakelock) &&
+					val->intval)
+			wake_lock(&chip->chrgr_en_wakelock);
+		else if (wake_lock_active(&chip->chrgr_en_wakelock) &&
+					!val->intval)
+			wake_unlock(&chip->chrgr_en_wakelock);
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
 		chip->online = val->intval;
@@ -1700,6 +1715,8 @@ static int bq24261_probe(struct i2c_client *client,
 		DEV_MANUFACTURER_NAME_SIZE);
 
 	mutex_init(&chip->lock);
+	wake_lock_init(&chip->chrgr_en_wakelock,
+			WAKE_LOCK_SUSPEND, "chrgr_en_wakelock");
 	ret = power_supply_register(&client->dev, &chip->psy_usb);
 	if (ret) {
 		dev_err(&client->dev, "Failed: power supply register (%d)\n",
@@ -1755,6 +1772,7 @@ static int bq24261_remove(struct i2c_client *client)
 		free_irq(client->irq, chip);
 
 	flush_scheduled_work();
+	wake_lock_destroy(&chip->chrgr_en_wakelock);
 	if (chip->irq_iomap)
 		iounmap(chip->irq_iomap);
 	if (chip->transceiver)
