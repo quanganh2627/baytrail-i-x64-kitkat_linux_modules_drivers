@@ -222,7 +222,7 @@ static int psh_byt_resume(struct device *dev)
 			(struct psh_ext_if *)ia_data->platform_priv;
 	if (psh_if_info->gpio_psh_ctl > 0) {
 		gpio_set_value(psh_if_info->gpio_psh_ctl, 1);
-		usleep_range(1500, 1500);
+		usleep_range(1800, 1800);
 	}
 	dev_dbg(dev, "PSH_BYT: %s\n", __func__);
 	return 0;
