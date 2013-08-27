@@ -26,7 +26,9 @@
  */
 
 #include "mdm_util.h"
-#include "mdm_imc.h"
+#include "mcd_mdm.h"
+#include "mcd_cpu.h"
+#include "mcd_pmic.h"
 
 /* Modem control driver instance */
 struct mdm_ctrl *mdm_drv;
@@ -58,91 +60,12 @@ inline int mdm_ctrl_get_opened(struct mdm_ctrl *drv)
 }
 
 /**
- *  mdm_ctrl_launch_work - Launch work to change modem state
- *  @drv: Reference to the driver structure
- *  @state: New state
- *
- *  Defer and queue change of state in order to avoid race condition
- *  with IRQ and timer expiration management.
- */
-inline void mdm_ctrl_launch_work(struct mdm_ctrl *drv, int state)
-{
-	struct next_state *new_state;
-	unsigned long flags;
-
-	new_state = kzalloc(sizeof(struct next_state), GFP_ATOMIC);
-	if (!new_state) {
-		pr_err(DRVNAME": Can't allocate new_state memory");
-		return;
-	}
-	new_state->state = state;
-
-	spin_lock_irqsave(&drv->state_lck, flags);
-	list_add_tail(&new_state->link, &drv->next_state_link);
-	queue_work(drv->change_state_wq, &drv->change_state_work);
-	spin_unlock_irqrestore(&drv->state_lck, flags);
-
-
-}
-
-/**
- *  mdm_ctrl_set_state -  Effectively sets the modem state on work execution
- *  @work: Reference to the work structure
- *
- */
-inline void mdm_ctrl_set_state(struct work_struct *work)
-{
-	struct mdm_ctrl *drv;
-	struct next_state *new_state;
-	unsigned long flags;
-
-	drv = container_of(work, struct mdm_ctrl, change_state_work);
-
-	/* List can have several elements */
-	while (!list_empty_careful(&drv->next_state_link)) {
-		spin_lock_irqsave(&drv->state_lck, flags);
-		new_state = list_first_entry(&drv->next_state_link,
-				struct next_state, link);
-		list_del_init(&new_state->link);
-		spin_unlock_irqrestore(&drv->state_lck, flags);
-
-		/* Set the current modem state */
-		drv->modem_state = new_state->state;
-		if (likely(drv->modem_state != MDM_CTRL_STATE_UNKNOWN) &&
-				(drv->modem_state & drv->polled_states)) {
-
-			drv->polled_state_reached = true;
-			/* Waking up the poll work queue */
-			wake_up(&drv->wait_wq);
-			pr_info(DRVNAME": Waking up polling 0x%x\r\n",
-					drv->modem_state);
-
-		}
-		/* Waking up the wait_for_state work queue */
-		wake_up(&drv->event);
-		kfree(new_state);
-	}
-}
-
-/**
- *  mdm_ctrl_get_state - Return the local current modem state
- *  @drv: Reference to the driver structure
- *
- *  Note: Real current state may be different in case of self-reset
- *	  or if user has manually changed the state.
- */
-inline int mdm_ctrl_get_state(struct mdm_ctrl *drv)
-{
-	return drv->modem_state;
-}
-
-/**
  *  mdm_ctrl_enable_flashing - Set the modem state to FW_DOWNLOAD_READY
  *
  */
 void mdm_ctrl_enable_flashing(unsigned long int param)
 {
-	struct mdm_ctrl *drv = (struct mdm_ctrl *) param;
+	struct mdm_ctrl *drv = (struct mdm_ctrl *)param;
 
 	del_timer(&drv->flashing_timer);
 	if (mdm_ctrl_get_state(drv) != MDM_CTRL_STATE_IPC_READY) {
@@ -160,16 +83,16 @@ void mdm_ctrl_enable_flashing(unsigned long int param)
  *  Note: Type MDM_TIMER_FLASH_DISABLE is not used anymore.
  */
 void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
-		unsigned int timer_type)
+			   unsigned int timer_type)
 {
-	timer->data = (unsigned long int) mdm_drv;
+	timer->data = (unsigned long int)mdm_drv;
 	switch (timer_type) {
 	case MDM_TIMER_FLASH_ENABLE:
 		timer->function = mdm_ctrl_enable_flashing;
 		break;
 	case MDM_TIMER_FLASH_DISABLE:
 	default:
-		pr_err(DRVNAME": Unrecognized timer type %d", timer_type);
+		pr_err(DRVNAME ": Unrecognized timer type %d", timer_type);
 		del_timer(timer);
 		return;
 		break;
@@ -200,21 +123,6 @@ inline int mdm_ctrl_get_reset_ongoing(struct mdm_ctrl *drv)
 }
 
 /**
- *  mdm_ctrl_set_gpio - Move the gpio value to simplify access
- *  @drv: Reference to the driver structure
- *
- */
-void mdm_ctrl_set_gpio(struct mdm_ctrl *drv)
-{
-	struct mdm_ctrl_pdata *pdata = drv->pdata;
-
-	drv->gpio_rst_out = pdata->cpu_data->gpio_rst_out;
-	drv->gpio_pwr_on  = pdata->cpu_data->gpio_pwr_on;
-	drv->gpio_rst_bbn = pdata->cpu_data->gpio_rst_bbn;
-	drv->gpio_cdump   = pdata->cpu_data->gpio_cdump;
-}
-
-/**
  *  mdm_ctrl_set_func - Set modem sequences functions to use
  *  @drv: Reference to the driver structure
  *
@@ -222,48 +130,155 @@ void mdm_ctrl_set_gpio(struct mdm_ctrl *drv)
 void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 {
 	int modem_type = 0;
+	int cpu_type = 0;
+	int pmic_type = 0;
 
-	if (drv->pdata)
-		modem_type = drv->pdata->modem;
-	else {
-		pr_info(DRVNAME": No modem data available");
-		return;
-	}
+	modem_type = drv->pdata->mdm_ver;
+	cpu_type = drv->pdata->cpu_ver;
+	pmic_type = drv->pdata->pmic_ver;
 
-	pr_info(DRVNAME": Taking %d modem sequences", modem_type);
-
-	/* There should be on modem file per provider at least */
 	switch (modem_type) {
 	case MODEM_6260:
 	case MODEM_6268:
-		drv->mdm_ctrl_cold_boot = mdm_ctrl_cold_boot_6x6x;
-		drv->mdm_ctrl_cold_reset = mdm_ctrl_cold_reset_6x6x;
-		drv->mdm_ctrl_normal_warm_reset =
-			mdm_ctrl_normal_warm_reset_6x6x;
-		drv->mdm_ctrl_silent_warm_reset =
-			mdm_ctrl_silent_warm_reset_6x6x;
-		drv->mdm_ctrl_flashing_warm_reset =
-			mdm_ctrl_flashing_warm_reset_6x6x;
-		drv->mdm_ctrl_power_off = mdm_ctrl_power_off_6x6x;
-		break;
 	case MODEM_6360:
 	case MODEM_7160:
 	case MODEM_7260:
-		drv->mdm_ctrl_cold_boot = mdm_ctrl_cold_boot_7x6x;
-		drv->mdm_ctrl_cold_reset = mdm_ctrl_cold_reset_7x6x;
-		drv->mdm_ctrl_normal_warm_reset =
-			mdm_ctrl_normal_warm_reset_7x6x;
-		drv->mdm_ctrl_silent_warm_reset =
-			mdm_ctrl_silent_warm_reset_7x6x;
-		drv->mdm_ctrl_flashing_warm_reset =
-			mdm_ctrl_flashing_warm_reset_7x6x;
-		drv->mdm_ctrl_power_off = mdm_ctrl_power_off_7x6x;
+		drv->pdata->mdm.init = mcd_mdm_init;
+		drv->pdata->mdm.power_on = mcd_mdm_cold_boot;
+		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
+		drv->pdata->mdm.power_off = mcd_mdm_power_off;
+		drv->pdata->mdm.cleanup = mcd_mdm_cleanup;
+		drv->pdata->mdm.get_wflash_delay =
+		    mcd_mdm_get_wflash_delay;
+		drv->pdata->mdm.get_cflash_delay =
+		    mcd_mdm_get_cflash_delay;
 		break;
 	default:
-		pr_info(DRVNAME": Can't retrieve modem specific functions");
-		drv->pdata->is_mdm_ctrl_disabled = true;
+		pr_info(DRVNAME ": Can't retrieve modem specific functions");
+		drv->is_mdm_ctrl_disabled = true;
 		break;
 	}
+
+	switch (cpu_type) {
+	case CPU_PWELL:
+	case CPU_CLVIEW:
+	case CPU_TANGIER:
+	case CPU_VVIEW2:
+		drv->pdata->cpu.init = cpu_init_gpio;
+		drv->pdata->cpu.cleanup = cpu_cleanup_gpio;
+		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state;
+		drv->pdata->cpu.get_irq_cdump = get_gpio_irq_cdump;
+		drv->pdata->cpu.get_irq_rst = get_gpio_irq_rst;
+		drv->pdata->cpu.get_gpio_rst = get_gpio_rst;
+		drv->pdata->cpu.get_gpio_pwr = get_gpio_pwr;
+		break;
+	default:
+		pr_info(DRVNAME ": Can't retrieve cpu specific functions");
+		drv->is_mdm_ctrl_disabled = true;
+		break;
+	}
+
+	switch (pmic_type) {
+	case PMIC_MFLD:
+	case PMIC_MRFL:
+	case PMIC_BYT:
+		drv->pdata->pmic.init = pmic_io_init;
+		drv->pdata->pmic.power_on_mdm = pmic_io_power_on_mdm;
+		drv->pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
+		drv->pdata->pmic.cleanup = pmic_io_cleanup;
+		drv->pdata->pmic.get_early_pwr_on = pmic_io_get_early_pwr_on;
+		drv->pdata->pmic.get_early_pwr_off = pmic_io_get_early_pwr_off;
+		break;
+	case PMIC_CLVT:
+		drv->pdata->pmic.init = pmic_io_init;
+		drv->pdata->pmic.power_on_mdm = pmic_io_power_on_ctp_mdm;
+		drv->pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
+		drv->pdata->pmic.cleanup = pmic_io_cleanup;
+		drv->pdata->pmic.get_early_pwr_on = pmic_io_get_early_pwr_on;
+		drv->pdata->pmic.get_early_pwr_off = pmic_io_get_early_pwr_off;
+		break;
+	default:
+		pr_info(DRVNAME ": Can't retrieve pmic specific functions");
+		drv->is_mdm_ctrl_disabled = true;
+		break;
+	}
+}
+
+/**
+ *  mdm_ctrl_set_state -  Effectively sets the modem state on work execution
+ *  @work: Reference to the work structure
+ *
+ */
+inline void mdm_ctrl_set_state(struct work_struct *work)
+{
+	struct mdm_ctrl *drv;
+	struct next_state *new_state;
+	unsigned long flags;
+
+	drv = container_of(work, struct mdm_ctrl, change_state_work);
+
+	/* List can have several elements */
+	while (!list_empty_careful(&drv->next_state_link)) {
+		spin_lock_irqsave(&drv->state_lck, flags);
+		new_state = list_first_entry(&drv->next_state_link,
+					     struct next_state, link);
+		list_del_init(&new_state->link);
+		spin_unlock_irqrestore(&drv->state_lck, flags);
+
+		/* Set the current modem state */
+		drv->modem_state = new_state->state;
+		if (likely(drv->modem_state != MDM_CTRL_STATE_UNKNOWN) &&
+		    (drv->modem_state & drv->polled_states)) {
+
+			drv->polled_state_reached = true;
+			/* Waking up the poll work queue */
+			wake_up(&drv->wait_wq);
+			pr_info(DRVNAME ": Waking up polling 0x%x\r\n",
+				drv->modem_state);
+
+		}
+		/* Waking up the wait_for_state work queue */
+		wake_up(&drv->event);
+		kfree(new_state);
+	}
+}
+
+/**
+ *  mdm_ctrl_get_state - Return the local current modem state
+ *  @drv: Reference to the driver structure
+ *
+ *  Note: Real current state may be different in case of self-reset
+ *	  or if user has manually changed the state.
+ */
+inline int mdm_ctrl_get_state(struct mdm_ctrl *drv)
+{
+	return drv->modem_state;
+}
+
+/**
+ *  mdm_ctrl_launch_work - Launch work to change modem state
+ *  @drv: Reference to the driver structure
+ *  @state: New state
+ *
+ *  Defer and queue change of state in order to avoid race condition
+ *  with IRQ and timer expiration management.
+ */
+inline void mdm_ctrl_launch_work(struct mdm_ctrl *drv, int state)
+{
+	struct next_state *new_state;
+	unsigned long flags;
+
+	new_state = kzalloc(sizeof(struct next_state), GFP_ATOMIC);
+	if (!new_state) {
+		pr_err(DRVNAME ": Can't allocate new_state memory");
+		return;
+	}
+	new_state->state = state;
+
+	spin_lock_irqsave(&drv->state_lck, flags);
+	list_add_tail(&new_state->link, &drv->next_state_link);
+	queue_work(drv->change_state_wq, &drv->change_state_work);
+	spin_unlock_irqrestore(&drv->state_lck, flags);
 }
 
 /**
@@ -272,129 +287,36 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
  *  pdata is created base on information given by platform.
  *  Data used is the modem type, the cpu type and the pmic type.
  */
-struct mdm_ctrl_pdata *modem_ctrl_create_pdata(struct platform_device *pdev)
+struct mcd_base_info *modem_ctrl_get_dev_data(struct platform_device *pdev)
 {
-	struct mdm_ctrl_pdata *pdata = NULL;
-	struct mdm_ctrl_device_info *mid_info = NULL;
-	struct modem_base_info *mb_info = NULL ;
-	struct mdm_ctrl_pmic_data *pmic_data = NULL;
+	struct mcd_base_info *info = NULL;
 
 	if (!pdev->dev.platform_data) {
-		pr_info("%s: No platform data available, checking ACPI...",
+		pr_info(DRVNAME
+			"%s: No platform data available, checking ACPI...",
 			__func__);
 		/* FOR ACPI HANDLING */
 		if (retrieve_modem_platform_data(pdev)) {
-		  pr_err("%s: No registered info found. Disabling driver.",
-			 __func__);
-		  return NULL;
+			pr_err(DRVNAME"%s: No registered info found. Disabling driver.",
+				__func__);
+			return NULL;
 		}
 	}
 
-	mb_info = pdev->dev.platform_data;
+	info = pdev->dev.platform_data;
 
-	pdata = kzalloc(sizeof(struct mdm_ctrl_pdata), GFP_ATOMIC);
-	if (!pdata) {
-		pr_err(DRVNAME": Can't allocate pdata memory");
+	pr_err(DRVNAME ": cpu: %d mdm: %d pmic: %d.", info->cpu_ver,
+	       info->mdm_ver, info->pmic_ver);
+	if ((info->mdm_ver == MODEM_UNSUP)
+	    || (info->cpu_ver == CPU_UNSUP)
+	    || (info->pmic_ver == PMIC_UNSUP)) {
+		/* mdm_ctrl is disabled as some components */
+		/* of the platform are not supported */
+		kfree(info);
 		return NULL;
-	};
-
-	mid_info = kzalloc(sizeof(struct mdm_ctrl_device_info), GFP_ATOMIC);
-	if (!mid_info) {
-		pr_err(DRVNAME": Can't allocate mid_info memory");
-		goto Error;
-	};
-
-	/* Check if the modem is supported.
-	 * Then set its specific timing values.
-	 */
-	switch (mb_info->id) {
-	case MODEM_6260:
-	case MODEM_6268:
-		mid_info->pre_on_delay = 200;
-		mid_info->on_duration = 60;
-		mid_info->pre_wflash_delay = 30;
-		mid_info->pre_cflash_delay = 60;
-		mid_info->flash_duration = 60;
-		mid_info->warm_rst_duration = 60;
-		break;
-	case MODEM_6360:
-	case MODEM_7160:
-	case MODEM_7260:
-		mid_info->pre_on_delay = 200;
-		mid_info->on_duration = 60;
-		mid_info->pre_wflash_delay = 30;
-		mid_info->pre_cflash_delay = 60;
-		mid_info->flash_duration = 60;
-		mid_info->warm_rst_duration = 60;
-		break;
-	default:
-		pr_info(DRVNAME": Modem not supported %d", mb_info->id);
-		goto Free_mid_info;
 	}
 
-	/* Modem is supported, fill in the pdata structure with it */
-	pdata->modem = mb_info->id;
-
-	pmic_data = (struct mdm_ctrl_pmic_data *) mb_info->pmic;
-	if (!pmic_data) {
-		pr_err(DRVNAME": No available PMIC Data!\n");
-		goto Free_mid_info;
-	};
-
-	/* Check if the PMIC is supported.
-	 * Then provide register adresses and values.
-	 */
-	switch (pmic_data->id) {
-	case MFLD_PMIC:
-		pdata->chipctrl = 0x0E0;
-		pdata->chipctrlon = 0x4;
-		pdata->chipctrloff = 0x2;
-		pdata->chipctrl_mask = 0xF8;
-		pdata->pre_pwr_down_delay = 60;
-		pdata->pwr_down_duration = 20000;
-		break;
-	case CLVT_PMIC:
-		pdata->chipctrl = 0x100;
-		pdata->chipctrlon = 0x10;
-		pdata->chipctrloff = 0x10;
-		pdata->chipctrl_mask = 0x00;
-		pdata->pre_pwr_down_delay = 650;
-		pdata->pwr_down_duration = 20000;
-		break;
-	case MRFL_PMIC:
-		pdata->chipctrl = 0x31;
-		pdata->chipctrlon = 0x2;
-		pdata->chipctrloff = 0x0;
-		pdata->chipctrl_mask = 0xFC;
-		pdata->pre_pwr_down_delay = 650;
-		pdata->pwr_down_duration = 20000;
-		break;
-	case BYT_PMIC:
-		pdata->chipctrl = pmic_data->chipctrl;
-		pdata->chipctrlon = pmic_data->chipctrlon;
-		pdata->chipctrloff = pmic_data->chipctrloff;
-		pdata->chipctrl_mask = pmic_data->chipctrl_mask;
-		pdata->pre_pwr_down_delay = 650;
-		pdata->pwr_down_duration = 20000;
-		break;
-	default:
-		pr_err(DRVNAME": PMIC not supported %d", pmic_data->id);
-		goto Free_mid_info;
-	}
-
-	/* Retrieve cpu data */
-	pdata->cpu_data = mb_info->data;
-
-	pdata->device_data = (void *)mid_info;
-	goto Out;
-
-Free_mid_info:
-	kfree(mid_info);
-Error:
-	kfree(pdata);
-	pdata = NULL;
-Out:
-	return pdata;
+	return info;
 }
 
 /**
@@ -404,19 +326,17 @@ Out:
  *  Platform are build from SFI table data.
  */
 void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
-		struct platform_device *pdev)
+			      struct platform_device *pdev)
 {
-	drv->pdata = modem_ctrl_create_pdata(pdev);
+	drv->pdata = modem_ctrl_get_dev_data(pdev);
 
-	if (!drv->pdata || drv->pdata->is_mdm_ctrl_disabled) {
+	if (!drv->pdata) {
 		drv->is_mdm_ctrl_disabled = true;
-		kfree(drv->pdata->device_data);
-		kfree(drv->pdata);
-		pr_info(DRVNAME": Disabling driver. No known device.");
+		pr_info(DRVNAME ": Disabling driver. No known device.");
 		goto out;
 	}
 
 	mdm_ctrl_set_func(drv);
-out:
+ out:
 	return;
 }

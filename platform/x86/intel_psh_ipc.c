@@ -29,44 +29,88 @@
 
 #define STATUS_PSH2IA(x)	(1 << ((x) + 6))
 #define FLAG_BIND		(1 << 0)
-#define PIMR(x)			(ipc_ctrl.ipc_regs->pimr[x])
 
-#define PSH_REG(x)		(ipc_ctrl.ipc_regs->x)
+#define IS_A_STEP		(ipc_ctrl.stepping == 0)
+
+#define PIMR_A_STEP(x)		(ipc_ctrl.psh_regs->psh_regs_a_step.pimr##x)
+#define PIMR_B_STEP(x)		(ipc_ctrl.psh_regs->psh_regs_b_step.pimr##x)
+
+#define PIMR_ADDR(x)		((ipc_ctrl.stepping & 1) ?	\
+				&PIMR_B_STEP(x) : &PIMR_A_STEP(x))
+
+#define PSH_REG_A_STEP(x)	(ipc_ctrl.psh_regs->psh_regs_a_step.x)
+#define PSH_REG_B_STEP(x)	(ipc_ctrl.psh_regs->psh_regs_b_step.x)
+
+#define PSH_REG_ADDR(x)		((ipc_ctrl.stepping & 1) ?	\
+				&PSH_REG_B_STEP(x) : &PSH_REG_A_STEP(x))
+
 #define PSH_CH_HANDLE(x)	(ipc_ctrl.channel_handle[x])
 #define PSH_CH_DATA(x)		(ipc_ctrl.channel_data[x])
 #define PSH_CH_FLAG(x)		(ipc_ctrl.flags[x])
 
-struct ipc_registers {
-	u32		csr;	/* 00h */
-	u32		res1;	/* padding */
-	u32		pisr;	/* 08h */
-	u32		pimr[4];/* 0Ch ~ 18h + 3 */
-	u32		pmctl;	/* 1Ch */
-	u32		pmstat;	/* 20h */
-	u32		res2;	/* padding */
-	struct psh_msg	ia2psh[NUM_IA2PSH_IPC];/* 28h ~ 44h + 3 */
-	struct psh_msg	cry2psh;/* 48h ~ 4Ch + 3 */
-	struct psh_msg	scu2psh;/* 50h ~ 54h + 3 */
-	u32		res3[2];/* padding */
-	struct psh_msg	psh2ia[NUM_PSH2IA_IPC];/* 60h ~ 7Ch + 3 */
-	struct psh_msg	psh2cry;/* 80h ~ 84h + 3 */
-	struct psh_msg  psh2scu;/* 88h */
-	u32		msi_dir;/* 90h */
-	u32		res4[3];
-	u32		scratchpad[2];/* A0 */
+/* PSH registers */
+union psh_registers {
+	/* A stepping */
+	struct {
+		u32		csr;	/* 00h */
+		u32		res1;	/* padding */
+		u32		pisr;	/* 08h */
+		u32		pimr0;	/* 0Ch */
+		u32		pimr1;	/* 10h */
+		u32		pimr2;	/* 14h */
+		u32		pimr3;	/* 18h */
+		u32		pmctl;	/* 1Ch */
+		u32		pmstat;	/* 20h */
+		u32		res2;	/* padding */
+		struct psh_msg	ia2psh[NUM_IA2PSH_IPC];/* 28h ~ 44h + 3 */
+		struct psh_msg	cry2psh;/* 48h ~ 4Ch + 3 */
+		struct psh_msg	scu2psh;/* 50h ~ 54h + 3 */
+		u32		res3[2];/* padding */
+		struct psh_msg	psh2ia[NUM_PSH2IA_IPC];/* 60h ~ 7Ch + 3 */
+		struct psh_msg	psh2cry;/* 80h ~ 84h + 3 */
+		struct psh_msg  psh2scu;/* 88h */
+		u32		msi_dir;/* 90h */
+		u32		res4[3];
+		u32		scratchpad[2];/* A0 */
+	} __packed psh_regs_a_step;
+	/* B stepping */
+	struct {
+		u32		pimr0;		/* 00h */
+		u32		csr;		/* 04h */
+		u32		pmctl;		/* 08h */
+		u32		pmstat;		/* 0Ch */
+		u32		psh_msi_direct;	/* 10h */
+		u32		res1[59];	/* 14h ~ FCh + 3, padding */
+		u32		pimr3;		/* 100h */
+		struct psh_msg	scu2psh;	/* 104h ~ 108h + 3 */
+		struct psh_msg	psh2scu;	/* 10Ch ~ 110h + 3 */
+		u32		res2[187];	/* 114h ~ 3FCh + 3, padding */
+		u32		pisr;		/* 400h */
+		u32		scratchpad[2];	/* 404h ~ 407h */
+		u32		res3[61];	/* 40Ch ~ 4FCh + 3, padding */
+		u32		pimr1;		/* 500h */
+		struct psh_msg	ia2psh[NUM_IA2PSH_IPC];	/* 504h ~ 520h + 3 */
+		struct psh_msg	psh2ia[NUM_PSH2IA_IPC];	/* 524h ~ 540h + 3 */
+		u32		res4[175];	/* 544h ~ 7FCh + 3, padding */
+		u32		pimr2;		/* 800h */
+		struct psh_msg	cry2psh;	/* 804h ~ 808h + 3 */
+		struct psh_msg	psh2cry;	/* 80Ch ~ 810h + 3 */
+	} __packed psh_regs_b_step;
 } __packed;
 
 static struct ipc_controller_t {
-	int initialized;
+	int			stepping;
+	int			initialized;
 	struct pci_dev		*pdev;
 	spinlock_t		lock;
 	int			flags[NUM_ALL_CH];
-	struct ipc_registers	*ipc_regs;
+	union psh_registers	*psh_regs;
 	struct semaphore	ch_lock[NUM_ALL_CH];
 	struct mutex		psh_mutex;
 	psh_channel_handle_t	channel_handle[NUM_PSH2IA_IPC];
 	void			*channel_data[NUM_PSH2IA_IPC];
 } ipc_ctrl;
+
 
 /**
  * intel_ia2psh_command - send IA to PSH command
@@ -77,7 +121,6 @@ static struct ipc_controller_t {
  * @ch: psh channel
  * @timeout: timeout for polling busy bit, in us
  */
-#define PSH_CSR_WORKAROUND 1
 int intel_ia2psh_command(struct psh_msg *in, struct psh_msg *out,
 			 int ch, int timeout)
 {
@@ -101,19 +144,20 @@ int intel_ia2psh_command(struct psh_msg *in, struct psh_msg *out,
 
 	in->msg |= CHANNEL_BUSY;
 	/* Check if channel is ready for IA sending command */
-#if PSH_CSR_WORKAROUND
-	{
+
+	if (IS_A_STEP) {
+		/* PSH_CSR_WORKAROUND */
 		int tm = 10000;
 
 		/* wait either D0i0 got ack'ed by PSH, or scratchpad set */
 		usleep_range(1000, 2000);
-		while (readl(&PSH_REG(scratchpad)[0]) && --tm)
+		while (readl(PSH_REG_ADDR(scratchpad[0])) && --tm)
 			usleep_range(100, 101);
 		if (!tm)
 			PSH_ERR("psh wait for scratchpad timeout\n");
 
 		tm = 10000;
-		while ((readl(&PSH_REG(ia2psh)[ch].msg) & CHANNEL_BUSY)
+		while ((readl(PSH_REG_ADDR(ia2psh[ch].msg)) & CHANNEL_BUSY)
 				&& --tm)
 			usleep_range(100, 101);
 		if (!tm) {
@@ -121,22 +165,22 @@ int intel_ia2psh_command(struct psh_msg *in, struct psh_msg *out,
 			ret = -EBUSY;
 			goto end;
 		}
+	} else {
+		if (readl(PSH_REG_ADDR(ia2psh[ch].msg)) & CHANNEL_BUSY) {
+			ret = -EBUSY;
+			goto end;
+		}
 	}
-#else
-	if (readl(&PSH_REG(ia2psh)[ch].msg) & CHANNEL_BUSY) {
-		ret = -EBUSY;
-		goto end;
-	}
-#endif
-	writel(in->param, &PSH_REG(ia2psh)[ch].param);
-	writel(in->msg, &PSH_REG(ia2psh)[ch].msg);
+
+	writel(in->param, PSH_REG_ADDR(ia2psh[ch].param));
+	writel(in->msg, PSH_REG_ADDR(ia2psh[ch].msg));
 
 	/* Input timeout is zero, do not check channel status */
 	if (timeout == 0)
 		goto end;
 
 	/* Input timeout is nonzero, check channel status */
-	while (((status = readl(&PSH_REG(ia2psh)[ch].msg)) & CHANNEL_BUSY)
+	while (((status = readl(PSH_REG_ADDR(ia2psh[ch].msg))) & CHANNEL_BUSY)
 		&& timeout) {
 		usleep_range(100, 101);
 		timeout -= 100;
@@ -150,7 +194,7 @@ int intel_ia2psh_command(struct psh_msg *in, struct psh_msg *out,
 		if (out == NULL)
 			goto end;
 
-		out->param = readl(&PSH_REG(ia2psh)[ch].param);
+		out->param = readl(PSH_REG_ADDR(ia2psh[ch].param));
 		out->msg = status;
 	}
 
@@ -195,7 +239,7 @@ int intel_psh_ipc_bind(int ch, psh_channel_handle_t handle, void *data)
 	pm_runtime_get_sync(&ipc_ctrl.pdev->dev);
 	spin_lock_irqsave(&ipc_ctrl.lock, flags);
 	PSH_CH_FLAG(ch) |= FLAG_BIND;
-	writel(readl(&PIMR(1)) | (1 << (ch - PSH_RECV_CH0)), &PIMR(1));
+	writel(readl(PIMR_ADDR(1)) | (1 << (ch - PSH_RECV_CH0)), PIMR_ADDR(1));
 	spin_unlock_irqrestore(&ipc_ctrl.lock, flags);
 	pm_runtime_put(&ipc_ctrl.pdev->dev);
 	mutex_unlock(&ipc_ctrl.psh_mutex);
@@ -226,7 +270,8 @@ void intel_psh_ipc_unbind(int ch)
 	pm_runtime_get_sync(&ipc_ctrl.pdev->dev);
 	spin_lock_irqsave(&ipc_ctrl.lock, flags);
 	PSH_CH_FLAG(ch) &= ~FLAG_BIND;
-	writel(readl(&PIMR(1)) & (~(1 << (ch - PSH_RECV_CH0))), &PIMR(1));
+	writel(readl(PIMR_ADDR(1)) & (~(1 << (ch - PSH_RECV_CH0))),
+						PIMR_ADDR(1));
 	spin_unlock_irqrestore(&ipc_ctrl.lock, flags);
 	pm_runtime_put(&ipc_ctrl.pdev->dev);
 
@@ -240,12 +285,11 @@ EXPORT_SYMBOL(intel_psh_ipc_unbind);
 static void psh_recv_handle(int i)
 {
 	int msg, param;
-	unsigned long flags;
 
 	down(&ipc_ctrl.ch_lock[i + PSH_RECV_CH0]);
 
-	msg = readl(&PSH_REG(psh2ia)[i].msg) & (~CHANNEL_BUSY);
-	param = readl(&PSH_REG(psh2ia)[i].param);
+	msg = readl(PSH_REG_ADDR(psh2ia[i].msg)) & (~CHANNEL_BUSY);
+	param = readl(PSH_REG_ADDR(psh2ia[i].param));
 
 	if (PSH_CH_HANDLE(i) == NULL) {
 		PSH_ERR("Ignore message from channel %d\n", i+PSH_RECV_CH0);
@@ -253,7 +297,7 @@ static void psh_recv_handle(int i)
 	}
 
 	/* write back to clear the busy bit */
-	writel(msg, &PSH_REG(psh2ia)[i].msg);
+	writel(msg, PSH_REG_ADDR(psh2ia[i].msg));
 	PSH_CH_HANDLE(i)(msg, param, PSH_CH_DATA(i));
 end:
 	up(&ipc_ctrl.ch_lock[i+PSH_RECV_CH0]);
@@ -265,7 +309,7 @@ static irqreturn_t psh_ipc_irq(int irq, void *data)
 	u32 status;
 
 	pm_runtime_get_sync(&ipc_ctrl.pdev->dev);
-	status = readl(&PSH_REG(pisr));
+	status = readl(PSH_REG_ADDR(pisr));
 
 	for (i = 0; i < NUM_PSH2IA_IPC; i++) {
 		if (status & STATUS_PSH2IA(i))
@@ -283,36 +327,40 @@ static void psh_regs_dump(void)
 	pm_runtime_get_sync(&ipc_ctrl.pdev->dev);
 	PSH_ERR("\n<-------------start------------>\n");
 
-	PSH_ERR("csr:\t%#x\n", readl(&PSH_REG(csr)));
-	PSH_ERR("pisr:\t%#x\n", readl(&PSH_REG(pisr)));
+	PSH_ERR("csr:\t%#x\n", readl(PSH_REG_ADDR(csr)));
+	PSH_ERR("pisr:\t%#x\n", readl(PSH_REG_ADDR(pisr)));
 
-	for (i = 0; i < 4; i++)
-		PSH_ERR("pimr[%d]:\t%#x\n", i, readl(&PSH_REG(pimr)[i]));
+	PSH_ERR("pimr0:\t%#x\n", readl(PIMR_ADDR(0)));
+	PSH_ERR("pimr1:\t%#x\n", readl(PIMR_ADDR(1)));
+	PSH_ERR("pimr2:\t%#x\n", readl(PIMR_ADDR(2)));
+	PSH_ERR("pimr3:\t%#x\n", readl(PIMR_ADDR(3)));
 
-	PSH_ERR("pmctl:\t%#x\n", readl(&PSH_REG(pmctl)));
-	PSH_ERR("pmstat:\t%#x\n", readl(&PSH_REG(pmstat)));
+	PSH_ERR("pmctl:\t%#x\n", readl(PSH_REG_ADDR(pmctl)));
+	PSH_ERR("pmstat:\t%#x\n", readl(PSH_REG_ADDR(pmstat)));
+	PSH_ERR("scratchpad0:\t%#x\n", readl(PSH_REG_ADDR(scratchpad[0])));
+	PSH_ERR("scratchpad1:\t%#x\n", readl(PSH_REG_ADDR(scratchpad[1])));
 
 	for (i = 0; i < NUM_IA2PSH_IPC; i++) {
 		PSH_ERR("ia2psh[%d].msg:\t%#x\n", i,
-				readl(&PSH_REG(ia2psh)[i].msg));
+				readl(PSH_REG_ADDR(ia2psh[i].msg)));
 		PSH_ERR("ia2psh[%d].param:\t%#x\n", i,
-				readl(&PSH_REG(ia2psh)[i].param));
+				readl(PSH_REG_ADDR(ia2psh[i].param)));
 	}
 
-	PSH_ERR("cry2psh.msg:\t%#x\n", readl(&PSH_REG(cry2psh).msg));
-	PSH_ERR("cry2psh.param:\t%#x\n", readl(&PSH_REG(cry2psh).param));
-	PSH_ERR("scu2psh.msg:\t%#x\n", readl(&PSH_REG(scu2psh).msg));
-	PSH_ERR("scu2psh.param:\t%#x\n", readl(&PSH_REG(scu2psh).param));
+	PSH_ERR("cry2psh.msg:\t%#x\n", readl(PSH_REG_ADDR(cry2psh.msg)));
+	PSH_ERR("cry2psh.param:\t%#x\n", readl(PSH_REG_ADDR(cry2psh.param)));
+	PSH_ERR("scu2psh.msg:\t%#x\n", readl(PSH_REG_ADDR(scu2psh.msg)));
+	PSH_ERR("scu2psh.param:\t%#x\n", readl(PSH_REG_ADDR(scu2psh.param)));
 
 	for (i = 0; i < NUM_PSH2IA_IPC; i++) {
 		PSH_ERR("psh2ia[%d].msg:\t%#x\n", i,
-				readl(&PSH_REG(psh2ia)[i].msg));
+				readl(PSH_REG_ADDR(psh2ia[i].msg)));
 		PSH_ERR("psh2ia[%d].param:\t%#x\n", i,
-				readl(&PSH_REG(psh2ia)[i].param));
+				readl(PSH_REG_ADDR(psh2ia[i].param)));
 	}
 
-	PSH_ERR("psh2cry.msg:\t%#x\n", readl(&PSH_REG(psh2cry).msg));
-	PSH_ERR("psh2cry.param:\t%#x\n", readl(&PSH_REG(psh2cry).param));
+	PSH_ERR("psh2cry.msg:\t%#x\n", readl(PSH_REG_ADDR(psh2cry.msg)));
+	PSH_ERR("psh2cry.param:\t%#x\n", readl(PSH_REG_ADDR(psh2cry.param)));
 
 	PSH_ERR("\n<-------------end------------>\n");
 	pm_runtime_put(&ipc_ctrl.pdev->dev);
@@ -499,8 +547,15 @@ static int psh_ipc_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (ret)
 		goto err1;
 
-	ipc_ctrl.ipc_regs = (struct ipc_registers *)ioremap_nocache(start, len);
-	if (!ipc_ctrl.ipc_regs) {
+	ipc_ctrl.stepping = intel_mid_soc_stepping();
+
+	if (ipc_ctrl.stepping != 0x0 && ipc_ctrl.stepping != 0x1) {
+		ret = -EINVAL;
+		goto err1;
+	}
+
+	ipc_ctrl.psh_regs = (union psh_registers *)ioremap_nocache(start, len);
+	if (!ipc_ctrl.psh_regs) {
 		ret = -ENOMEM;
 		goto err2;
 	}
@@ -528,10 +583,11 @@ static int psh_ipc_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	pm_runtime_put_noidle(&pdev->dev);
 	pm_runtime_allow(&pdev->dev);
+
 	return 0;
 
 err3:
-	iounmap(ipc_ctrl.ipc_regs);
+	iounmap(ipc_ctrl.psh_regs);
 err2:
 	pci_release_regions(pdev);
 err1:
@@ -545,7 +601,7 @@ static void psh_ipc_remove(struct pci_dev *pdev)
 	pm_runtime_forbid(&pdev->dev);
 	pm_runtime_get_noresume(&pdev->dev);
 	free_irq(pdev->irq, NULL);
-	iounmap(ipc_ctrl.ipc_regs);
+	iounmap(ipc_ctrl.psh_regs);
 	pci_release_regions(pdev);
 	pci_dev_put(pdev);
 	intel_psh_devices_destroy();

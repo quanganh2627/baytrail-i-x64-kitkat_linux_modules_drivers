@@ -645,8 +645,11 @@ int bq24192_get_charger_health(void)
 int bq24192_get_battery_health(void)
 {
 	int ret, temp, count;
-	struct bq24192_chip *chip =
-		i2c_get_clientdata(bq24192_client);
+	struct bq24192_chip *chip;
+	if (!bq24192_client)
+		return POWER_SUPPLY_HEALTH_UNKNOWN;
+
+	chip = i2c_get_clientdata(bq24192_client);
 
 	dev_info(&chip->client->dev, "+%s\n", __func__);
 
