@@ -13,7 +13,6 @@ obj-y                           += platform/x86/
 obj-$(CONFIG_POWER_SUPPLY)	+= power/
 obj-$(CONFIG_REGULATOR)         += regulator/
 obj-$(CONFIG_STAGING)		+= staging/
-obj-$(CONFIG_SWITCH)		+= switch/
 obj-y               		+= hsu/
 obj-y               		+= mfd/
 obj-y				+= net/wireless/
