@@ -51,10 +51,15 @@
 #endif
 
 #define APP_IMR_SIZE (1024 * 126)
+#define STATIC_IMR_ADDR 0x04819000
 
 struct psh_plt_priv {
-	struct page *imr;	/* hack as imr before Chabbi ready */
+	int stepping;
 	struct device *hwmon_dev;
+	struct page *page_imr;	/* hack as imr before Chabbi ready */
+	void __iomem *io_imr;
+	void *imr;
+	u32 imr_phy;
 };
 
 int process_send_cmd(struct psh_ia_priv *psh_ia_data,
@@ -105,7 +110,7 @@ int do_setup_ddr(struct device *dev)
 	struct psh_plt_priv *plt_priv =
 			(struct psh_plt_priv *)ia_data->platform_priv;
 	u32 ddr_phy = page_to_phys(ia_data->pg);
-	u32 imr_phy = page_to_phys(plt_priv->imr);
+	u32 imr_phy = plt_priv->imr_phy;
 	const struct firmware *fw_entry;
 	struct ia_cmd cmd_user = {
 		.cmd_id = CMD_SETUP_DDR,
@@ -129,7 +134,7 @@ int do_setup_ddr(struct device *dev)
 				.sensor_id = 0,
 				};
 
-			memcpy(page_address(plt_priv->imr), fw_entry->data,
+			memcpy(plt_priv->imr, fw_entry->data,
 				fw_entry->size);
 			*(u32 *)(&cmd.param) = imr_phy;
 			cmd.tran_id = 0x1;
@@ -178,11 +183,32 @@ static int psh_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto plt_err;
 	}
 
-	plt_priv->imr = alloc_pages(GFP_KERNEL | GFP_DMA32 | __GFP_ZERO,
-			get_order(APP_IMR_SIZE));
-	if (!plt_priv->imr) {
-		dev_err(&pdev->dev, "can not allocate app imr buffer\n");
-		goto imr_err;
+	plt_priv->stepping = intel_mid_soc_stepping();
+
+	if (plt_priv->stepping == 0) {
+		/* A stepping */
+		plt_priv->page_imr = alloc_pages(GFP_KERNEL | GFP_DMA32 | __GFP_ZERO,
+				get_order(APP_IMR_SIZE));
+		if (!plt_priv->page_imr) {
+			dev_err(&pdev->dev, "can not allocate app page imr buffer\n");
+			goto imr_err;
+		}
+		plt_priv->imr_phy = page_to_phys(plt_priv->page_imr);
+		plt_priv->imr = page_address(plt_priv->page_imr);
+		plt_priv->io_imr = NULL;
+	} else if (plt_priv->stepping == 1) {
+		/* B stepping */
+		plt_priv->io_imr = ioremap(STATIC_IMR_ADDR, APP_IMR_SIZE);
+		if (!plt_priv->io_imr) {
+			dev_err(&pdev->dev, "can not ioremap app imr address\n");
+			goto imr_err;
+		}
+		plt_priv->imr_phy = STATIC_IMR_ADDR;
+		plt_priv->imr = (void *)plt_priv->io_imr;
+		plt_priv->page_imr = NULL;
+	} else {
+		dev_err(&pdev->dev, "Invalid chip stepping\n");
+		goto plt_err;
 	}
 
 	ret = psh_ia_common_init(&pdev->dev, &ia_data);
@@ -215,7 +241,11 @@ irq_err:
 hwmon_err:
 	psh_ia_common_deinit(&pdev->dev);
 psh_ia_err:
-	__free_pages(plt_priv->imr, get_order(APP_IMR_SIZE));
+	if (plt_priv->page_imr)
+		__free_pages(plt_priv->page_imr, get_order(APP_IMR_SIZE));
+
+	if (plt_priv->io_imr)
+		iounmap(plt_priv->io_imr);
 imr_err:
 	kfree(plt_priv);
 plt_err:
@@ -231,7 +261,11 @@ static void psh_remove(struct pci_dev *pdev)
 	struct psh_plt_priv *plt_priv =
 			(struct psh_plt_priv *)ia_data->platform_priv;
 
-	__free_pages(plt_priv->imr, get_order(APP_IMR_SIZE));
+	if (plt_priv->page_imr)
+		__free_pages(plt_priv->page_imr, get_order(APP_IMR_SIZE));
+
+	if (plt_priv->io_imr)
+		iounmap(plt_priv->io_imr);
 
 	intel_psh_ipc_unbind(PSH_RECV_CH0);
 
