@@ -141,10 +141,10 @@ static ssize_t clean_osnib_store(struct kobject *kobj,
 }
 
 static struct kobj_attribute fw_update_attribute =
-		__ATTR(fw_update, 0666, fw_update_show, fw_update_store);
+		__ATTR(fw_update, (S_IWUSR|S_IRUGO), fw_update_show, fw_update_store);
 
 static struct kobj_attribute clean_osnib_attribute =
-		__ATTR(clean_osnib, 0200, NULL, clean_osnib_store);
+		__ATTR(clean_osnib, S_IWUSR, NULL, clean_osnib_store);
 
 static struct attribute *attrs[] = {
 	&fw_update_attribute.attr,
