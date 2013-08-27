@@ -825,10 +825,8 @@ static void dlp_tty_close(struct tty_struct *tty, struct file *filp)
 	}
 
 	/* Set TTY as closed to prevent RX/TX transactions */
-	if (need_cleanup) {
+	if (need_cleanup)
 		dlp_tty_set_link_valid(1, dlp_drv.tx_timeout);
-		tty->flow_stopped = 1 ;
-	}
 
 	if (filp && ch_ctx) {
 		struct dlp_tty_context *tty_ctx = ch_ctx->ch_data;
