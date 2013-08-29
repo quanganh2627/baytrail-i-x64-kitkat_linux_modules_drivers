@@ -161,7 +161,6 @@ static void vibra_disable(struct vibra_info *info)
 {
 	pr_debug("Disable gpio\n");
 	mutex_lock(&info->lock);
-	gpio_set_value(info->gpio_pwm, 0);
 	gpio_set_value(info->gpio_en, 0);
 	lnw_gpio_set_alt(info->gpio_pwm, 0);
 	info->enabled = false;
@@ -269,7 +268,6 @@ static int vibra_init_ext_drv(struct vibra_info *info)
 #define DRV_GO_BIT	0x01
 
 	/*enable gpio first */
-	gpio_set_value(info->gpio_pwm, 1);
 	gpio_set_value(info->gpio_en, 1);
 	/* wait for gpio to settle and drv to accept i2c*/
 	msleep(1);
@@ -287,7 +285,6 @@ static int vibra_init_ext_drv(struct vibra_info *info)
 	msleep(1000);
 	/* set the driver in pwm mode */
 	vibra_driver_write(DRV_MODE, DRV_PWM);
-	gpio_set_value(info->gpio_pwm, 0);
 	gpio_set_value(info->gpio_en, 0);
 	return 0;
 }
@@ -334,17 +331,11 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 		goto out;
 	}
 
-	ret = gpio_request_one(info->gpio_pwm, GPIOF_DIR_OUT, "PWM ENABLE");
-	if (ret != 0) {
-		pr_err("gpio_request(%d) fails:%d\n", info->gpio_pwm, ret);
-		goto do_freegpio_vibra_enable;
-	}
-
 	/* Init the device */
 	ret = pci_enable_device(pci);
 	if (ret) {
 		pr_err("device can't be enabled\n");
-		goto do_freegpio_pwm;
+		goto do_freegpio_vibra_enable;
 	}
 	ret = pci_request_regions(pci, INTEL_VIBRA_DRV_NAME);
 
@@ -385,8 +376,6 @@ do_release_regions:
 	pci_release_regions(pci);
 do_disable_device:
 	pci_disable_device(pci);
-do_freegpio_pwm:
-	gpio_free(info->gpio_pwm);
 do_freegpio_vibra_enable:
 	gpio_free(info->gpio_en);
 out:
@@ -396,7 +385,6 @@ out:
 static void intel_mid_vibra_remove(struct pci_dev *pci)
 {
 	struct vibra_info *info = pci_get_drvdata(pci);
-	gpio_free(info->gpio_pwm);
 	gpio_free(info->gpio_en);
 	sysfs_remove_group(&info->dev->kobj, &vibra_attr_group);
 	iounmap(info->shim);
