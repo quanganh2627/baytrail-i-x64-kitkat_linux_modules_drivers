@@ -26,9 +26,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/module.h>
-#include <linux/jiffies.h>
 #include <linux/platform_device.h>
-#include <linux/workqueue.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
@@ -36,7 +34,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/lnw_gpio.h>
 #include <linux/input/intel_mid_vibra.h>
-#include <asm/intel-mid.h>
 
 union sst_pwmctrl_reg {
 	struct {
@@ -210,7 +207,7 @@ static DEVICE_ATTR(vibrator, S_IRUGO | S_IWUSR,
 static DEVICE_ULONG_ATTR(pwm_baseunit, S_IRUGO | S_IWUSR, mid_vibra_base_unit);
 static DEVICE_ULONG_ATTR(pwm_ontime_div, S_IRUGO | S_IWUSR, mid_vibra_duty_cycle);
 
-static const struct attribute *vibra_attrs[] = {
+static struct attribute *vibra_attrs[] = {
 	&dev_attr_vibrator.attr,
 	&dev_attr_pwm_baseunit.attr.attr,
 	&dev_attr_pwm_ontime_div.attr.attr,
@@ -338,7 +335,6 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 		goto do_freegpio_vibra_enable;
 	}
 	ret = pci_request_regions(pci, INTEL_VIBRA_DRV_NAME);
-
 	if (ret)
 		goto do_disable_device;
 	info->pci = pci_dev_get(pci);
@@ -349,7 +345,7 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 		pr_err("ioremap failed for vibra driver\n");
 		goto do_release_regions;
 	}
-	pr_debug("Base reg: %x", pci_resource_start(pci, 0));
+	pr_debug("Base reg: %#x", (unsigned int) pci_resource_start(pci, 0));
 
 	info->dev = &pci->dev;
 	info->name = "intel_mid:vibrator";
