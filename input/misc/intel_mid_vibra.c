@@ -34,6 +34,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/lnw_gpio.h>
 #include <linux/input/intel_mid_vibra.h>
+#include "mid_vibra.h"
 
 union sst_pwmctrl_reg {
 	struct {
@@ -43,26 +44,6 @@ union sst_pwmctrl_reg {
 		u32 pwmenable:1;
 	} part;
 	u32 full;
-};
-
-struct vibra_info {
-	int     enabled;
-	struct mutex	lock;
-	struct device	*dev;
-	void __iomem	*shim;
-	const char	*name;
-	unsigned long *base_unit;
-	unsigned long *duty_cycle;
-	u8  max_base_unit;
-	u8  max_duty_cycle;
-	int gpio_en;
-	int gpio_pwm;
-	int alt_fn;
-	int ext_drv;
-
-	void (*enable)(struct vibra_info *info);
-	void (*disable)(struct vibra_info *info);
-	int (*pwm_configure)(struct vibra_info *info, bool enable);
 };
 
 #define VIBRA_DRV_BUS 0x2
