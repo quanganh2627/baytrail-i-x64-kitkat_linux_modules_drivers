@@ -55,7 +55,10 @@ struct vibra_info {
 	void __iomem	*shim;
 	const char	*name;
 	struct pci_dev	*pci;
-	union sst_pwmctrl_reg   pwm;
+	unsigned long *base_unit;
+	unsigned long *duty_cycle;
+	u8  max_base_unit;
+	u8  max_duty_cycle;
 	int gpio_en;
 	int gpio_pwm;
 	int alt_fn;
@@ -115,8 +118,14 @@ static int vibra_pwm_configure(struct vibra_info *info, unsigned int enable)
 			return -EBUSY;
 		/*Base unit == 1*/
 		pwmctrl.part.pwmswupdate = 0x1;
-		pwmctrl.part.pwmbu = info->pwm.part.pwmbu;
-		pwmctrl.part.pwmtd = info->pwm.part.pwmtd;
+
+		/* validate values input */
+		if (*info->base_unit > info->max_base_unit)
+			*info->base_unit = info->max_base_unit;
+		if (*info->duty_cycle > info->max_duty_cycle)
+			*info->duty_cycle = info->max_duty_cycle;
+		pwmctrl.part.pwmbu = *info->base_unit;
+		pwmctrl.part.pwmtd = *info->duty_cycle;
 		writel(pwmctrl.full,  info->shim);
 		pr_debug("Read pwmctrl %x\n", pwmctrl.full);
 	} else { /*disable PWM block */
@@ -194,74 +203,18 @@ static ssize_t vibra_set_vibrator(struct device *dev,
 	return len;
 }
 
-static ssize_t vibra_set_pwm_baseunit(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t len)
-{
-	unsigned long  pwm_base;
-	struct vibra_info *info = dev_get_drvdata(dev);
-
-	if (kstrtoul(buf, 0, &pwm_base))
-		return -EINVAL;
-
-	pr_debug("PWM value 0x%lx\n", pwm_base);
-	pwm_base = abs(pwm_base);
-
-	if (pwm_base < 0 || pwm_base > INTEL_VIBRA_MAX_BASEUNIT) {
-		pr_err("Supported value is out of Range\n");
-		return -EINVAL;
-	}
-	pr_debug("PWM value 0x%lx\n", pwm_base);
-	info->pwm.part.pwmbu = pwm_base;
-	return len;
-}
-
-static ssize_t vibra_show_pwm_baseunit(struct device *dev,
-	 struct device_attribute *attr, char *buf)
-{
-	struct vibra_info *info = dev_get_drvdata(dev);
-
-	return sprintf(buf, "0x%X\n", info->pwm.part.pwmbu);
-}
-
-static ssize_t vibra_set_pwm_ontime_div(struct device *dev,
-	 struct device_attribute *attr, const char *buf, size_t len)
-{
-	unsigned long  pwm_td;
-	struct vibra_info *info = dev_get_drvdata(dev);
-
-	if (kstrtoul(buf, 0, &pwm_td))
-		return -EINVAL;
-	pr_debug("PWM value 0x%lx\n", pwm_td);
-	pwm_td = abs(pwm_td);
-	if (pwm_td > INTEL_VIBRA_MAX_TIMEDIVISOR || pwm_td < 0) {
-		pr_err("Supported value is out of Range\n");
-		return -EINVAL;
-	}
-
-	info->pwm.part.pwmtd = pwm_td;
-
-	return len;
-}
-
-static ssize_t vibra_show_pwm_ontime_div(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct vibra_info *info = dev_get_drvdata(dev);
-
-	return sprintf(buf, "0x%X\n", info->pwm.part.pwmtd);
-}
+unsigned long mid_vibra_base_unit;
+unsigned long mid_vibra_duty_cycle;
 
 static DEVICE_ATTR(vibrator, S_IRUGO | S_IWUSR,
 		   vibra_show_vibrator, vibra_set_vibrator);
-static DEVICE_ATTR(pwm_baseunit, S_IRUGO | S_IWUSR,
-		   vibra_show_pwm_baseunit, vibra_set_pwm_baseunit);
-static DEVICE_ATTR(pwm_ontime_div, S_IRUGO | S_IWUSR,
-	           vibra_show_pwm_ontime_div, vibra_set_pwm_ontime_div);
+static DEVICE_ULONG_ATTR(pwm_baseunit, S_IRUGO | S_IWUSR, mid_vibra_base_unit);
+static DEVICE_ULONG_ATTR(pwm_ontime_div, S_IRUGO | S_IWUSR, mid_vibra_duty_cycle);
 
 static const struct attribute *vibra_attrs[] = {
 	&dev_attr_vibrator.attr,
-	&dev_attr_pwm_baseunit.attr,
-	&dev_attr_pwm_ontime_div.attr,
+	&dev_attr_pwm_baseunit.attr.attr,
+	&dev_attr_pwm_ontime_div.attr.attr,
 	0,
 };
 
@@ -350,7 +303,6 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	pr_debug("Probe for DID %x\n", pci->device);
 
 	data = pci->dev.platform_data;
-
 	if (!data) {
 		dev_err(&pci->dev, "Failed to get vibrator platform data\n");
 		return -ENODEV;
@@ -366,6 +318,14 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	info->ext_drv = data->ext_drv;
 	info->gpio_en = data->gpio_en;
 	info->gpio_pwm = data->gpio_pwm;
+
+	mid_vibra_base_unit = data->base_unit;
+	mid_vibra_duty_cycle = data->time_divisor;
+	info->base_unit = &mid_vibra_base_unit;
+	info->duty_cycle = &mid_vibra_duty_cycle;
+
+	info->max_base_unit = INTEL_VIBRA_MAX_BASEUNIT;
+	info->max_duty_cycle = INTEL_VIBRA_MAX_TIMEDIVISOR;
 
 	pr_debug("using gpios en: %d, pwm %d", info->gpio_en, info->gpio_pwm);
 	ret = gpio_request_one(info->gpio_en, GPIOF_DIR_OUT, "VIBRA ENABLE");
@@ -399,10 +359,6 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 		goto do_release_regions;
 	}
 	pr_debug("Base reg: %x", pci_resource_start(pci, 0));
-
-	/*set default value to driver data */
-	info->pwm.part.pwmbu = data->base_unit;
-	info->pwm.part.pwmtd = data->time_divisor;
 
 	info->dev = &pci->dev;
 	info->name = "intel_mid:vibrator";
