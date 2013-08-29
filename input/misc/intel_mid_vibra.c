@@ -59,6 +59,10 @@ struct vibra_info {
 	int gpio_pwm;
 	int alt_fn;
 	int ext_drv;
+
+	void (*enable)(struct vibra_info *info);
+	void (*disable)(struct vibra_info *info);
+	int (*pwm_configure)(struct vibra_info *info, bool enable);
 };
 
 #define VIBRA_DRV_BUS 0x2
@@ -92,11 +96,13 @@ static int vibra_driver_write(u8 reg, u8 value)
 	return ret;
 }
 
-static int vibra_pwm_configure(struct vibra_info *info, unsigned int enable)
+static int vibra_soc_pwm_configure(struct vibra_info *info, bool enable)
 {
 	union sst_pwmctrl_reg pwmctrl;
 
 	if (enable) {
+		lnw_gpio_set_alt(info->gpio_pwm, info->alt_fn);
+
 		/*1. Enable the PWM by setting PWM enable bit to 1 */
 		pwmctrl.full = readl(info->shim);
 		pr_debug("Vibra:Read pwmctrl %x\n", readl(info->shim));
@@ -125,6 +131,8 @@ static int vibra_pwm_configure(struct vibra_info *info, unsigned int enable)
 		writel(pwmctrl.full,  info->shim);
 		pr_debug("Read pwmctrl %x\n", pwmctrl.full);
 	} else { /*disable PWM block */
+		lnw_gpio_set_alt(info->gpio_pwm, 0);
+
 		   /*1. setting PWM enable bit to 0 */
 		pwmctrl.full = readl(info->shim);
 		pwmctrl.part.pwmenable = 0;
@@ -132,10 +140,11 @@ static int vibra_pwm_configure(struct vibra_info *info, unsigned int enable)
 	}
 	return 0;
 }
-/* Enable's vibra driver */
-static void vibra_enable(struct vibra_info *info)
+
+/* Enable vibra */
+static void vibra_drv2605_enable(struct vibra_info *info)
 {
-	pr_debug("Enable gpio\n");
+	pr_debug("%s: Enable", __func__);
 	mutex_lock(&info->lock);
 	pm_runtime_get_sync(info->dev);
 
@@ -146,8 +155,7 @@ static void vibra_enable(struct vibra_info *info)
 	usleep_range(950, 1000);
 
 	/* Enable the Trigger line */
-	lnw_gpio_set_alt(info->gpio_pwm, info->alt_fn);
-	vibra_pwm_configure(info, true);
+	info->pwm_configure(info, true);
 
 	info->enabled = true;
 	mutex_unlock(&info->lock);
@@ -155,16 +163,25 @@ static void vibra_enable(struct vibra_info *info)
 
 static void vibra_disable(struct vibra_info *info)
 {
-	pr_debug("Disable gpio\n");
+	pr_debug("%s: Disable", __func__);
 	mutex_lock(&info->lock);
-	gpio_set_value(info->gpio_en, 0);
-	lnw_gpio_set_alt(info->gpio_pwm, 0);
+	gpio_set_value_cansleep(info->gpio_en, 0);
 	info->enabled = false;
-	vibra_pwm_configure(info, false);
+	info->pwm_configure(info, false);
 	pm_runtime_put(info->dev);
 	mutex_unlock(&info->lock);
 }
 
+static void vibra_drv8601_enable(struct vibra_info *info)
+{
+	pr_debug("%s: Enable", __func__);
+	mutex_lock(&info->lock);
+	pm_runtime_get_sync(info->dev);
+	info->pwm_configure(info, true);
+	gpio_set_value_cansleep(info->gpio_en, 1);
+	info->enabled = true;
+	mutex_unlock(&info->lock);
+}
 
 /*******************************************************************************
  * SYSFS                                                                       *
@@ -190,9 +207,9 @@ static ssize_t vibra_set_vibrator(struct device *dev,
 	if (vibrator_enable == info->enabled)
 		return len;
 	else if (vibrator_enable == 0)
-		vibra_disable(info);
+		info->disable(info);
 	else if (vibrator_enable == 1)
-		vibra_enable(info);
+		info->enable(info);
 	else
 		return -EINVAL;
 	return len;
@@ -224,7 +241,7 @@ static int intel_vibra_runtime_suspend(struct device *dev)
 	struct vibra_info *info = dev_get_drvdata(dev);
 
 	pr_debug("In %s\n", __func__);
-	vibra_pwm_configure(info, false);
+	info->pwm_configure(info, false);
 	return 0;
 }
 
@@ -233,7 +250,7 @@ static int intel_vibra_runtime_resume(struct device *dev)
 	struct vibra_info *info = dev_get_drvdata(dev);
 
 	pr_debug("In %s\n", __func__);
-	vibra_pwm_configure(info, true);
+	info->pwm_configure(info, true);
 	return 0;
 }
 
@@ -311,11 +328,24 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	info->ext_drv = data->ext_drv;
 	info->gpio_en = data->gpio_en;
 	info->gpio_pwm = data->gpio_pwm;
+	info->name = data->name;
 
 	mid_vibra_base_unit = data->base_unit;
 	mid_vibra_duty_cycle = data->time_divisor;
 	info->base_unit = &mid_vibra_base_unit;
 	info->duty_cycle = &mid_vibra_duty_cycle;
+
+	/* ops */
+	if (!strncmp(info->name, "drv8601", 8)) {
+		info->enable = vibra_drv8601_enable;
+	} else if (!strncmp(info->name, "drv2605", 8)) {
+		info->enable = vibra_drv2605_enable;
+	} else {
+		pr_err("%s: unsupported vibrator device", __func__);
+		return -EINVAL;
+	}
+	info->disable = vibra_disable;
+	info->pwm_configure = vibra_soc_pwm_configure;
 
 	info->max_base_unit = INTEL_VIBRA_MAX_BASEUNIT;
 	info->max_duty_cycle = INTEL_VIBRA_MAX_TIMEDIVISOR;
@@ -347,7 +377,6 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	pr_debug("Base reg: %#x", (unsigned int) pci_resource_start(pci, 0));
 
 	info->dev = &pci->dev;
-	info->name = "intel_mid:vibrator";
 	mutex_init(&info->lock);
 
 	ret = sysfs_create_group(&dev->kobj, &vibra_attr_group);
@@ -355,7 +384,6 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 		pr_err("could not register sysfs files\n");
 		goto do_unmap_shim;
 	}
-	vibra_pwm_configure(info, true);
 
 	if (info->ext_drv)
 		vibra_init_ext_drv(info);
