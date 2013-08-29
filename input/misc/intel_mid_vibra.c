@@ -31,6 +31,7 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/i2c.h>
+#include <linux/acpi.h>
 #include <linux/pm_runtime.h>
 #include <linux/lnw_gpio.h>
 #include <linux/input/intel_mid_vibra.h>
@@ -114,7 +115,7 @@ static int vibra_soc_pwm_configure(struct vibra_info *info, bool enable)
 	} else { /*disable PWM block */
 		lnw_gpio_set_alt(info->gpio_pwm, 0);
 
-		   /*1. setting PWM enable bit to 0 */
+		/*1. setting PWM enable bit to 0 */
 		pwmctrl.full = readl(info->shim);
 		pwmctrl.part.pwmenable = 0;
 		writel(pwmctrl.full,  info->shim);
@@ -304,6 +305,7 @@ struct vibra_info *mid_vibra_setup(struct device *dev, struct mid_vibra_pdata *d
 
 	info->dev = dev;
 	mutex_init(&info->lock);
+	info->vibra_attr_group = &vibra_attr_group;
 
 	mid_vibra_base_unit = data->base_unit;
 	mid_vibra_duty_cycle = data->time_divisor;
@@ -375,7 +377,7 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	}
 	pr_debug("Base reg: %#x", (unsigned int) pci_resource_start(pci, 0));
 
-	ret = sysfs_create_group(&dev->kobj, &vibra_attr_group);
+	ret = sysfs_create_group(&dev->kobj, info->vibra_attr_group);
 	if (ret) {
 		pr_err("could not register sysfs files\n");
 		goto do_unmap_shim;
@@ -405,7 +407,7 @@ static void intel_mid_vibra_remove(struct pci_dev *pci)
 {
 	struct vibra_info *info = pci_get_drvdata(pci);
 	gpio_free(info->gpio_en);
-	sysfs_remove_group(&info->dev->kobj, &vibra_attr_group);
+	sysfs_remove_group(&info->dev->kobj, info->vibra_attr_group);
 	iounmap(info->shim);
 	pci_release_regions(pci);
 	pci_disable_device(pci);
@@ -432,11 +434,42 @@ static struct pci_driver vibra_driver = {
 #endif
 };
 
+static const struct acpi_device_id vibra_acpi_ids[];
+
+void *mid_vibra_acpi_get_drvdata(const char *hid)
+{
+	const struct acpi_device_id *id;
+
+	for (id = vibra_acpi_ids; id->id[0]; id++)
+		if (!strncmp(id->id, hid, 16))
+			return (void *)id->driver_data;
+	return 0;
+}
+
+static const struct acpi_device_id vibra_acpi_ids[] = {
+	{ "VIB8601", (kernel_ulong_t) &pmic_vibra_data_byt_ffrd8 },
+	{},
+};
+MODULE_DEVICE_TABLE(acpi, vibra_acpi_ids);
+
+static struct platform_driver plat_vibra_driver = {
+	.driver = {
+		.name = "intel_mid_pmic_vibra",
+		.owner = THIS_MODULE,
+		.acpi_match_table = ACPI_PTR(vibra_acpi_ids),
+#ifdef CONFIG_PM
+		.pm = &intel_mid_vibra_pm_ops,
+#endif
+	},
+	.probe = intel_mid_plat_vibra_probe,
+	.remove = intel_mid_plat_vibra_remove,
+};
+
 /**
 * intel_mid_vibra_init - Module init function
 *
 * Registers with PCI
-* Registers with /dev
+* Registers platform
 * Init all data strutures
 */
 static int __init intel_mid_vibra_init(void)
@@ -447,6 +480,11 @@ static int __init intel_mid_vibra_init(void)
 	ret = pci_register_driver(&vibra_driver);
 	if (ret)
 		pr_err("PCI register failed\n");
+
+	ret = platform_driver_register(&plat_vibra_driver);
+	if (ret)
+		pr_err("Platform register failed\n");
+
 	return ret;
 }
 
@@ -454,12 +492,13 @@ static int __init intel_mid_vibra_init(void)
 * intel_mid_vibra_exit - Module exit function
 *
 * Unregisters with PCI
-* Unregisters with /dev
+* Unregisters platform
 * Frees all data strutures
 */
 static void __exit intel_mid_vibra_exit(void)
 {
 	pci_unregister_driver(&vibra_driver);
+	platform_driver_unregister(&plat_vibra_driver);
 	pr_debug("intel_mid_vibra driver exited\n");
 	return;
 }

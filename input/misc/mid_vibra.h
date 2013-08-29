@@ -42,7 +42,14 @@ struct vibra_info {
 	void (*enable)(struct vibra_info *info);
 	void (*disable)(struct vibra_info *info);
 	int (*pwm_configure)(struct vibra_info *info, bool enable);
+
+	const struct attribute_group *vibra_attr_group;
 };
 
 struct vibra_info *mid_vibra_setup(struct device *dev, struct mid_vibra_pdata *data);
+void *mid_vibra_acpi_get_drvdata(const char *hid);
+int intel_mid_plat_vibra_probe(struct platform_device *pdev);
+int intel_mid_plat_vibra_remove(struct platform_device *pdev);
+
+extern struct mid_vibra_pdata pmic_vibra_data_byt_ffrd8;
 #endif /* __MID_VIBRA_H */
