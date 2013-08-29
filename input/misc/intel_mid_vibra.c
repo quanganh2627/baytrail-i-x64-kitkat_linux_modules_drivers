@@ -51,7 +51,6 @@ struct vibra_info {
 	struct device	*dev;
 	void __iomem	*shim;
 	const char	*name;
-	struct pci_dev	*pci;
 	unsigned long *base_unit;
 	unsigned long *duty_cycle;
 	u8  max_base_unit;
@@ -138,7 +137,7 @@ static void vibra_enable(struct vibra_info *info)
 {
 	pr_debug("Enable gpio\n");
 	mutex_lock(&info->lock);
-	pm_runtime_get_sync(&info->pci->dev);
+	pm_runtime_get_sync(info->dev);
 
 	/* Enable the EN line */
 	gpio_set_value(info->gpio_en, 1);
@@ -162,7 +161,7 @@ static void vibra_disable(struct vibra_info *info)
 	lnw_gpio_set_alt(info->gpio_pwm, 0);
 	info->enabled = false;
 	vibra_pwm_configure(info, false);
-	pm_runtime_put(&info->pci->dev);
+	pm_runtime_put(info->dev);
 	mutex_unlock(&info->lock);
 }
 
@@ -337,7 +336,7 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	ret = pci_request_regions(pci, INTEL_VIBRA_DRV_NAME);
 	if (ret)
 		goto do_disable_device;
-	info->pci = pci_dev_get(pci);
+	pci_dev_get(pci);
 
 	/* vibra Shim */
 	info->shim =  pci_ioremap_bar(pci, 0);
