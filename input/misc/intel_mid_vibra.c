@@ -302,33 +302,27 @@ static int vibra_init_ext_drv(struct vibra_info *info)
 	return 0;
 }
 
-static int intel_mid_vibra_probe(struct pci_dev *pci,
-			const struct pci_device_id *pci_id)
+struct vibra_info *mid_vibra_setup(struct device *dev, struct mid_vibra_pdata *data)
 {
 	struct vibra_info *info;
-	struct device *dev = &pci->dev;
-	struct mid_vibra_pdata *data;
-	int ret = 0;
 
-	pr_debug("Probe for DID %x\n", pci->device);
+	pr_debug("probe data divisor %x, base %x, alt_fn %d ext_drv %d, name: %s",
+		data->time_divisor, data->base_unit, data->alt_fn, data->ext_drv, data->name);
 
-	data = pci->dev.platform_data;
-	if (!data) {
-		dev_err(&pci->dev, "Failed to get vibrator platform data\n");
-		return -ENODEV;
+	info =  devm_kzalloc(dev, sizeof(*info), GFP_KERNEL);
+	if (!info) {
+		pr_err("%s: no memory for driver context", __func__);
+		return NULL;
 	}
-	pr_debug("probe data divisor %x, base %x, alt_fn %d ext_drv %d",
-			data->time_divisor, data->base_unit, data->alt_fn, data->ext_drv);
-
-	info =  devm_kzalloc(&pci->dev, sizeof(*info), GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
 
 	info->alt_fn = data->alt_fn;
 	info->ext_drv = data->ext_drv;
 	info->gpio_en = data->gpio_en;
 	info->gpio_pwm = data->gpio_pwm;
 	info->name = data->name;
+
+	info->dev = dev;
+	mutex_init(&info->lock);
 
 	mid_vibra_base_unit = data->base_unit;
 	mid_vibra_duty_cycle = data->time_divisor;
@@ -342,9 +336,33 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 		info->enable = vibra_drv2605_enable;
 	} else {
 		pr_err("%s: unsupported vibrator device", __func__);
-		return -EINVAL;
+		return NULL;
 	}
 	info->disable = vibra_disable;
+
+	return info;
+}
+
+static int intel_mid_vibra_probe(struct pci_dev *pci,
+			const struct pci_device_id *pci_id)
+{
+	struct vibra_info *info;
+	struct device *dev = &pci->dev;
+	struct mid_vibra_pdata *data;
+	int ret;
+
+	pr_debug("Probe for DID %x\n", pci->device);
+
+	data = pci->dev.platform_data;
+	if (!data) {
+		dev_err(&pci->dev, "Failed to get vibrator platform data\n");
+		return -ENODEV;
+	}
+
+	info = mid_vibra_setup(dev, data);
+	if (!info)
+		return -ENODEV;
+
 	info->pwm_configure = vibra_soc_pwm_configure;
 
 	info->max_base_unit = INTEL_VIBRA_MAX_BASEUNIT;
@@ -375,9 +393,6 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 		goto do_release_regions;
 	}
 	pr_debug("Base reg: %#x", (unsigned int) pci_resource_start(pci, 0));
-
-	info->dev = &pci->dev;
-	mutex_init(&info->lock);
 
 	ret = sysfs_create_group(&dev->kobj, &vibra_attr_group);
 	if (ret) {
