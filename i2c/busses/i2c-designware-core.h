@@ -72,6 +72,10 @@
 #define DW_IC_CON_RESTART_EN		0x20
 #define DW_IC_CON_SLAVE_DISABLE		0x40
 
+#define INTEL_MID_STD_CFG  (DW_IC_CON_MASTER |			\
+				DW_IC_CON_SLAVE_DISABLE |	\
+				DW_IC_CON_RESTART_EN)
+
 #define DW_IC_INTR_RX_UNDER	0x001
 #define DW_IC_INTR_RX_OVER	0x002
 #define DW_IC_INTR_RX_FULL	0x004
@@ -207,7 +211,6 @@
  * @adapter: i2c subsystem adapter node
  * @tx_fifo_depth: depth of the hardware tx fifo
  * @rx_fifo_depth: depth of the hardware rx fifo
- * @rx_outstanding: current master-rx elements in tx fifo
  */
 struct dw_i2c_dev {
 	struct device		*dev;
@@ -218,6 +221,7 @@ struct dw_i2c_dev {
 	u32			(*get_clk_rate_khz) (struct dw_i2c_dev *dev);
 	int			(*get_scl_cfg) (struct dw_i2c_dev *dev);
 	void			(*reset)(struct dw_i2c_dev *dev);
+	void			(*abort)(int busnum);
 	struct dw_pci_controller *controller;
 	int			enable_stop;
 	int			share_irq;
@@ -234,17 +238,16 @@ struct dw_i2c_dev {
 	unsigned int		status;
 	u32			abort_source;
 	int			irq;
-	u32			accessor_flags;
+	int			swab;
 	struct i2c_adapter	adapter;
 	u32			functionality;
 	u32			master_cfg;
 	unsigned int		tx_fifo_depth;
 	unsigned int		rx_fifo_depth;
-	int			rx_outstanding;
+	int			use_dyn_clk;	/* use dynamic clk setting */
+	u32			clk_khz;	/* input clock */
+	u32			speed_cfg;
 };
-
-#define ACCESS_SWAP		0x00000001
-#define ACCESS_16BIT		0x00000002
 
 extern u32 dw_readl(struct dw_i2c_dev *dev, int offset);
 extern void dw_writel(struct dw_i2c_dev *dev, u32 b, int offset);
@@ -259,3 +262,4 @@ extern void i2c_dw_disable(struct dw_i2c_dev *dev);
 extern void i2c_dw_clear_int(struct dw_i2c_dev *dev);
 extern void i2c_dw_disable_int(struct dw_i2c_dev *dev);
 extern u32 i2c_dw_read_comp_param(struct dw_i2c_dev *dev);
+extern int intel_mid_dw_i2c_abort(int busnum);
