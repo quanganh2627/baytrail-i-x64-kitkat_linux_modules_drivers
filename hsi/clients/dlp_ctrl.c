@@ -129,14 +129,11 @@ struct dlp_command {
 /*
  * struct dlp_ctrl_context - CTRL channel private data
  *
- * @response: Modem response
  * @wq: Modem readiness/TX timeout worqueue
  * @tx_timeout_work: Modem TX timeout work
- * @readiness_work: Modem readiness work
- * @ready_event: Modem readiness wait event
  * @response: Received response from the modem
  * @ehandler: HSI client events CB
- * @xfers_list: The list of ALL the RX/TX msgs exchanged on channel 0
+ * @open_lock: Lock to prevent concurrent open issues
  */
 struct dlp_ctrl_context {
 	/* Modem readiness/TX timeout work & worqueue */
@@ -148,6 +145,9 @@ struct dlp_ctrl_context {
 
 	/* HSI events callback */
 	hsi_client_cb ehandler;
+
+	/* Lock for concurrent open operations */
+	spinlock_t open_lock;
 };
 
 /**
@@ -494,18 +494,22 @@ static void dlp_ctrl_complete_rx(struct hsi_msg *msg)
 			break;
 
 		/* Ready ? if not, just save the OPEN_CONN request params */
+		spin_lock_irqsave(&ctrl_ctx->open_lock, flags);
 		state = dlp_ctrl_get_channel_state(hsi_channel);
-		if (state == DLP_CH_STATE_CLOSED) {
+		if (state != DLP_CH_STATE_OPENED) {
 			struct dlp_hsi_channel *hsi_ch;
 
 			hsi_ch = &dlp_drv.channels_hsi[hsi_channel];
 			memcpy(&hsi_ch->open_conn, &params, sizeof(params));
+			spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
+
 			response = -1;
 
 			pr_debug(DRVNAME ": HSI CH%d OPEN_CONN received (postponed)\n",
 					params.channel);
 			goto push_rx;
-		}
+		} else
+			spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
 
 		pr_debug(DRVNAME ": HSI CH%d OPEN_CONN received (size: %d)\n",
 					params.channel,
@@ -681,7 +685,7 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 	}
 
 	/* TX OK */
-   /* 1. Set the intermidiate channel state */
+	/* 1. Set the intermidiate channel state */
 	if (interm_state != DLP_CH_STATE_NONE)
 		dlp_ctrl_set_channel_state(ch_ctx->hsi_channel, interm_state);
 
@@ -731,6 +735,7 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 			(unsigned int)(*(u32 *)(&expected_resp)));
 
 		ret = -EIO;
+		goto free_cmd;
 	}
 
 no_resp:
@@ -883,6 +888,7 @@ struct dlp_channel *dlp_ctrl_ctx_create(unsigned int ch_id,
 
 	spin_lock_init(&ch_ctx->lock);
 	INIT_WORK(&ctrl_ctx->tx_timeout_work, dlp_ctrl_handle_tx_timeout);
+	spin_lock_init(&ctrl_ctx->open_lock);
 
 	/* Register PDUs push, cleanup CBs */
 	ch_ctx->push_rx_pdus = dlp_ctrl_push_rx_pdus;
@@ -951,25 +957,27 @@ int dlp_ctrl_open_channel(struct dlp_channel *ch_ctx)
 	int ret = 0;
 	unsigned char param1 = PARAM1(ch_ctx->tx.pdu_size);
 	unsigned char param2 = PARAM2(ch_ctx->tx.pdu_size);
-
-	/* Check if we have any waiting OPEN_CONN */
-	ret = dlp_ctrl_send_ack_nack(ch_ctx);
-	if (ret)
-		goto out;
+	struct dlp_ctrl_context *ctrl_ctx = DLP_CTRL_CTX;
 
 	/* Send the OPEN_CONN command */
 	ret = dlp_ctrl_cmd_send(ch_ctx,
 				DLP_CMD_OPEN_CONN, DLP_CMD_ACK,
-				DLP_CH_STATE_OPENING, DLP_CH_STATE_OPENED,
+				DLP_CH_STATE_OPENING, DLP_CH_STATE_NONE,
 				param1, param2, 0);
 
-	/* Channel correctly openned ? */
+	/* Channel correctly opened ? */
 	if (ret == 0) {
-		/* Reset old OPEN_CONN params */
-		dlp_drv.channels_hsi[ch_ctx->hsi_channel].open_conn = 0;
+		unsigned long flags;
+
+		spin_lock_irqsave(&ctrl_ctx->open_lock, flags);
+		dlp_ctrl_set_channel_state(ch_ctx->hsi_channel,
+				DLP_CH_STATE_OPENED);
+		spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
+
+		/* Check if we have any waiting OPEN_CONN */
+		ret = dlp_ctrl_send_ack_nack(ch_ctx);
 	}
 
-out:
 	return ret;
 }
 

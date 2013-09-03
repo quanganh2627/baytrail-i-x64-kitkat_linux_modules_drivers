@@ -2,11 +2,9 @@
  * linux/drivers/modem_control/mdm_util.h
  *
  * mdm_util.h
- * Generic functions header.
+ * Utilities functions header.
  *
- * Intel Mobile Communication modem boot driver
- *
- * Copyright (C) 2012 Intel Corporation. All rights reserved.
+ * Copyright (C) 2013 Intel Corporation. All rights reserved.
  *
  * Contact: Faouaz Tenoutit <faouazx.tenoutit@intel.com>
  *          Frederic Berat <fredericx.berat@intel.com>
@@ -28,6 +26,9 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/acpi.h>
+#include <linux/acpi_gpio.h>
+#include <linux/platform_device.h>
 #include <linux/device.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
@@ -49,8 +50,6 @@
 #ifndef _MDM_UTIL_H
 #define _MDM_UTIL_H
 
-#define DRVNAME "mdm_ctrl"
-
 /**
  * struct mdm_ctrl - Modem boot driver
  *
@@ -71,7 +70,7 @@
  * @rst_ongoing: Stating that a reset is ongoing
  * @wq: Modem Reset/Coredump worqueue
  * @hangup_work: Modem Reset/Coredump work
-*/
+ */
 struct mdm_ctrl {
 	/* Char device registration */
 	int major;
@@ -80,16 +79,8 @@ struct mdm_ctrl {
 	struct cdev cdev;
 	struct class *class;
 
-	/* Device infos*/
-	struct mdm_ctrl_pdata *pdata;
-
-	/* Sequence execution callbacks */
-	int (*mdm_ctrl_cold_boot) (struct mdm_ctrl *);
-	int (*mdm_ctrl_cold_reset) (struct mdm_ctrl *);
-	int (*mdm_ctrl_silent_warm_reset) (struct mdm_ctrl *);
-	int (*mdm_ctrl_normal_warm_reset) (struct mdm_ctrl *);
-	int (*mdm_ctrl_flashing_warm_reset) (struct mdm_ctrl *);
-	int (*mdm_ctrl_power_off) (struct mdm_ctrl *);
+	/* Device infos */
+	struct mcd_base_info *pdata;
 
 	/* Used to prevent multiple access to device */
 	unsigned int opened;
@@ -99,14 +90,7 @@ struct mdm_ctrl {
 	unsigned int polled_states;
 	bool polled_state_reached;
 
-	/* GPIOs & IRQs */
-	unsigned int gpio_rst_out;
-	unsigned int gpio_pwr_on;
-	unsigned int gpio_rst_bbn;
-	unsigned int gpio_cdump;
-
-	int irq_cdump;
-	int irq_reset;
+	/* modem status */
 	int rst_ongoing;
 	int hangup_causes;
 
@@ -124,7 +108,7 @@ struct mdm_ctrl {
 
 	struct timer_list flashing_timer;
 
-	/* Wait queue for WAIT_FOR_STATE ioctl*/
+	/* Wait queue for WAIT_FOR_STATE ioctl */
 	wait_queue_head_t event;
 
 	bool is_mdm_ctrl_disabled;
@@ -143,20 +127,19 @@ extern struct mdm_ctrl *mdm_drv;
 inline void mdm_ctrl_set_opened(struct mdm_ctrl *drv, int value);
 inline int mdm_ctrl_get_opened(struct mdm_ctrl *drv);
 
-inline void mdm_ctrl_launch_work(struct mdm_ctrl *drv, int state);
-
-inline void mdm_ctrl_set_state(struct work_struct *work);
-inline int mdm_ctrl_get_state(struct mdm_ctrl *drv);
-
 void mdm_ctrl_enable_flashing(unsigned long int param);
 void mdm_ctrl_disable_flashing(unsigned long int param);
 
 void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
-				unsigned int timer_type);
+			   unsigned int timer_type);
 
 inline void mdm_ctrl_set_reset_ongoing(struct mdm_ctrl *drv, int ongoing);
 inline int mdm_ctrl_get_reset_ongoing(struct mdm_ctrl *drv);
 
-void mdm_ctrl_get_gpio(struct mdm_ctrl *drv);
-void mdm_ctrl_get_device_info(struct mdm_ctrl *drv);
-#endif /* _MDM_UTIL_H */
+inline void mdm_ctrl_launch_work(struct mdm_ctrl *drv, int state);
+inline void mdm_ctrl_set_state(struct work_struct *work);
+inline int mdm_ctrl_get_state(struct mdm_ctrl *drv);
+
+void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
+			      struct platform_device *pdev);
+#endif				/* _MDM_UTIL_H */

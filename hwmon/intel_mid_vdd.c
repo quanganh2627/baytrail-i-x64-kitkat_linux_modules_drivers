@@ -747,6 +747,17 @@ static int mid_vdd_probe(struct platform_device *pdev)
 #ifdef CONFIG_BOARD_CTP
 	vinfo->bcu_intr_addr = ioremap(MSIC_BCU_STAT, MSIC_BCU_LEN);
 #else
+	if (pdata == NULL) {
+		pdata = devm_kzalloc(&pdev->dev,
+				sizeof(struct intel_msic_vdd_pdata),
+				GFP_KERNEL);
+		if (!pdata) {
+			dev_err(&pdev->dev, "kzalloc failed");
+			return -ENOMEM;
+		}
+		pdata->disable_unused_comparator = DISABLE_VWARNA |
+						DISABLE_VCRIT;
+	}
 	vinfo->bcu_intr_addr = BCUIRQ;
 #endif
 	if (!vinfo->bcu_intr_addr) {

@@ -42,14 +42,22 @@
 #include <linux/delay.h>
 #include <linux/gpio.h>
 #include <linux/wakelock.h>
+#include <linux/version.h>
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+#include <linux/usb/otg.h>
+#include <linux/platform_data/intel_mid_remoteproc.h>
+#else
 #include <linux/usb/penwell_otg.h>
+#include <asm/intel_mid_remoteproc.h>
+#endif
+
 #include <linux/rpmsg.h>
 
 #include <asm/intel_mid_gpadc.h>
 #include <asm/intel_scu_ipc.h>
 #include <asm/intel_scu_pmic.h>
 #include <asm/intel_mid_rpmsg.h>
-#include <asm/intel_mid_remoteproc.h>
 
 #define DRV_NAME "bq24192_charger"
 #define DEV_NAME "bq24192"
@@ -256,13 +264,14 @@ struct bq24192_chip {
 	int batt_status;
 	int bat_health;
 	int cntl_state;
-	int online;
 	int irq;
 	bool is_charger_enabled;
 	bool is_charging_enabled;
 	bool votg;
 	bool is_pwr_good;
 	bool boost_mode;
+	bool online;
+	bool present;
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -644,8 +653,11 @@ int bq24192_get_charger_health(void)
 int bq24192_get_battery_health(void)
 {
 	int ret, temp, count;
-	struct bq24192_chip *chip =
-		i2c_get_clientdata(bq24192_client);
+	struct bq24192_chip *chip;
+	if (!bq24192_client)
+		return POWER_SUPPLY_HEALTH_UNKNOWN;
+
+	chip = i2c_get_clientdata(bq24192_client);
 
 	dev_info(&chip->client->dev, "+%s\n", __func__);
 
@@ -1089,7 +1101,7 @@ static inline int bq24192_enable_charging(
 	dev_warn(&chip->client->dev, "%s:%d %d\n", __func__, __LINE__, val);
 
 	ret = program_timers(chip, CHRG_TIMER_EXP_CNTL_WDT160SEC, true);
-	if (ret) {
+	if (ret < 0) {
 		dev_err(&chip->client->dev,
 				"program_timers failed: %d\n", ret);
 		return ret;
@@ -1105,7 +1117,7 @@ static inline int bq24192_enable_charging(
 
 	ret = bq24192_write_reg(chip->client, BQ24192_INPUT_SRC_CNTL_REG,
 				regval);
-	if (ret) {
+	if (ret < 0) {
 		dev_err(&chip->client->dev,
 				"inlmt programming failed: %d\n", ret);
 		return ret;
@@ -1128,10 +1140,40 @@ static inline int bq24192_enable_charging(
 					BQ24192_POWER_ON_CFG_REG,
 					ret, CHR_CFG_BIT_POS,
 					CHR_CFG_BIT_LEN);
-	if (val)
+	if (val) {
 		/* Schedule the charger task worker now */
-		schedule_delayed_work(&chip->chrg_task_wrkr,
-						0);
+		schedule_delayed_work(&chip->chrg_task_wrkr, 0);
+
+		/*
+		 * Prevent system from entering s3 while charger is connected
+		 */
+		if (!wake_lock_active(&chip->wakelock))
+			wake_lock(&chip->wakelock);
+	} else {
+		/* Release the wake lock */
+		if (wake_lock_active(&chip->wakelock))
+			wake_unlock(&chip->wakelock);
+
+		/*
+		 * Cancel the worker since it need not run when charging is not
+		 * happening
+		 */
+		cancel_delayed_work_sync(&chip->chrg_full_wrkr);
+
+		/* Read the status to know about input supply */
+		ret = bq24192_read_reg(chip->client, BQ24192_SYSTEM_STAT_REG);
+		if (ret < 0) {
+			dev_warn(&chip->client->dev,
+				"read reg failed %s\n", __func__);
+		}
+
+		/* If no charger connected, cancel the workers */
+		if (!(ret & SYSTEM_STAT_VBUS_OTG)) {
+			dev_info(&chip->client->dev, "NO charger connected\n");
+			cancel_delayed_work_sync(&chip->chrg_task_wrkr);
+		}
+	}
+
 	return ret;
 }
 
@@ -1163,7 +1205,7 @@ static inline int bq24192_set_cv(struct bq24192_chip *chip, int cv)
 	regval = chrg_volt_to_reg(cv);
 
 	return bq24192_write_reg(chip->client, BQ24192_CHRG_VOLT_CNTL_REG,
-					regval |  CHRG_VOLT_CNTL_VRECHRG);
+					regval & ~CHRG_VOLT_CNTL_VRECHRG);
 }
 
 static inline int bq24192_set_inlmt(struct bq24192_chip *chip, int inlmt)
@@ -1240,10 +1282,16 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 
 	switch (psp) {
 
+	case POWER_SUPPLY_PROP_PRESENT:
+		chip->present = val->intval;
+		break;
+	case POWER_SUPPLY_PROP_ONLINE:
+		chip->online = val->intval;
+		break;
 	case POWER_SUPPLY_PROP_ENABLE_CHARGING:
 		ret = bq24192_enable_charging(chip, val->intval);
 
-		if (ret)
+		if (ret < 0)
 			dev_err(&chip->client->dev,
 				"Error(%d) in %s charging", ret,
 				(val->intval ? "enable" : "disable"));
@@ -1258,7 +1306,7 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ENABLE_CHARGER:
 		ret = bq24192_enable_charger(chip, val->intval);
 
-		if (ret) {
+		if (ret < 0) {
 			dev_err(&chip->client->dev,
 			"Error(%d) in %s charger", ret,
 			(val->intval ? "enable" : "disable"));
@@ -1330,12 +1378,10 @@ static int bq24192_usb_get_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
-		val->intval = (chip->cable_type !=
-					POWER_SUPPLY_CHARGER_TYPE_NONE);
+		val->intval = chip->present;
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
-		val->intval = (chip->cable_type !=
-				POWER_SUPPLY_CHARGER_TYPE_NONE) ? true : false;
+		val->intval = chip->online;
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
 		val->intval = bq24192_get_charger_health();
@@ -1447,6 +1493,8 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 	if (reg_status < 0)
 		dev_err(&chip->client->dev, "STATUS register read failed:\n");
 
+	dev_info(&chip->client->dev, "STATUS reg %x\n", reg_status);
+
 	reg_status &= SYSTEM_STAT_CHRG_DONE;
 
 	if (reg_status == SYSTEM_STAT_CHRG_DONE) {
@@ -1462,6 +1510,7 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 	if (reg_fault < 0)
 		dev_err(&chip->client->dev, "FAULT register read failed:\n");
 
+	dev_info(&chip->client->dev, "FAULT reg %x\n", reg_fault);
 	if (reg_fault & FAULT_STAT_WDT_TMR_EXP) {
 		dev_warn(&chip->client->dev, "WDT expiration fault\n");
 		if (chip->is_charging_enabled) {
@@ -1661,7 +1710,11 @@ static inline int register_otg_notification(struct bq24192_chip *chip)
 	/*
 	 * Get the USB transceiver instance
 	 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+	chip->transceiver = usb_get_phy(USB_PHY_TYPE_USB2);
+#else
 	chip->transceiver = usb_get_transceiver();
+#endif
 	if (!chip->transceiver) {
 		dev_err(&chip->client->dev, "Failed to get the USB transceiver\n");
 		return -EINVAL;
@@ -1866,7 +1919,7 @@ static int bq24192_probe(struct i2c_client *client,
 
 	/* Program the safety charge temperature threshold with default value*/
 	ret =  intel_scu_ipc_iowrite8(MSIC_CHRTMPCTRL,
-				(CHRTMPCTRL_TMPH_60 | CHRTMPCTRL_TMPL_00));
+				(CHRTMPCTRL_TMPH_45 | CHRTMPCTRL_TMPL_00));
 	if (ret) {
 		dev_err(&chip->client->dev,
 				"IPC Failed with %d error\n", ret);
@@ -2057,7 +2110,6 @@ static int __init bq24192_rpmsg_init(void)
 {
 	return register_rpmsg_driver(&bq24192_rpmsg);
 }
-
 module_init(bq24192_rpmsg_init);
 
 static void __exit bq24192_rpmsg_exit(void)

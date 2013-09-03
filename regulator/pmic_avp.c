@@ -17,6 +17,7 @@
  *
  */
 
+#include <linux/version.h>	/*FIXME*/
 #include <linux/bug.h>
 #include <linux/err.h>
 #include <linux/kernel.h>
@@ -381,16 +382,28 @@ static int avp_pmic_probe(struct platform_device *pdev)
 	intel_pmic = pdev->dev.platform_data;
 	if (!intel_pmic)
 		return -EINVAL;
+
 	for (i = 0; i < ARRAY_SIZE(reg_addr_offset); i++) {
 		if (reg_addr_offset[i] == pdata->pmic_reg)
 			break;
 	}
 	if (i < (ARRAY_SIZE(reg_addr_offset))) {
 		platform_set_drvdata(pdev, intel_pmic->intel_pmic_rdev);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0))
+		{
+		struct regulator_config config = { 0 };
+		config.dev = &pdev->dev;
+		config.init_data = pdata->init_data;
+		config.driver_data = pdata;
 		intel_pmic->intel_pmic_rdev =
-		regulator_register(&intel_pmic_desc[i],
-				&pdev->dev, pdata->init_data, pdata,
-				pdev->dev.of_node);
+			regulator_register(&intel_pmic_desc[i], &config);
+		}
+#else
+		intel_pmic->intel_pmic_rdev =
+			regulator_register(&intel_pmic_desc[i],
+					&pdev->dev, pdata->init_data, pdata,
+					pdev->dev.of_node);
+#endif
 		if (IS_ERR(intel_pmic->intel_pmic_rdev)) {
 			pmic_err("can't register regulator..error %ld\n",
 					PTR_ERR(intel_pmic->intel_pmic_rdev));

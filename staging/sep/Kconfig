@@ -1,5 +1,5 @@
-config DX_SEP
-	tristate "Discretix SEP driver"
+config DX_SEP_FORK
+	tristate "Fork of Discretix SEP driver"
 	depends on PCI && MMC_BLOCK
 	help
 	  Discretix SEP driver; used for the security processor subsystem
