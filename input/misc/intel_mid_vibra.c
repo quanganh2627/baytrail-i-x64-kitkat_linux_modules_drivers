@@ -244,23 +244,23 @@ static const struct dev_pm_ops intel_mid_vibra_pm_ops = {
 };
 #endif
 
-/* vibra_init_ext_drv: initializes the ext drv and auto calibrates it one time
+/* vibra_drv2604_calibrate: initializes the ext drv and auto calibrates it one time
  *
- * @info: vibrsa driver context
+ * @info: vibra driver context
  */
-static int vibra_init_ext_drv(struct vibra_info *info)
+static int vibra_drv2605_calibrate(struct vibra_info *info)
 {
-#define DRV_MODE	0x01
-#define DRV_GO		0x0c
-#define DRV_VOLTAGE	0x16
-#define DRV_CLAMP	0x17
-#define DRV_FB_CONTROL	0x1a
+#define DRV2605_MODE		0x01
+#define DRV2605_GO		0x0c
+#define DRV2605_VOLTAGE		0x16
+#define DRV2605_CLAMP		0x17
+#define DRV2605_FB_CONTROL	0x1a
 
-#define DRV_AUTO_CALIB	0x07
-#define DRV_2_0V	0x5b
-#define DRV_LRA		0xa4
-#define DRV_PWM		0x03
-#define DRV_GO_BIT	0x01
+#define DRV2605_AUTO_CALIB	0x07
+#define DRV2605_2_0V		0x5b
+#define DRV2605_LRA		0xa4
+#define DRV2605_PWM		0x03
+#define DRV2605_GO_BIT		0x01
 
 	/*enable gpio first */
 	gpio_set_value(info->gpio_en, 1);
@@ -268,18 +268,18 @@ static int vibra_init_ext_drv(struct vibra_info *info)
 	msleep(1);
 
 	/*put device in auto calibrate mode*/
-	vibra_driver_write(DRV_MODE, DRV_AUTO_CALIB);
-	vibra_driver_write(DRV_FB_CONTROL, DRV_LRA);
-	vibra_driver_write(DRV_VOLTAGE, DRV_2_0V);
-	vibra_driver_write(DRV_CLAMP, DRV_2_0V);
-	vibra_driver_write(DRV_GO, DRV_GO_BIT);
+	vibra_driver_write(DRV2605_MODE, DRV2605_AUTO_CALIB);
+	vibra_driver_write(DRV2605_FB_CONTROL, DRV2605_LRA);
+	vibra_driver_write(DRV2605_VOLTAGE, DRV2605_2_0V);
+	vibra_driver_write(DRV2605_CLAMP, DRV2605_2_0V);
+	vibra_driver_write(DRV2605_GO, DRV2605_GO_BIT);
 
 	/* wait for auto calibration to complete
 	 * polling of driver does not work
 	 */
 	msleep(1000);
 	/* set the driver in pwm mode */
-	vibra_driver_write(DRV_MODE, DRV_PWM);
+	vibra_driver_write(DRV2605_MODE, DRV2605_PWM);
 	gpio_set_value(info->gpio_en, 0);
 	return 0;
 }
@@ -384,7 +384,7 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	}
 
 	if (info->ext_drv)
-		vibra_init_ext_drv(info);
+		vibra_drv2605_calibrate(info);
 
 	pci_set_drvdata(pci, info);
 	pm_runtime_allow(&pci->dev);
