@@ -926,42 +926,61 @@ static int new_dump_fwerr_log(char *buf, int size)
 #ifdef CONFIG_PROC_FS
 struct proc_dir_entry *ipanic_faberr;
 struct proc_dir_entry *ipanic_faberr_recoverable;
-static int intel_fw_logging_recoverable_proc_read(char *buffer, char **start,
-						  off_t offset, int count,
-						  int *peof, void *data)
+
+static int intel_fw_logging_recoverable_proc_read(struct file *file,
+						  char __user *buffer,
+						  size_t count, loff_t *ppos)
 {
-	if (offset > 0)
+	int ret = 0;
+	if (*ppos > 0)
 		return 0; /* We have finished to read, return 0 */
-	else
-		return new_dump_fwerr_log(buffer, count);
+	else {
+		ret = new_dump_fwerr_log(buffer, count);
+		*ppos += ret;
+		return ret;
+	}
 }
 
-static int intel_fw_logging_proc_read(char *buffer, char **start, off_t offset,
-					int count, int *peof, void *data)
+static ssize_t intel_fw_logging_proc_read(struct file *file,
+					  char __user *buffer, size_t count,
+					  loff_t *ppos)
 {
 	int ret = 0;
 	u32 read;
 
 	if (intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER) {
-		if (!offset)
+		if (!*ppos) {
 			ret = new_dump_fwerr_log(buffer, count);
-		*peof = 1;
+		} else {
+			/* replace *peof = 1;*/
+			return 0;
+		}
+		*ppos += ret;
 	} else {
-		if (!offset) {
-			/* Fill the buffer, return the buffer size */
+		if (!*ppos) {
+			/* Fill the buffer, return the buffer size*/
 			ret = dump_fwerr_log(buffer, count);
 			read = MAX_NUM_ALL_LOGDWORDS * sizeof(u32);
+			*ppos = read;
 		} else {
+			if (*ppos >= MAX_NUM_ALL_LOGDWORDS * sizeof(u32)
+				+ sram_buf_sz)
+				return 0;
 			ret = dump_scu_extented_trace(buffer, count,
-					      offset, &read);
+					*ppos, &read);
+			*ppos += read;
 		}
-		if (offset + read >= MAX_NUM_ALL_LOGDWORDS * sizeof(u32) + sram_buf_sz)
-			*peof = 1;
-
-		*start = (void *) read;
 	}
 	return ret;
 }
+
+static const struct file_operations ipanic_fabric_err_fops = {
+	.read = intel_fw_logging_proc_read
+};
+
+static const struct file_operations ipanic_fab_recoverable_fops = {
+	.read = intel_fw_logging_recoverable_proc_read
+};
 #endif /* CONFIG_PROC_FS */
 
 static irqreturn_t recoverable_faberror_irq(int irq, void *ignored)
@@ -1048,17 +1067,15 @@ static int fw_logging_crash_on_boot(void)
 	}
 
 #ifdef CONFIG_PROC_FS
-	ipanic_faberr = create_proc_entry("ipanic_fabric_err",
-					  S_IFREG | S_IRUGO, NULL);
+
+	ipanic_faberr = proc_create("ipanic_fabric_err", S_IFREG | S_IRUGO,
+				    NULL, &ipanic_fabric_err_fops);
 	if (ipanic_faberr == 0) {
 		pr_err("Fail creating procfile ipanic_fabric_err for fatal fabric err\n");
 		err = -ENODEV;
 		goto out;
 	}
 
-	ipanic_faberr->read_proc = intel_fw_logging_proc_read;
-	ipanic_faberr->write_proc = NULL;
-	ipanic_faberr->size = length;
 #endif /* CONFIG_PROC_FS */
 
 out:
@@ -1365,20 +1382,16 @@ static int intel_fw_logging_init(void)
 
 	/* Create a permanent sysfs for hosting recoverable error log */
 #ifdef CONFIG_PROC_FS
-	ipanic_faberr_recoverable = create_proc_entry("ipanic_fabric_recv_err",
-						      S_IFREG | S_IRUGO, NULL);
+	ipanic_faberr_recoverable = proc_create("ipanic_fabric_recv_err",
+						S_IFREG | S_IRUGO, NULL,
+						&ipanic_fab_recoverable_fops);
 	if (ipanic_faberr_recoverable == 0) {
 		pr_err("Fail creating procfile ipanic_fabric_recv_err "\
 				"for recoverable fabric err\n");
-
 		err = -ENODEV;
 		goto err3;
 	}
 
-	ipanic_faberr_recoverable->read_proc = \
-		intel_fw_logging_recoverable_proc_read;
-	ipanic_faberr_recoverable->write_proc = NULL;
-	ipanic_faberr_recoverable->size = FABRIC_ERR_MAXIMUM_TXT;
 #endif /* CONFIG_PROC_FS */
 
 non_recover:
