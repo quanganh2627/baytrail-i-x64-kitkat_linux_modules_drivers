@@ -273,6 +273,7 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 {
 #define DRV2605_I2C_ADDR	0x5a
 
+#define DRV2605_STATUS		0x00
 #define DRV2605_MODE		0x01
 #define DRV2605_GO		0x0c
 #define DRV2605_VOLTAGE		0x16
@@ -285,12 +286,28 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 #define DRV2605_PWM		0x03
 #define DRV2605_GO_BIT		0x01
 
+#define DRV2605_STANDBY_BIT         6
+#define DRV2605_DIAG_RESULT_BIT     3
+
 	struct i2c_adapter *adap;
+	u8 status = 0, mode = 0;
 
 	adap = i2c_get_adapter(MRFLD_VIBRA_BUS);
 	if (!adap) {
 		pr_err("can't find bus adapter");
 		return -EIO;
+	}
+
+	vibra_driver_read(adap, DRV2605_I2C_ADDR, DRV2605_MODE, &mode);
+	/* Is Device Ready?? */
+	if (!((mode >> DRV2605_STANDBY_BIT) & 0x1)) {
+
+		vibra_driver_read(adap, DRV2605_I2C_ADDR, DRV2605_STATUS, &status);
+		/* Is it Auto Calibrated?? */
+		if (!((status >> DRV2605_DIAG_RESULT_BIT) & 0x1)) {
+			pr_debug("Do Nothing -  Device Calibrated\n");
+			return 0;
+		}
 	}
 
 	/*enable gpio first */
@@ -312,6 +329,7 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 	/* set the driver in pwm mode */
 	vibra_driver_write(adap, DRV2605_I2C_ADDR, DRV2605_MODE, DRV2605_PWM);
 	gpio_set_value(info->gpio_en, 0);
+
 	return 0;
 }
 
