@@ -70,6 +70,33 @@ static int vibra_driver_write(struct i2c_adapter *adap, u8 i2c_addr,
 	return ret;
 }
 
+static int vibra_driver_read(struct i2c_adapter *adap, u8 i2c_addr,
+				u8 reg, u8 *value)
+{
+	struct i2c_msg xfer[2];
+	int ret = 0;
+
+	xfer[0].addr = i2c_addr;
+	xfer[0].flags = 0;
+	xfer[0].len = 1;
+	xfer[0].buf = (u8 *)&reg; /* write address */
+
+	xfer[1].addr = i2c_addr;
+	xfer[1].flags = I2C_M_RD;
+	xfer[1].len = 1;
+	xfer[1].buf = (u8 *)value; /*Read value */
+
+	ret = i2c_transfer(adap, xfer, 2);
+	if (ret != 2) {
+		pr_err("%s:i2c transfer err:%d for reg %x", __func__, ret, reg);
+	} else {
+		pr_debug("Read from 0x%x, the val 0x%x\n", reg, *value);
+		return 0;
+	}
+
+	return ret;
+}
+
 static int vibra_soc_pwm_configure(struct vibra_info *info, bool enable)
 {
 	union sst_pwmctrl_reg pwmctrl;
