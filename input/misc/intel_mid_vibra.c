@@ -269,7 +269,7 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 	/*enable gpio first */
 	gpio_set_value(info->gpio_en, 1);
 	/* wait for gpio to settle and drv to accept i2c*/
-	msleep(1);
+	usleep_range(1000, 1100);
 
 	/*put device in auto calibrate mode*/
 	vibra_driver_write(adap, DRV2605_I2C_ADDR, DRV2605_MODE, DRV2605_AUTO_CALIB);
