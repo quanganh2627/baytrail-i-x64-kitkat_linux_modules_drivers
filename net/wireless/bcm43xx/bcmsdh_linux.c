@@ -631,7 +631,9 @@ static irqreturn_t wlan_oob_irq(int irq, void *dev_id)
 
 	dhdp = (dhd_pub_t *)dev_get_drvdata(sdhcinfo->dev);
 
+#if defined(HW_OOB)
 	bcmsdh_oob_intr_set(0);
+#endif /* defined(HW_OOB) */
 
 	if (dhdp == NULL) {
 		SDLX_MSG(("Out of band GPIO interrupt fired way too early\n"));
