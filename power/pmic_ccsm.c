@@ -54,7 +54,6 @@
 #include <asm/intel_mid_rpmsg.h>
 #include <asm/intel_mid_remoteproc.h>
 #include <linux/io.h>
-#include <linux/power/intel_mid_powersupply.h>
 #include <linux/sched.h>
 #include <linux/pm_runtime.h>
 #include <linux/sfi.h>
@@ -832,12 +831,20 @@ static int pmic_read_adc_val(int channel, int *sensor_val,
 	int ret;
 	struct iio_channel *indio_chan;
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	indio_chan = iio_st_channel_get("BATTEMP", "BATTEMP0");
+#else
+	indio_chan = iio_channel_get(chc->dev, "BATTEMP0");
+#endif
 	if (IS_ERR_OR_NULL(indio_chan)) {
 		ret = PTR_ERR(indio_chan);
 		goto exit;
 	}
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	ret = iio_st_read_channel_raw(indio_chan, &val);
+#else
+	ret = iio_read_channel_raw(indio_chan, &val);
+#endif
 	if (ret) {
 		dev_err(chc->dev, "IIO channel read error\n");
 		goto err_exit;
@@ -855,7 +862,11 @@ static int pmic_read_adc_val(int channel, int *sensor_val,
 		__func__, val, val, *sensor_val);
 
 err_exit:
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	iio_st_channel_release(indio_chan);
+#else
+	iio_channel_release(indio_chan);
+#endif
 exit:
 	return ret;
 }
@@ -1515,7 +1526,11 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 		goto ioremap_failed;
 	}
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	chc.otg = usb_get_transceiver();
+#else
+	chc.otg = usb_get_phy(USB_PHY_TYPE_USB3);
+#endif
 	if (!chc.otg) {
 		dev_err(&pdev->dev, "Failed to get otg transceiver!!\n");
 		retval = -ENOMEM;

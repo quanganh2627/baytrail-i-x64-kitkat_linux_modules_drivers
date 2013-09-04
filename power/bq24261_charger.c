@@ -22,6 +22,7 @@
  * Author: Jenny TC <jenny.tc@intel.com>
  */
 
+#include <linux/version.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/err.h>
@@ -41,7 +42,6 @@
 #include <linux/debugfs.h>
 
 #include <asm/intel_scu_ipc.h>
-#include <linux/usb/dwc_otg3.h>
 
 #define DEV_NAME "bq24261_charger"
 #define DEV_MANUFACTURER "TI"
@@ -1587,7 +1587,11 @@ static inline int register_otg_notifications(struct bq24261_charger *chip)
 
 	chip->otg_nb.notifier_call = otg_handle_notification;
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	chip->transceiver = usb_get_transceiver();
+#else
+	chip->transceiver = usb_get_phy(USB_PHY_TYPE_USB2);
+#endif
 	if (!chip->transceiver) {
 		dev_err(&chip->client->dev, "failed to get otg transceiver\n");
 		return -EINVAL;
@@ -1743,7 +1747,7 @@ static int bq24261_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int __devexit bq24261_remove(struct i2c_client *client)
+static int bq24261_remove(struct i2c_client *client)
 {
 	struct bq24261_charger *chip = i2c_get_clientdata(client);
 
@@ -1817,7 +1821,7 @@ static struct i2c_driver bq24261_driver = {
 		   .pm = &bq24261_pm_ops,
 		   },
 	.probe = bq24261_probe,
-	.remove = __devexit_p(bq24261_remove),
+	.remove = bq24261_remove,
 	.id_table = bq24261_id,
 };
 
