@@ -742,7 +742,7 @@ int pmic_set_cc(int new_cc)
 		return 0;
 
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
-			BATT_PROF_MAX_TEMP_NR_RNG);
+			BATT_TEMP_NR_RNG);
 
 	for (i = 0; i < temp_mon_ranges; ++i) {
 		new_cc1 = min_t(int, new_cc,
@@ -781,7 +781,7 @@ int pmic_set_cv(int new_cv)
 		return 0;
 
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
-			BATT_PROF_MAX_TEMP_NR_RNG);
+			BATT_TEMP_NR_RNG);
 
 	for (i = 0; i < temp_mon_ranges; ++i) {
 		new_cv1 = min_t(int, new_cv,
@@ -1184,7 +1184,7 @@ static int pmic_init(void)
 	}
 
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
-			BATT_PROF_MAX_TEMP_NR_RNG);
+			BATT_TEMP_NR_RNG);
 	for (i = 0; i < temp_mon_ranges; ++i) {
 		ret =
 		CONVERT_TEMP_TO_ADC(bcprof->temp_mon_range[i].temp_up_lim,
@@ -1267,7 +1267,7 @@ static inline void print_ps_pse_mod_prof(struct ps_pse_mod_prof *bcprof)
 	dev_info(chc.dev, "ChrgProf: temp_mon_ranges:%u\n",
 			bcprof->temp_mon_ranges);
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
-			BATT_PROF_MAX_TEMP_NR_RNG);
+			BATT_TEMP_NR_RNG);
 
 	for (i = 0; i < temp_mon_ranges; ++i) {
 		dev_info(chc.dev, "ChrgProf: temp_up_lim[%d]:%d\n",
