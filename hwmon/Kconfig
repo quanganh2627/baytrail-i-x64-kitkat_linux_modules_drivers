@@ -70,6 +70,16 @@ config SENSORS_MID_VDD
 	  Say Y here to enable Voltage drop detection driver on Intel
 	  Clovertrail plus Platform.
 
+config SENSORS_MRFL_OCD
+	tristate "Basincove BCU driver for Merrifield"
+	depends on INTEL_SCU_IPC
+	help
+	  Say yes here to enable current monitoring driver for
+	  merrifield platform.
+
+	  This driver is specific to basin cove PMIC used in the
+          Merrifield platform.
+
 choice
 	prompt "Select PSH driver"
 	default n

@@ -197,12 +197,26 @@ int ia_send_cmd(struct psh_ia_priv *psh_ia_data,
 		return ret;
 
 	if (ch == 0 && cmd->cmd_id == CMD_RESET) {
+		struct ia_cmd cmd;
+		struct get_status_param *param;
+
 		if (!wait_for_completion_timeout(&psh_ia_data->cmd_reset_comp,
 					6 * HZ)) {
 			pr_warn("no status back when resetting pshfw!\n");
 			psh_ia_data->reset_in_progress = 0;
 			return -1;
 		}
+
+		param = (struct get_status_param *)cmd.param;
+		cmd.cmd_id = CMD_GET_STATUS;
+		cmd.sensor_id = 0;
+		param->snr_bitmask = (u32)-1;
+		ret = ia_send_cmd(psh_ia_data, PSH2IA_CHANNEL0, &cmd, 7);
+		if (ret) {
+			pr_err("get sensor status failed when resetting pshfw\n");
+			return ret;
+		}
+
 	} else if (ch == 0 && cmd->cmd_id == CMD_GET_STATUS) {
 		if (!wait_for_completion_timeout(&psh_ia_data->get_status_comp,
 					HZ)) {
@@ -377,35 +391,55 @@ ssize_t ia_get_dbg_mask(struct device *dev,
 			psh_ia_data->dbg_mask.mask_level);
 }
 
-void ia_handle_snr_info(struct circ_buf *circ, const struct snr_info *sinfo)
+static inline int is_port_sensor(enum sensor_type type)
 {
-#define STR_BUFF_SIZE 256
+	return ((type > PORT_SENSOR_BASE) && (type < PORT_SENSOR_MAX_NUM));
+}
+
+void ia_handle_snr_info(struct psh_ia_priv *psh_ia_data,
+				const struct snr_info *sinfo)
+{
 	char buf[STR_BUFF_SIZE];
 	ssize_t str_size;
 	int i;
 	static int snr_info_start;
+	static int sensor_map_setup;
 
 	if (!snr_info_start) {
 		snr_info_start++;
 		str_size = snprintf(buf, STR_BUFF_SIZE,
 				"******** Start Sensor Status ********\n");
-		ia_circ_put_data(circ, buf, str_size);
+		ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
 	}
 
 	if (!sinfo) {
 		if (snr_info_start) {
 			snr_info_start = 0;
+			sensor_map_setup = 1;
 			str_size = snprintf(buf, STR_BUFF_SIZE,
 					"******** End Sensor Status ********\n");
-			ia_circ_put_data(circ, buf, str_size);
+			ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
 		}
 		return;
+	}
+
+	if (!sensor_map_setup && snr_info_start) {
+		int len = strlen(sinfo->name) + 1;
+		struct sensor_db *sensor_obj =
+				kmalloc(sizeof(struct sensor_db), GFP_KERNEL);
+
+		sensor_obj->sid = sinfo->id;
+		memcpy(sensor_obj->sensor_name, sinfo->name,
+			len < SNR_NAME_MAX_LEN ? len : SNR_NAME_MAX_LEN);
+		sensor_obj->sensor_name[SNR_NAME_MAX_LEN - 1] = '\0';
+		list_add_tail(&sensor_obj->list, &psh_ia_data->sensor_list);
+
 	}
 
 	str_size = snprintf(buf, STR_BUFF_SIZE,
 			"***** Sensor %5s(%d) Status *****\n",
 			sinfo->name, sinfo->id);
-	ia_circ_put_data(circ, buf, str_size);
+	ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
 
 	str_size = snprintf(buf, STR_BUFF_SIZE,
 			"  freq=%d, freq_max=%d\n"
@@ -416,7 +450,7 @@ void ia_handle_snr_info(struct circ_buf *circ, const struct snr_info *sinfo)
 			sinfo->status, sinfo->slide,
 			sinfo->data_cnt, sinfo->priv,
 			sinfo->attri, sinfo->health);
-	ia_circ_put_data(circ, buf, str_size);
+	ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
 
 	for (i = 0; i < sinfo->link_num; i++) {
 		const struct link_info *linfo = &sinfo->linfo[i];
@@ -429,12 +463,12 @@ void ia_handle_snr_info(struct circ_buf *circ, const struct snr_info *sinfo)
 			linfo->id,
 			linfo->slide);
 
-		ia_circ_put_data(circ, buf, str_size);
+		ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
 	}
 
 	str_size = snprintf(buf, STR_BUFF_SIZE,
 			"*****************************\n");
-	ia_circ_put_data(circ, buf, str_size);
+	ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
 }
 
 ssize_t ia_set_status_mask(struct device *dev,
@@ -597,6 +631,84 @@ static struct bin_attribute dbg_attr = {
 	.read = ia_read_debug_data
 };
 
+const char *sensor_get_name(u8 sid, struct psh_ia_priv *psh_ia_data)
+{
+	if (sid == PSH_ITSELF)
+		return "_PSH_";
+	else if (is_port_sensor(sid))
+		return sensor_port_str[sid - PORT_SENSOR_BASE - 1];
+	else {
+		struct sensor_db *sensor_obj;
+
+		list_for_each_entry(sensor_obj,
+				&psh_ia_data->sensor_list, list) {
+			if (sid == sensor_obj->sid)
+				return sensor_obj->sensor_name;
+		}
+	}
+
+	return "?????";
+}
+
+static const char level_str[8][6] = {
+	"FATAL",
+	"ERROR",
+	" WARN",
+	" INFO",
+	"DEBUG",
+	"C_TRC",
+	"D_TRC",
+	"M_TRC",
+};
+
+static const char ctrace_str[12][6] = {
+	"SCORE",
+	"S_CFG",
+	"HW_PD",
+	"HW_PU",
+	"HW_PI",
+	" C_IN",
+	"C_OUT",
+	"IIDLE",
+	"OIDLE",
+	"SUSPD",
+	"RESUM",
+};
+
+static const char dtrace_str[5][6] = {
+	" MISC",
+	"D_RDY",
+	" D_IN",
+	"D_OUT",
+	"DDUMP"
+};
+
+static const char mtrace_str[3][6] = {
+	"TLOCK",
+	" LOCK",
+	"ULOCK",
+};
+
+const char *_get_evt_str(u16 level, u16 evt)
+{
+	if (level == PSH_DBG_CTRACE)
+		return ctrace_str[evt];
+	else if (level == PSH_DBG_DTRACE)
+		return dtrace_str[evt];
+	if (level == PSH_DBG_MTRACE)
+		return mtrace_str[evt];
+	else {
+		int level_index = 0;
+		u16 mid_val = level;
+
+		while (mid_val > 1) {
+			mid_val /= 2;
+			level_index++;
+		}
+		return level_str[level_index];
+	}
+}
+
 /*
  * return value = 0	no valid data frame
  * return value > 0	data frame
@@ -607,6 +719,13 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 	struct cmd_resp *resp = dbuf;
 	const struct snr_info *sinfo;
 	const struct resp_version *version;
+	u32 curtime;
+	int len;
+	const char *sensor_name;
+	const char *event_name;
+	const char *context_name;
+	struct trace_data *out_data;
+	char msg_str[STR_BUFF_SIZE];
 
 	switch (resp->type) {
 	case RESP_BIST_RESULT:
@@ -624,9 +743,9 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 		sinfo = (struct snr_info *)resp->buf;
 		if (!resp->data_len) {
 			complete(&psh_ia_data->get_status_comp);
-			ia_handle_snr_info(&psh_ia_data->circ_dbg, NULL);
+			ia_handle_snr_info(psh_ia_data, NULL);
 		} else if (SNR_INFO_SIZE(sinfo) == resp->data_len)
-			ia_handle_snr_info(&psh_ia_data->circ_dbg, sinfo);
+			ia_handle_snr_info(psh_ia_data, sinfo);
 		else {
 			pr_err("Wrong RESP_GET_STATUS!\n");
 			return 0;
@@ -659,6 +778,27 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 		}
 		complete(&psh_ia_data->cmd_version_comp);
 		return 0;
+	case RESP_TRACE_MSG:
+		out_data = (struct trace_data *)resp->buf;
+		while (out_data < resp->buf + resp->data_len) {
+			curtime = out_data->timestamp;
+			sensor_name = sensor_get_name(out_data->sensor_id,
+								psh_ia_data);
+			event_name = _get_evt_str(out_data->type,
+					out_data->event);
+			context_name = sensor_get_name(out_data->sensor_cnt,
+								psh_ia_data);
+
+			len = snprintf(msg_str, STR_BUFF_SIZE,
+						"[%u,%s,%s,%s]\n",
+						curtime, sensor_name,
+						event_name, context_name);
+
+			ia_circ_put_data(&psh_ia_data->circ_dbg,
+					msg_str, len);
+			out_data++;
+		}
+		return size;
 	default:
 		break;
 	}
@@ -711,6 +851,7 @@ int psh_ia_common_init(struct device *dev, struct psh_ia_priv **data)
 	init_completion(&psh_ia_data->cmd_load_comp);
 	init_completion(&psh_ia_data->cmd_counter_comp);
 	init_completion(&psh_ia_data->cmd_version_comp);
+	INIT_LIST_HEAD(&psh_ia_data->sensor_list);
 
 	psh_ia_data->reset_in_progress = 0;
 
@@ -791,6 +932,7 @@ priv_err:
 
 void psh_ia_common_deinit(struct device *dev)
 {
+	struct sensor_db *sensor_obj, *sensor_tmp;
 	struct psh_ia_priv *psh_ia_data =
 			(struct psh_ia_priv *)dev_get_drvdata(dev);
 
@@ -810,6 +952,12 @@ void psh_ia_common_deinit(struct device *dev)
 		&sensor_dev_attr_fw_version.dev_attr.attr);
 	sysfs_remove_bin_file(&dev->kobj, &bin_attr);
 	sysfs_remove_bin_file(&dev->kobj, &dbg_attr);
+
+	list_for_each_entry_safe(sensor_obj, sensor_tmp,
+				&psh_ia_data->sensor_list, list) {
+		list_del(&sensor_obj->list);
+		kfree(sensor_obj);
+	}
 
 	kfree(psh_ia_data->circ.buf);
 

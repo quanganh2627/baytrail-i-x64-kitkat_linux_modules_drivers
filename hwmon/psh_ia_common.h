@@ -55,6 +55,7 @@ enum resp_type {
 	RESP_COMP_CAL_RESULT,
 	RESP_COUNTER,
 	RESP_GET_VERSION,
+	RESP_TRACE_MSG,
 };
 
 #define CMD_PARAM_MAX_SIZE ((u16)60)
@@ -197,6 +198,8 @@ struct frame_head {
 
 #define CIRC_SIZE (1024 * 64)
 
+#define STR_BUFF_SIZE 256
+
 struct psh_ia_priv {
 	struct loop_buffer lbuf;	/* loop bufer */
 	struct page *pg;
@@ -211,6 +214,7 @@ struct psh_ia_priv {
 	struct completion cmd_load_comp;
 	struct completion cmd_counter_comp;
 	struct completion cmd_version_comp;
+	struct list_head sensor_list;
 	u32 reset_in_progress;
 	u32 load_in_progress;
 	u32 status_bitmask;
@@ -232,4 +236,56 @@ int do_setup_ddr(struct device *dev);
 int process_send_cmd(struct psh_ia_priv *psh_ia_data,
 			int ch, struct ia_cmd *cmd, int len);
 int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size);
+
+#define PSH_ITSELF     (PHY_SENSOR_BASE) /* means PSH itself */
+#define PORT_SENSOR_NUM (PORT_SENSOR_MAX_NUM - PORT_SENSOR_BASE - 1)
+#define PORT_SENSOR_INDEX(x) ( \
+		(x > PORT_SENSOR_BASE && x < PORT_SENSOR_MAX_NUM) \
+		? (x - PORT_SENSOR_BASE - 1) : 0)
+
+
+#define PSH_DBG_ALL     ((u16)-1)
+#define PSH_DBG_FATAL   ((u16)(0x1 << 0x0))
+#define PSH_DBG_ERR     ((u16)(0x1 << 0x1))
+#define PSH_DBG_WARN    ((u16)(0x1 << 0x2))
+#define PSH_DBG_INFO    ((u16)(0x1 << 0x3))
+#define PSH_DBG_DBG     ((u16)(0x1 << 0x4))
+#define PSH_DBG_CTRACE  ((u16)(0x1 << 0x5))     /* config path tracing */
+#define PSH_DBG_DTRACE  ((u16)(0x1 << 0x6))     /* data path tracing */
+#define PSH_DBG_MTRACE  ((u16)(0x1 << 0x7))     /* mutex_exec tracing */
+
+/* port sensor is fixed, other sensor can be created dynamically */
+enum sensor_type {
+	PHY_SENSOR_BASE = 0,
+	PORT_SENSOR_BASE = 200,
+	CS_PORT,        /* port for streaming configuration and uploading */
+	GS_PORT,        /* port for get_single configuration and uploading */
+#if defined(CONFIG_HAVE_SENSOR_EVENT)
+	EVT_PORT,       /* port for event configuration and uploading */
+#endif
+	PORT_SENSOR_MAX_NUM,
+};
+
+static const char sensor_port_str[PORT_SENSOR_NUM][SNR_NAME_MAX_LEN] = {
+	"CSPRT",
+	"GSPRT",
+#if defined(CONFIG_HAVE_SENSOR_EVENT)
+	"EVPRT",
+#endif
+};
+
+struct sensor_db {
+	u8 sid;
+	char sensor_name[SNR_NAME_MAX_LEN];
+	struct list_head list;
+} __packed;
+
+struct trace_data {
+	u32 timestamp;
+	u16 type;
+	u16 event;
+	u8 sensor_id;
+	u8 sensor_cnt;
+} __packed;
+
 #endif
