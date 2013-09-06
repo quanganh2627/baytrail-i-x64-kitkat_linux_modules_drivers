@@ -11,3 +11,12 @@ config I2C_DESIGNWARE_PCI_FORK
 
 	  This driver can also be built as a module.  If so, the module
 	  will be called i2c-designware-pci.
+
+config I2C_PMIC
+	bool "PMIC I2C Adapter"
+	depends on INTEL_SCU_IPC
+	help
+	  Say Y here if you have PMIC I2C adapter.
+
+	  PMIC-I2C adapter driver to handle I2C transactions
+	  in the PMIC's I2C bus.
