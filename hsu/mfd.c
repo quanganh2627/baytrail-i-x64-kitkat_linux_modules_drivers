@@ -235,7 +235,7 @@ static void serial_set_alt(int index)
 	if (!phsu->irq_port_and_dma)
 		disable_irq(phsu->dma_irq);
 	serial_sched_stop(up);
-	if (up->use_dma && up->hw_type == HSU_INTEL) {
+	if (up->use_dma && up->hw_type == hsu_intel) {
 		txc->uport = up;
 		rxc->uport = up;
 	}
@@ -273,24 +273,6 @@ static void serial_clear_alt(int index)
 		enable_irq(phsu->dma_irq);
 	enable_irq(up->port.irq);
 	pm_runtime_put(up->dev);
-}
-
-static inline void dw_set_clk(struct uart_hsu_port *up, u32 m, u32 n)
-{
-	u32 param, update_bit;
-
-	update_bit = 1 << 31;
-	param = (m << 1) | (n << 16) | 0x1;
-
-	writel(param, (up->port.membase + 0x800));
-	writel((param | update_bit), (up->port.membase + 0x800));
-	writel(param, (up->port.membase + 0x800));
-}
-
-static inline void dw_hw_reset(struct uart_hsu_port *up)
-{
-	writel(0, (up->port.membase + 0x804));
-	writel(3, (up->port.membase + 0x804));
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -934,7 +916,7 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 
 	up->port_irq_num++;
 
-	if (up->hw_type == HSU_INTEL) {
+	if (up->hw_type == hsu_intel) {
 		if (unlikely(!test_bit(flag_set_alt, &up->flags))) {
 			up->port_irq_no_alt++;
 			return IRQ_NONE;
@@ -966,7 +948,7 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 	}
 
 	/* DesignWare HW's DMA mode still needs the port irq */
-	if (up->use_dma && up->hw_type == HSU_INTEL) {
+	if (up->use_dma && up->hw_type == hsu_intel) {
 		if (phsu->irq_port_and_dma) {
 			phsu->int_sts = mfd_readl(phsu, HSU_GBL_DMAISR);
 			if (phsu->int_sts & (3 << (up->index * 2)))
@@ -1112,8 +1094,8 @@ static int serial_hsu_startup(struct uart_port *port)
 	pm_runtime_get_sync(up->dev);
 
 	/* HW start it */
-	if (up->hw_reset)
-		up->hw_reset(up);
+	if (cfg->hw_reset)
+		cfg->hw_reset(up->port.membase);
 
 	if (console_first_init && test_bit(flag_console, &up->flags)) {
 		serial_sched_stop(up);
@@ -1186,7 +1168,7 @@ static int serial_hsu_startup(struct uart_port *port)
 	 * anyway, so we don't enable them here.
 	 */
 	/* bit 4 for DW is reserved, but SEG need it to be set */
-	if (!up->use_dma || up->hw_type == HSU_DW)
+	if (!up->use_dma || up->hw_type == hsu_dw)
 		up->ier = UART_IER_RLSI | UART_IER_RDI | UART_IER_RTOIE;
 	else
 		up->ier = 0;
@@ -1321,6 +1303,9 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 	unsigned char cval, fcr = 0;
 	unsigned long flags;
 	unsigned int baud, quot, clock, bits;
+	/* 0x3d09 is default dividor value refer for deatils
+	 * please refer high speed UART HAS documents.
+	 */
 	u32 ps = 0, mul = 0, div = 0x3D09, m = 0, n = 0;
 
 	switch (termios->c_cflag & CSIZE) {
@@ -1359,7 +1344,7 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 
 	baud = uart_get_baud_rate(port, termios, old, 0, 4000000);
 
-	if (up->hw_type == HSU_INTEL) {
+	if (up->hw_type == hsu_intel) {
 		/*
 		 * If base clk is 50Mhz, and the baud rate come from:
 		 *	baud = 50M * MUL / (DIV * PS * DLAB)
@@ -1514,7 +1499,7 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 	serial_out(up, UART_DLM, up->dlm);		/* MS of divisor */
 	serial_out(up, UART_LCR, cval);			/* reset DLAB */
 
-	if (up->hw_type == HSU_INTEL) {
+	if (up->hw_type == hsu_intel) {
 		up->mul	= mul;
 		up->div = div;
 		up->ps	= ps;
@@ -1523,7 +1508,8 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 		serial_out(up, UART_PS, up->ps);	/* set PS */
 	} else {
 		if (m != up->m || n != up->n) {
-			dw_set_clk(up, m, n);
+			if (cfg->set_clk)
+				cfg->set_clk(m, n, up->port.membase);
 			up->m = m;
 			up->n = n;
 		}
@@ -1779,7 +1765,8 @@ static irqreturn_t wakeup_irq(int irq, void *dev)
 static void hsu_flush_rxfifo(struct uart_hsu_port *up)
 {
 	unsigned int lsr, cnt;
-	if (up->hw_type == HSU_INTEL) {
+
+	if (up->hw_type == hsu_intel) {
 		cnt = serial_in(up, UART_FOR) & 0x7F;
 		if (cnt)
 			dev_info(up->dev,
@@ -1799,6 +1786,8 @@ static void hsu_flush_rxfifo(struct uart_hsu_port *up)
 
 static void hsu_regs_context(struct uart_hsu_port *up, int op)
 {
+	struct hsu_port_cfg *cfg = phsu->configs[up->index];
+
 	if (op == context_load) {
 		/*
 		 * Delay a while before HW get stable. Without this the
@@ -1809,10 +1798,10 @@ static void hsu_regs_context(struct uart_hsu_port *up, int op)
 		 * the HSU HW in runtime suspend. While in Penwell/CLV it is
 		 * only clock gated.
 		*/
-		usleep_range(500, 500);
+		usleep_range(500, 510);
 
-		if (up->hw_reset)
-			up->hw_reset(up);
+		if (cfg->hw_reset)
+			cfg->hw_reset(up->port.membase);
 
 		serial_out(up, UART_LCR, up->lcr);
 		serial_out(up, UART_LCR, up->lcr | UART_LCR_DLAB);
@@ -1820,12 +1809,14 @@ static void hsu_regs_context(struct uart_hsu_port *up, int op)
 		serial_out(up, UART_DLM, up->dlm);
 		serial_out(up, UART_LCR, up->lcr);
 
-		if (up->hw_type == HSU_INTEL) {
+		if (up->hw_type == hsu_intel) {
 			serial_out(up, UART_MUL, up->mul);
 			serial_out(up, UART_DIV, up->div);
 			serial_out(up, UART_PS, up->ps);
-		} else
-			dw_set_clk(up, up->m, up->n);
+		} else {
+			if (cfg->set_clk)
+				cfg->set_clk(up->m, up->n, up->port.membase);
+		}
 
 		serial_out(up, UART_MCR, up->mcr);
 		serial_out(up, UART_FCR, up->fcr);
@@ -1860,7 +1851,7 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 				&& serial_in(up, UART_FOR) & 0x7F)
 			goto busy;
 
-		if (up->hw_type == HSU_INTEL) {
+		if (up->hw_type == hsu_intel) {
 			if (chan_readl(up->rxc, HSU_CH_D0SAR) >
 					up->rxbuf.dma_addr)
 				goto busy;
@@ -1875,7 +1866,7 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 		disable_irq(phsu->dma_irq);
 
 	if (cfg->hw_set_rts)
-		usleep_range(up->byte_delay, up->byte_delay);
+		usleep_range(up->byte_delay, up->byte_delay + 1);
 
 	serial_sched_stop(up);
 	set_bit(flag_suspend, &up->flags);
@@ -1926,7 +1917,7 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 		cfg->hw_suspend_post(up->index);
 	if (!phsu->irq_port_and_dma)
 		enable_irq(phsu->dma_irq);
-	if (up->hw_type == HSU_DW)
+	if (up->hw_type == hsu_dw)
 		enable_irq(up->port.irq);
 
 	if (tty)
@@ -1938,7 +1929,7 @@ err:
 		cfg->hw_set_rts(up->index, 0);
 	clear_bit(flag_suspend, &up->flags);
 	enable_irq(up->port.irq);
-	if (up->use_dma && up->hw_type == HSU_INTEL)
+	if (up->use_dma && up->hw_type == hsu_intel)
 		intel_dma_do_rx(up, 0);
 	if (!phsu->irq_port_and_dma)
 		enable_irq(phsu->dma_irq);
@@ -1963,7 +1954,7 @@ static int serial_hsu_do_resume(struct pci_dev *pdev)
 
 	if (!test_and_clear_bit(flag_suspend, &up->flags))
 		return 0;
-	if (up->hw_type == HSU_DW)
+	if (up->hw_type == hsu_dw)
 		disable_irq(up->port.irq);
 	if (cfg->hw_context_save)
 		hsu_regs_context(up, context_load);
@@ -2096,7 +2087,7 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 			}
 			break;
 		case qcmd_stop_rx:
-			if (!up->use_dma || up->hw_type == HSU_DW) {
+			if (!up->use_dma || up->hw_type == hsu_dw) {
 				up->ier &= ~UART_IER_RLSI;
 				up->port.read_status_mask &= ~UART_LSR_DR;
 				serial_out(up, UART_IER, up->ier);
@@ -2138,7 +2129,7 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 			up->port_irq_cmddone++;
 
 			/* Baytrail patform use shared IRQ and need more care */
-			if (up->hw_type == HSU_INTEL) {
+			if (up->hw_type == hsu_intel) {
 				iir = serial_in(up, UART_IIR);
 			} else {
 				if (up->iir & 0x1)
@@ -2168,7 +2159,7 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 			if (lsr & UART_LSR_DR) {
 				if (!up->use_dma) {
 					receive_chars(up, &lsr);
-				} else if (up->hw_type == HSU_DW) {
+				} else if (up->hw_type == hsu_dw) {
 					if ((iir & 0xf) == 0xc) {
 						/*
 						 * RX timeout IRQ, the DMA
@@ -2188,7 +2179,7 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 			enable_irq(up->port.irq);
 			break;
 		case qcmd_dma_irq:
-			/* Only HSU_INTEL has this irq */
+			/* Only hsu_intel has this irq */
 			up->dma_irq_cmddone++;
 			if (phsu->int_sts & (1 << txc->id)) {
 				status = chan_readl(txc, HSU_CH_SR);
@@ -2338,9 +2329,6 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	if (port == -1)
 		return 0;
 
-	if (pdev->device == 0x0f0a || pdev->device == 0x0f0c)
-		port = (int)ent->driver_data;
-
 	cfg = hsu_port_func_cfg + port;
 	if (!cfg)
 		return -1;
@@ -2357,12 +2345,7 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	up = phsu->port + index;
 	pci_set_drvdata(pdev, up);
 
-	if (pdev->device == 0x0f0a || pdev->device == 0x0f0c)
-		up->hw_type = HSU_DW;
-	else
-		up->hw_type = HSU_INTEL;
-
-	pr_info("Found a %s HSU\n", up->hw_type ? "Designware" : "Intel");
+	pr_info("Found a %s HSU\n", cfg->hw_ip ? "Designware" : "Intel");
 
 	up->dev = &pdev->dev;
 	up->port.type = PORT_MFD;
@@ -2373,6 +2356,7 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	up->port.fifosize = 64;
 	up->port.ops = &serial_hsu_pops;
 	up->port.flags = UPF_IOREMAP;
+	up->hw_type = cfg->hw_ip;
 	/* calculate if DLAB=1, the ideal uartclk */
 	if (cfg->hw_get_clk)
 		clock = cfg->hw_get_clk();
@@ -2388,7 +2372,7 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	else
 		uclk = 1;
 
-	if (up->hw_type == HSU_INTEL)
+	if (up->hw_type == hsu_intel)
 		up->port.uartclk = 115200 * uclk * 16;
 	else
 		up->port.uartclk = 115200 * 32 * 16;
@@ -2396,13 +2380,12 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	up->port.irq = pdev->irq;
 	up->port.dev = &pdev->dev;
 
-	if (up->hw_type == HSU_INTEL) {
+	if (up->hw_type == hsu_intel) {
 		up->txc = &phsu->chans[index * 2];
 		up->rxc = &phsu->chans[index * 2 + 1];
 		up->dma_ops = &intel_dma_ops;
 	} else {
 		up->dma_ops = &dw_dma_ops;
-		up->hw_reset = dw_hw_reset;
 	}
 
 	if (cfg->has_alt) {
