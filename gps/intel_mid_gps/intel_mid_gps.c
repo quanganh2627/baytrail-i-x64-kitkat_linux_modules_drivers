@@ -18,6 +18,8 @@
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
 #include <linux/lnw_gpio.h>
+#include <linux/acpi.h>
+#include <linux/acpi_gpio.h>
 
 #include <linux/intel_mid_gps.h>
 
@@ -140,7 +142,15 @@ static struct attribute_group intel_mid_gps_attr_group = {
 static int intel_mid_gps_init(struct platform_device *pdev)
 {
 	int ret;
-	struct intel_mid_gps_platform_data *pdata = pdev->dev.platform_data;
+	struct intel_mid_gps_platform_data *pdata = dev_get_drvdata(&pdev->dev);
+
+	/* we need to rename the sysfs entry to match the one created with SFI,
+	   and we are sure that there is always one GPS per platform */
+	if (ACPI_HANDLE(&pdev->dev)) {
+		ret = sysfs_rename_dir(&pdev->dev.kobj, DRIVER_NAME);
+		if (ret)
+			pr_err("%s: failed to rename sysfs entry\n", __func__);
+	}
 
 	ret = sysfs_create_group(&pdev->dev.kobj, &intel_mid_gps_attr_group);
 	if (ret)
@@ -202,7 +212,7 @@ error_gpio_reset_request:
 
 static void intel_mid_gps_deinit(struct platform_device *pdev)
 {
-	struct intel_mid_gps_platform_data *pdata = pdev->dev.platform_data;
+	struct intel_mid_gps_platform_data *pdata = dev_get_drvdata(&pdev->dev);
 
 	if (gpio_is_valid(pdata->gpio_enable))
 		gpio_free(pdata->gpio_enable);
@@ -215,36 +225,56 @@ static void intel_mid_gps_deinit(struct platform_device *pdev)
 
 static int intel_mid_gps_probe(struct platform_device *pdev)
 {
+	struct intel_mid_gps_platform_data *pdata = NULL;
 	int ret = 0;
 
 	pr_info("%s probe called\n", dev_name(&pdev->dev));
 
-	if (strcmp(dev_name(&pdev->dev), DRIVER_NAME) == 0)
-		ret = intel_mid_gps_init(pdev);
+	if (ACPI_HANDLE(&pdev->dev)) {
+		/* create a new platform data that will be
+		   populated with gpio data from ACPI table */
+		struct acpi_gpio_info info;
+		pdata = kzalloc(sizeof(struct intel_mid_gps_platform_data),
+			GFP_KERNEL);
+
+		if (!pdata)
+			return -ENOMEM;
+
+		pdata->gpio_reset = acpi_get_gpio_by_index(&pdev->dev,
+							   0, &info);
+		pdata->gpio_enable = acpi_get_gpio_by_index(&pdev->dev,
+							    1, &info);
+
+		platform_set_drvdata(pdev, pdata);
+	} else {
+		platform_set_drvdata(pdev, pdev->dev.platform_data);
+	}
+
+	ret = intel_mid_gps_init(pdev);
 
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to initalize %s\n",
 			dev_name(&pdev->dev));
-		goto exit;
+
+		if (ACPI_HANDLE(&pdev->dev))
+			kfree(pdata);
 	}
-
-	platform_set_drvdata(pdev, pdev->dev.platform_data);
-
-exit:
 	return ret;
 }
 
 static int intel_mid_gps_remove(struct platform_device *pdev)
 {
-	if (strcmp(dev_name(&pdev->dev), DRIVER_NAME) == 0)
-		intel_mid_gps_deinit(pdev);
+	intel_mid_gps_deinit(pdev);
+
+	if (ACPI_HANDLE(&pdev->dev))
+		kfree(dev_get_drvdata(&pdev->dev));
 
 	return 0;
 }
 
 static void intel_mid_gps_shutdown(struct platform_device *pdev)
 {
-	struct intel_mid_gps_platform_data *pdata = pdev->dev.platform_data;
+	struct intel_mid_gps_platform_data *pdata = dev_get_drvdata(&pdev->dev);
 
 	pr_info("%s shutdown called\n", dev_name(&pdev->dev));
 
@@ -257,9 +287,15 @@ static void intel_mid_gps_shutdown(struct platform_device *pdev)
  *		Driver initialisation and finalization
  *********************************************************************/
 
-static const struct platform_device_id gps_id_table[] = {
-	{DRIVER_NAME, 0},
+#ifdef CONFIG_ACPI
+static struct acpi_device_id acpi_gps_id_table[] = {
+	/* ACPI IDs here */
+	{"BCM4752"},
+	{ }
 };
+
+MODULE_DEVICE_TABLE(acpi, acpi_gps_id_table);
+#endif
 
 static struct platform_driver intel_mid_gps_driver = {
 	.probe		= intel_mid_gps_probe,
@@ -267,8 +303,10 @@ static struct platform_driver intel_mid_gps_driver = {
 	.driver		= {
 		.name	= DRIVER_NAME,
 		.owner	= THIS_MODULE,
+#ifdef CONFIG_ACPI
+		.acpi_match_table = ACPI_PTR(acpi_gps_id_table),
+#endif
 	},
-	.id_table = gps_id_table,
 	.shutdown	= intel_mid_gps_shutdown,
 };
 
