@@ -1529,9 +1529,9 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	chc.otg = usb_get_transceiver();
 #else
-	chc.otg = usb_get_phy(USB_PHY_TYPE_USB3);
+	chc.otg = usb_get_phy(USB_PHY_TYPE_USB2);
 #endif
-	if (!chc.otg) {
+	if (!chc.otg || IS_ERR(chc.otg)) {
 		dev_err(&pdev->dev, "Failed to get otg transceiver!!\n");
 		retval = -ENOMEM;
 		goto otg_req_failed;
