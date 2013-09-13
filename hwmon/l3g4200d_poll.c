@@ -571,7 +571,7 @@ static struct device_attribute attributes[] = {
 	__ATTR(enable, 0644, attr_enable_show, attr_enable_store),
 	__ATTR(range, 0644, attr_range_show, attr_range_store),
 	__ATTR(enable_selftest, 0644, attr_get_selftest, attr_set_selftest),
-	__ATTR(registers, 0600, attr_reg_get, NULL),
+	__ATTR(registers, 0400, attr_reg_get, NULL),
 };
 
 static int create_sysfs_interfaces(struct device *dev)

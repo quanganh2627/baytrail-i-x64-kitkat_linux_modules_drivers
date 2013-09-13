@@ -1166,7 +1166,7 @@ static int serial_hsu_startup(struct uart_port *port)
 
 	/* DMA init */
 	if (up->use_dma) {
-		ret = up->dma_ops->init(up);
+		ret = up->dma_ops->init ? up->dma_ops->init(up) : -ENODEV;
 		if (ret) {
 			dev_warn(up->dev, "Fail to init DMA, will use PIO\n");
 			up->use_dma = 0;

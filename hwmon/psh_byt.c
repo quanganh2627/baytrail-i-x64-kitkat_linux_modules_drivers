@@ -297,14 +297,15 @@ static int psh_probe(struct i2c_client *client,
 		}
 	}
 
+	/* set the flag to to enable irq when need */
+	irq_set_status_flags(client->irq, IRQ_NOAUTOEN);
+
 	ret = request_threaded_irq(client->irq, NULL, psh_byt_irq_thread,
 			IRQF_TRIGGER_FALLING | IRQF_ONESHOT, "psh_byt", client);
 	if (ret) {
 		dev_err(&client->dev, "fail to request irq\n");
 		goto irq_err;
 	}
-
-	disable_irq(client->irq);
 
 	psh_if_info->irq_disabled = 1;
 

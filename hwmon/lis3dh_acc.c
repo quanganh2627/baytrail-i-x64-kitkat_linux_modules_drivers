@@ -1167,7 +1167,7 @@ static int lis3dh_acc_probe(struct i2c_client *client,
 			 acc->irq1, acc->pdata->gpio_int1);
 
 		err = request_threaded_irq(acc->irq1, NULL, lis3dh_acc_isr1,
-				IRQF_TRIGGER_RISING, "lis3dh_acc_irq1", acc);
+				IRQF_TRIGGER_RISING | IRQF_ONESHOT, "lis3dh_acc_irq1", acc);
 		if (err < 0) {
 			dev_err(&client->dev, "request irq1 failed: %d\n", err);
 			goto out_free_input;

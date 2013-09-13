@@ -45,7 +45,7 @@ config INTEL_MID_OSIP_DEBUG_FS
 
 config INTEL_PSH_IPC
 	bool "Intel PSH IPC Support"
-	depends on X86_INTEL_MID && X86_MRFLD
+	depends on X86_INTEL_MID
 	---help---
 	  PSH(Platform Services Hub) is a low frequence IA core on Tangier Platform,
 	  whose power consumption is quite low. PSH runs RTOS software inside itself,

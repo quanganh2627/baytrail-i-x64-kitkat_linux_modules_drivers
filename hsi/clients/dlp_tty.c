@@ -385,9 +385,9 @@ static void dlp_tty_complete_rx(struct hsi_msg *pdu)
 	if (!dlp_tty_is_link_valid()) {
 		if ((EDLP_TTY_RX_DATA_REPORT) ||
 			(EDLP_TTY_RX_DATA_LEN_REPORT))
-			pr_debug(DRVNAME ": TTY: CH%d RX PDU ignored (close:%d, Time out: %d)\n",
-				xfer_ctx->channel->ch_id,
-				dlp_drv.tty_closed, dlp_drv.tx_timeout);
+				pr_debug(DRVNAME ": TTY: CH%d RX PDU ignored (close:%d, Time out: %d)\n",
+					xfer_ctx->channel->ch_id,
+					dlp_drv.tty_closed, dlp_drv.tx_timeout);
 		return;
 	}
 
@@ -869,11 +869,12 @@ int dlp_tty_do_write(struct dlp_xfer_ctx *xfer_ctx, unsigned char *buf,
 	copied = 0;
 
 	if (!dlp_ctx_have_credits(xfer_ctx, xfer_ctx->channel)) {
-		pr_warn(DRVNAME ": CH%d TX ignored (credits:%d, seq_num:%d, closed:%d, timeout:%d)",
-			xfer_ctx->channel->ch_id,
-			xfer_ctx->channel->credits,
-			xfer_ctx->seq_num,
-			dlp_drv.tty_closed, dlp_drv.tx_timeout);
+		if ((EDLP_TTY_TX_DATA_REPORT) ||
+			(EDLP_TTY_TX_DATA_LEN_REPORT))
+				pr_warn(DRVNAME ": CH%d (HSI CH%d) out of credits (%d)",
+					xfer_ctx->channel->ch_id,
+					xfer_ctx->channel->hsi_channel,
+					xfer_ctx->seq_num);
 		goto out;
 	}
 
