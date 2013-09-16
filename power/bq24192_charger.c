@@ -785,6 +785,19 @@ static int bq24192_enable_hw_term(struct bq24192_chip *chip, bool hw_term_en)
 
 	dev_info(&chip->client->dev, "%s\n", __func__);
 
+	/* Disable and enable charging to restart the charging */
+	ret = bq24192_reg_multi_bitset(chip->client,
+					BQ24192_POWER_ON_CFG_REG,
+					POWER_ON_CFG_CHRG_CFG_DIS,
+					CHR_CFG_BIT_POS,
+					CHR_CFG_BIT_LEN);
+	if (ret < 0) {
+		dev_warn(&chip->client->dev,
+			"i2c reg write failed: reg: %d, ret: %d\n",
+			BQ24192_POWER_ON_CFG_REG, ret);
+		return ret;
+	}
+
 	/* Read the timer control register */
 	ret = bq24192_read_reg(chip->client, BQ24192_CHRG_TIMER_EXP_CNTL_REG);
 	if (ret < 0) {
@@ -1289,6 +1302,7 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 		chip->online = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_ENABLE_CHARGING:
+		bq24192_enable_hw_term(chip, val->intval);
 		ret = bq24192_enable_charging(chip, val->intval);
 
 		if (ret < 0)
@@ -1298,9 +1312,7 @@ static int bq24192_usb_set_property(struct power_supply *psy,
 		else
 			chip->is_charging_enabled = val->intval;
 
-		if (val->intval)
-			bq24192_enable_hw_term(chip, true);
-		else
+		if (!val->intval)
 			cancel_delayed_work_sync(&chip->chrg_full_wrkr);
 		break;
 	case POWER_SUPPLY_PROP_ENABLE_CHARGER:
@@ -1480,7 +1492,7 @@ static irqreturn_t bq24192_irq_isr(int irq, void *devid)
 static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 {
 	struct bq24192_chip *chip = (struct bq24192_chip *)devid;
-	int reg_status, reg_fault, temp;
+	int reg_status, reg_fault;
 
 	dev_info(&chip->client->dev,
 		"IRQ Handled for charger interrupt: %d\n", irq);
@@ -1499,12 +1511,17 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 
 	if (reg_status == SYSTEM_STAT_CHRG_DONE) {
 		dev_warn(&chip->client->dev, "HW termination happened\n");
-
 		bq24192_enable_hw_term(chip, false);
 		bq24192_resume_charging(chip);
 		/* schedule the thread to let the framework know about FULL */
 		schedule_delayed_work(&chip->chrg_full_wrkr, 0);
 	}
+
+	/* Check if battery fault condition occured. Reading the register
+	   value two times to get reliable reg value, recommended by vendor*/
+	reg_fault = bq24192_read_reg(chip->client, BQ24192_FAULT_STAT_REG);
+	if (reg_fault < 0)
+		dev_err(&chip->client->dev, "FAULT register read failed:\n");
 
 	reg_fault = bq24192_read_reg(chip->client, BQ24192_FAULT_STAT_REG);
 	if (reg_fault < 0)
@@ -1520,22 +1537,8 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 		} else
 			dev_info(&chip->client->dev, "No charger connected\n");
 	}
-	/*updating health status when interrupt occurs*/
-	temp = fg_chip_get_property(POWER_SUPPLY_PROP_TEMP);
-
-	if (temp == -ENODEV || temp == -EINVAL) {
-		dev_err(&chip->client->dev,
-			"%s Failed to read batt temp\n", __func__);
-	}
-
-	temp /= 10;
-
-	if ((temp <= chip->min_temp) ||
-		(temp >= chip->max_temp)) {
-			/*updating health status when the
-				status change interrupt occurs*/
-				power_supply_changed(&chip->usb);
-	}
+	if (reg_status != SYSTEM_STAT_CHRG_DONE)
+		power_supply_changed(&chip->usb);
 
 	return IRQ_HANDLED;
 }
