@@ -56,12 +56,10 @@ static void mdm_ctrl_handle_hangup(struct work_struct *work)
 	modem_rst = drv->hangup_causes;
 
 	if (modem_rst & MDM_CTRL_HU_RESET)
-		mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_WARM_BOOT);
+		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_WARM_BOOT);
 
 	if (modem_rst & MDM_CTRL_HU_COREDUMP)
-		mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_COREDUMP);
-
-	flush_workqueue(drv->change_state_wq);
+		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_COREDUMP);
 
 	pr_info(DRVNAME ": %s (reasons: 0x%X)\n", __func__, drv->hangup_causes);
 }
@@ -89,13 +87,10 @@ static int mdm_ctrl_cold_boot(struct mdm_ctrl *drv)
 	pr_warn(DRVNAME ": Cold boot requested");
 
 	/* Set the current modem state */
-	mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_COLD_BOOT);
-	flush_workqueue(drv->change_state_wq);
+	mdm_ctrl_set_state(drv, MDM_CTRL_STATE_COLD_BOOT);
 
 	/* AP request => just ignore the modem reset */
-	spin_lock_irqsave(&drv->state_lck, flags);
-	mdm_ctrl_set_reset_ongoing(drv, 1);
-	spin_unlock_irqrestore(&drv->state_lck, flags);
+	atomic_set(&drv->rst_ongoing, 1);
 
 	rst = cpu->get_gpio_rst(cpu_data);
 	pwr_on = cpu->get_gpio_pwr(cpu_data);
@@ -124,14 +119,11 @@ static int mdm_ctrl_normal_warm_reset(struct mdm_ctrl *drv)
 
 	pr_info(DRVNAME ": Normal warm reset requested\r\n");
 
-	spin_lock_irqsave(&drv->state_lck, flags);
 	/* AP requested reset => just ignore */
-	mdm_ctrl_set_reset_ongoing(drv, 1);
-	spin_unlock_irqrestore(&drv->state_lck, flags);
+	atomic_set(&drv->rst_ongoing, 1);
 
 	/* Set the current modem state */
-	mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_WARM_BOOT);
-	flush_workqueue(drv->change_state_wq);
+	mdm_ctrl_set_state(drv, MDM_CTRL_STATE_WARM_BOOT);
 
 	rst = cpu->get_gpio_rst(cpu_data);
 	wflash_delay = mdm->get_wflash_delay(mdm_data);
@@ -159,14 +151,11 @@ static int mdm_ctrl_flashing_warm_reset(struct mdm_ctrl *drv)
 
 	pr_info(DRVNAME ": Flashing warm reset requested");
 
-	spin_lock_irqsave(&drv->state_lck, flags);
 	/* AP requested reset => just ignore */
-	mdm_ctrl_set_reset_ongoing(drv, 1);
-	spin_unlock_irqrestore(&drv->state_lck, flags);
+	atomic_set(&drv->rst_ongoing, 1);
 
 	/* Set the current modem state */
-	mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_WARM_BOOT);
-	flush_workqueue(drv->change_state_wq);
+	mdm_ctrl_set_state(drv, MDM_CTRL_STATE_WARM_BOOT);
 
 	rst = cpu->get_gpio_rst(cpu_data);
 	wflash_delay = mdm->get_wflash_delay(mdm_data);
@@ -193,14 +182,11 @@ static int mdm_ctrl_power_off(struct mdm_ctrl *drv)
 
 	pr_info(DRVNAME ": Power OFF requested");
 
-	spin_lock_irqsave(&drv->state_lck, flags);
 	/* AP requested reset => just ignore */
-	mdm_ctrl_set_reset_ongoing(drv, 1);
-	spin_unlock_irqrestore(&drv->state_lck, flags);
+	atomic_set(&drv->rst_ongoing, 1);
 
 	/* Set the modem state to OFF */
-	mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_OFF);
-	flush_workqueue(drv->change_state_wq);
+	mdm_ctrl_set_state(drv, MDM_CTRL_STATE_OFF);
 
 	rst = cpu->get_gpio_rst(cpu_data);
 	mdm->power_off(mdm_data, rst);
@@ -239,7 +225,7 @@ static irqreturn_t mdm_ctrl_coredump_it(int irq, void *data)
 	}
 
 	/* Ignoring if Modem reset is ongoing. */
-	if (mdm_ctrl_get_reset_ongoing(drv) == 1) {
+	if (atomic_read(&drv->rst_ongoing) == 1) {
 		pr_err(DRVNAME ": CORE_DUMP while Modem Reset is ongoing\r\n");
 		goto out;
 	}
@@ -277,19 +263,17 @@ static irqreturn_t mdm_ctrl_reset_it(int irq, void *data)
 	/* If reset is ongoing we expect falling if applicable and rising
 	 * edge.
 	 */
-	reset_ongoing = mdm_ctrl_get_reset_ongoing(drv);
+	reset_ongoing = atomic_read(&drv->rst_ongoing);
 	if (reset_ongoing) {
 		pr_err(DRVNAME ": RESET_OUT 0x%x\r\n", value);
 
 		/* Rising EDGE (IPC ready) */
 		if (value) {
-			spin_lock_irqsave(&drv->state_lck, flags);
 			/* Reset the reset ongoing flag */
-			mdm_ctrl_set_reset_ongoing(drv, 0);
-			spin_unlock_irqrestore(&drv->state_lck, flags);
+			atomic_set(&drv->rst_ongoing, 0);
 
 			pr_err(DRVNAME ": IPC READY !\r\n");
-			mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_IPC_READY);
+			mdm_ctrl_set_state(drv, MDM_CTRL_STATE_IPC_READY);
 		}
 
 		goto out;
@@ -298,9 +282,7 @@ static irqreturn_t mdm_ctrl_reset_it(int irq, void *data)
 	pr_err(DRVNAME ": Unexpected RESET_OUT 0x%x\r\n", value);
 
 	/* Unexpected reset received */
-	spin_lock_irqsave(&drv->state_lck, flags);
-	mdm_ctrl_set_reset_ongoing(drv, 1);
-	spin_unlock_irqrestore(&drv->state_lck, flags);
+	atomic_set(&drv->rst_ongoing, 1);
 
 	/* Set the reason & launch the work to handle the hangup */
 	drv->hangup_causes |= MDM_CTRL_HU_RESET;
@@ -391,7 +373,6 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	unsigned int param;
 
 	pr_info(DRVNAME ": ioctl request 0x%x received \r\n", cmd);
-	flush_workqueue(drv->change_state_wq);
 	mdm_state = mdm_ctrl_get_state(drv);
 
 	switch (cmd) {
@@ -403,10 +384,10 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	case MDM_CTRL_POWER_ON:
 		/* Only allowed when modem is OFF or in unkown state */
 		if ((mdm_state == MDM_CTRL_STATE_OFF) ||
-			(mdm_state == MDM_CTRL_STATE_UNKNOWN))
+				(mdm_state == MDM_CTRL_STATE_UNKNOWN))
 			mdm_ctrl_cold_boot(drv);
 		else
-				/* Specific log in COREDUMP state */
+			/* Specific log in COREDUMP state */
 			if (mdm_state == MDM_CTRL_STATE_COREDUMP)
 				pr_err(DRVNAME ": Power ON not allowed (coredump)");
 			else
@@ -455,8 +436,7 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		     MDM_CTRL_STATE_IPC_READY |
 		     MDM_CTRL_STATE_FW_DOWNLOAD_READY);
 
-		mdm_ctrl_launch_work(drv, param);
-		flush_workqueue(drv->change_state_wq);
+		mdm_ctrl_set_state(drv, param);
 		break;
 
 	case MDM_CTRL_GET_STATE:
@@ -486,8 +466,8 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		       cmd_params.param);
 
 		ret = wait_event_interruptible_timeout(drv->event,
-						       drv->modem_state ==
-						       cmd_params.param,
+						       mdm_ctrl_get_state(drv)
+						       == cmd_params.param,
 						       msecs_to_jiffies
 						       (cmd_params.timeout));
 		if (!ret)
@@ -524,7 +504,6 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		drv->polled_states = param;
 		/* Poll is active ? */
 		if (waitqueue_active(&drv->wait_wq)) {
-			flush_workqueue(drv->change_state_wq);
 			mdm_state = mdm_ctrl_get_state(drv);
 			/* Check if current state is awaited */
 			if (mdm_state)
@@ -609,7 +588,6 @@ static unsigned int mdm_ctrl_dev_poll(struct file *filep,
 	unsigned int ret = 0;
 
 	/* Wait event change */
-	flush_workqueue(drv->change_state_wq);
 	poll_wait(filep, &drv->wait_wq, pt);
 
 	/* State notify */
@@ -671,22 +649,11 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	}
 
 	/* Initialization */
-	spin_lock_init(&new_drv->state_lck);
 	mutex_init(&new_drv->lock);
 	init_waitqueue_head(&new_drv->event);
 	init_waitqueue_head(&new_drv->wait_wq);
-	INIT_LIST_HEAD(&new_drv->next_state_link);
 
-	INIT_WORK(&new_drv->change_state_work, mdm_ctrl_set_state);
 	/* Create a high priority ordered workqueue to change modem state */
-	new_drv->change_state_wq =
-	    create_singlethread_workqueue(DRVNAME "-cs_wq");
-
-	if (!new_drv->change_state_wq) {
-		pr_err(DRVNAME ": Unable to create set state workqueue");
-		ret = -EIO;
-		goto free_drv;
-	}
 
 	INIT_WORK(&new_drv->hangup_work, mdm_ctrl_handle_hangup);
 
@@ -695,7 +662,7 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	if (!new_drv->hu_wq) {
 		pr_err(DRVNAME ": Unable to create control workqueue");
 		ret = -EIO;
-		goto free_change_state_wq;
+		goto free_drv;
 	}
 
 	/* Register the device */
@@ -733,8 +700,7 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 		goto del_class;
 	}
 
-	mdm_ctrl_launch_work(new_drv, MDM_CTRL_STATE_OFF);
-	flush_workqueue(new_drv->change_state_wq);
+	mdm_ctrl_set_state(new_drv, MDM_CTRL_STATE_OFF);
 
 	if (new_drv->pdata->mdm.init(new_drv->pdata->modem_data))
 		goto del_dev;
@@ -744,8 +710,8 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 		goto del_dev;
 
 	ret =
-	    request_irq(new_drv->pdata->
-			cpu.get_irq_rst(new_drv->pdata->cpu_data),
+	    request_irq(new_drv->pdata->cpu.
+			get_irq_rst(new_drv->pdata->cpu_data),
 			mdm_ctrl_reset_it,
 			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
 			IRQF_NO_SUSPEND, DRVNAME, new_drv);
@@ -756,8 +722,8 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	}
 
 	ret =
-	    request_irq(new_drv->pdata->
-			cpu.get_irq_cdump(new_drv->pdata->cpu_data),
+	    request_irq(new_drv->pdata->cpu.
+			get_irq_cdump(new_drv->pdata->cpu_data),
 			mdm_ctrl_coredump_it,
 			IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND, DRVNAME,
 			new_drv);
@@ -800,9 +766,6 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
  free_hu_wq:
 	destroy_workqueue(new_drv->hu_wq);
 
- free_change_state_wq:
-	destroy_workqueue(new_drv->change_state_wq);
-
  free_drv:
 	kfree(new_drv);
 
@@ -821,9 +784,6 @@ static int mdm_ctrl_module_remove(struct platform_device *pdev)
 	if (mdm_drv->is_mdm_ctrl_disabled)
 		goto out;
 
-	/* Delete the modem state worqueue */
-	destroy_workqueue(mdm_drv->change_state_wq);
-
 	/* Delete the modem hangup worqueue */
 	destroy_workqueue(mdm_drv->hu_wq);
 
@@ -834,11 +794,11 @@ static int mdm_ctrl_module_remove(struct platform_device *pdev)
 	unregister_chrdev_region(mdm_drv->tdev, 1);
 
 	if (mdm_drv->pdata->cpu.get_irq_cdump(mdm_drv->pdata->cpu_data) > 0)
-		free_irq(mdm_drv->pdata->
-			 cpu.get_irq_cdump(mdm_drv->pdata->cpu_data), NULL);
+		free_irq(mdm_drv->pdata->cpu.
+			 get_irq_cdump(mdm_drv->pdata->cpu_data), NULL);
 	if (mdm_drv->pdata->cpu.get_irq_rst(mdm_drv->pdata->cpu_data) > 0)
-		free_irq(mdm_drv->pdata->
-			 cpu.get_irq_rst(mdm_drv->pdata->cpu_data), NULL);
+		free_irq(mdm_drv->pdata->cpu.
+			 get_irq_rst(mdm_drv->pdata->cpu_data), NULL);
 
 	mdm_drv->pdata->mdm.cleanup(mdm_drv->pdata->modem_data);
 	mdm_drv->pdata->cpu.cleanup(mdm_drv->pdata->cpu_data);
