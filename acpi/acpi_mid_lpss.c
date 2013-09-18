@@ -22,6 +22,8 @@ ACPI_MODULE_NAME("acpi_mid_lpss");
 static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
 	/* MID LPSS I2C controller*/
 	{ "80860F41" },
+	/* MID LPSS HSU controller*/
+	{ "80860F0A" },
 	{ }
 };
 
