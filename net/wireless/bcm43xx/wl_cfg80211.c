@@ -167,6 +167,26 @@ static const struct ieee80211_regdomain brcm_regdom = {
 		REG_RULE(5470-10, 5850+10, 40, 6, 20, 0), }
 };
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+static const struct ieee80211_iface_limit if_limits[] = {
+	{.max = 3,
+		.types = BIT(NL80211_IFTYPE_AP)
+					| BIT(NL80211_IFTYPE_STATION)
+#ifdef WL_ENABLE_P2P_IF
+					| BIT(NL80211_IFTYPE_P2P_CLIENT)
+					| BIT(NL80211_IFTYPE_P2P_GO)
+#endif
+					,},
+};
+static const struct ieee80211_iface_combination if_combinations[] = {
+	{
+	.limits = if_limits,
+	.n_limits = ARRAY_SIZE(if_limits),
+	.max_interfaces = 3,
+	.num_different_channels = 2,
+	},
+};
+#endif
 
 /* Data Element Definitions */
 #define WPS_ID_CONFIG_METHODS     0x1008
@@ -6472,12 +6492,19 @@ static s32 wl_setup_wiphy(struct wireless_dev *wdev, struct device *sdiofunc_dev
 	wdev->wiphy->interface_modes =
 		BIT(NL80211_IFTYPE_STATION)
 		| BIT(NL80211_IFTYPE_ADHOC)
+#ifdef WL_ENABLE_P2P_IF
+		| BIT(NL80211_IFTYPE_P2P_CLIENT)
+		| BIT(NL80211_IFTYPE_P2P_GO)
+#endif
 #if !defined(WL_ENABLE_P2P_IF)
 		| BIT(NL80211_IFTYPE_MONITOR)
 #endif /* !WL_ENABLE_P2P_IF */
 		| BIT(NL80211_IFTYPE_AP);
 
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
+		wdev->wiphy->iface_combinations = if_combinations;
+		wdev->wiphy->n_iface_combinations = ARRAY_SIZE(if_combinations);
+#endif
 	wdev->wiphy->bands[IEEE80211_BAND_2GHZ] = &__wl_band_2ghz;
 
 	wdev->wiphy->signal_type = CFG80211_SIGNAL_TYPE_MBM;
@@ -6530,6 +6557,7 @@ static s32 wl_setup_wiphy(struct wireless_dev *wdev, struct device *sdiofunc_dev
 	WL_DBG(("Registering custom regulatory)\n"));
 	wdev->wiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
 	wiphy_apply_custom_regulatory(wdev->wiphy, &brcm_regdom);
+
 	/* Now we can register wiphy with cfg80211 module */
 	err = wiphy_register(wdev->wiphy);
 	if (unlikely(err < 0)) {
