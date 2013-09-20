@@ -35,8 +35,9 @@
 #include <linux/input/intel_mid_vibra.h>
 #include "mid_vibra.h"
 
-#define CRYSTALCOVE_PMIC_PWM1_CONFIG_GPIO	0x2F
-#define CRYSTALCOVE_PMIC_PWM1_CONFIG_VALUE	0x23
+#define CRYSTALCOVE_PMIC_PWM_EN_GPIO_REG        0x2F
+/* PWM enable gpio register settings: drive type = CMOS; pull disabled */
+#define CRYSTALCOVE_PMIC_PWM_EN_GPIO_VALUE	0x22
 #define CRYSTALCOVE_PMIC_PWM1_CLKDIV_REG	0x4C
 #define CRYSTALCOVE_PMIC_PWM1_DUTYCYC_REG	0x4F
 #define CRYSTALCOVE_PMIC_PWM_ENABLE		0x01
@@ -56,9 +57,6 @@ static int vibra_pmic_pwm_configure(struct vibra_info *info, bool enable)
 	u8 duty_cyc;
 
 	if (enable) {
-		intel_mid_pmic_writeb(CRYSTALCOVE_PMIC_PWM1_CONFIG_GPIO,
-				      CRYSTALCOVE_PMIC_PWM1_CONFIG_VALUE);
-
 		/* disable PWM before updating clock div*/
 		intel_mid_pmic_writeb(CRYSTALCOVE_PMIC_PWM1_CLKDIV_REG, 0);
 
@@ -86,7 +84,7 @@ static int vibra_pmic_pwm_configure(struct vibra_info *info, bool enable)
 	}
 	clk_div =  intel_mid_pmic_readb(CRYSTALCOVE_PMIC_PWM1_CLKDIV_REG);
 	duty_cyc =  intel_mid_pmic_readb(CRYSTALCOVE_PMIC_PWM1_DUTYCYC_REG);
-	pr_debug("%s: base_unit = %#x, duty_cycle = %#x\n", __func__, clk_div, duty_cyc);
+	pr_debug("%s: clk_div_reg = %#x, duty_cycle_reg = %#x\n", __func__, clk_div, duty_cyc);
 	return 0;
 }
 
@@ -127,6 +125,9 @@ int intel_mid_plat_vibra_probe(struct platform_device *pdev)
 		pr_err("gpio_request(%d) fails:%d\n", info->gpio_en, ret);
 		return ret;
 	}
+	/* Re configure the PWM EN GPIO to have drive type as CMOS and pull disable*/
+	intel_mid_pmic_writeb(CRYSTALCOVE_PMIC_PWM_EN_GPIO_REG,
+			CRYSTALCOVE_PMIC_PWM_EN_GPIO_VALUE);
 
 	ret = sysfs_create_group(&dev->kobj, info->vibra_attr_group);
 	if (ret) {

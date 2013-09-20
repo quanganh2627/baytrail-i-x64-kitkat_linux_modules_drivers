@@ -157,6 +157,10 @@
 #define BCU_QUEUE		"bcu-queue"
 #define BASE_TIME		30
 #define STEP_TIME		15
+
+#define CAMFLASH_STATE_ON       1
+#define CAMFLASH_STATE_OFF      0
+
 /* Defined to match the correponding bit positions of the interrupt */
 enum { VWARNB_EVENT = 1, VWARNA_EVENT = 2, VCRIT_EVENT = 4};
 
@@ -177,6 +181,8 @@ struct vdd_info {
 	u64 seed_time;
 	struct delayed_work vcrit_burst;
 };
+
+static uint8_t cam_flash_state;
 
 static uint8_t global_irq_data;
 struct vdd_smip_data {
@@ -438,6 +444,26 @@ static ssize_t show_action_status(struct device *dev,
 	return sprintf(buf, "%x\n", action_status);
 }
 
+static ssize_t store_camflash_ctrl(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	uint8_t value;
+	if (kstrtou8(buf, 10, &value))
+		return -EINVAL;
+
+	if ((value != CAMFLASH_STATE_ON) && (value != CAMFLASH_STATE_OFF))
+		return -EINVAL;
+
+	cam_flash_state = value;
+	return count;
+}
+
+static ssize_t show_camflash_ctrl(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", cam_flash_state);
+}
+
 static void unmask_theburst(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
@@ -638,6 +664,8 @@ static SENSOR_DEVICE_ATTR_2(irq_status, S_IRUGO, show_irq_status,
 				NULL, 0, 0);
 static SENSOR_DEVICE_ATTR_2(action_status, S_IRUGO, show_action_status,
 				NULL, 0, 0);
+static SENSOR_DEVICE_ATTR(camflash_ctrl, S_IRUGO | S_IWUSR,
+				show_camflash_ctrl, store_camflash_ctrl, 0);
 
 static struct attribute *mid_vdd_attrs[] = {
 	&sensor_dev_attr_voltage_warnA.dev_attr.attr,
@@ -647,6 +675,7 @@ static struct attribute *mid_vdd_attrs[] = {
 	&sensor_dev_attr_bcu_status.dev_attr.attr,
 	&sensor_dev_attr_irq_status.dev_attr.attr,
 	&sensor_dev_attr_action_status.dev_attr.attr,
+	&sensor_dev_attr_camflash_ctrl.dev_attr.attr,
 	NULL
 };
 
@@ -795,6 +824,9 @@ static int mid_vdd_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "workqueue creation failed\n");
 	else
 		INIT_DELAYED_WORK(&(vinfo->vcrit_burst), unmask_theburst);
+
+	cam_flash_state = CAMFLASH_STATE_ON;
+
 	ret = program_bcu(pdev, vinfo);
 	if (!ret)
 		return ret;

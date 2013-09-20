@@ -41,6 +41,7 @@
 #include <linux/gpio.h>
 #include <linux/rpmsg.h>
 #include <linux/debugfs.h>
+#include <linux/power_supply.h>
 #include <asm/intel_scu_ipc.h>
 #include <asm/intel_scu_pmic.h>
 #include <asm/intel_basincove_ocd.h>
@@ -72,6 +73,7 @@ static const unsigned long curr_thresholds[NUM_THRESHOLDS] = {
 struct ocd_info {
 	struct device *dev;
 	struct platform_device *pdev;
+	struct delayed_work vwarn1_irq_work;
 	void *bcu_intr_addr;
 	int irq;
 };
@@ -590,28 +592,87 @@ static inline void bcbcu_create_debugfs(struct ocd_info *info) { }
 static inline void bcbcu_remove_debugfs(struct ocd_info *info) { }
 #endif /* CONFIG_DEBUG_FS */
 
-static void handle_VW1_event(int event, void *dev_data)
+/**
+ * vwarn1_irq_enable_work: delayed work queue function, which is used to unmask
+ * (enable) the VWARN1 interrupt after the specified delay time while sceduling.
+ */
+static void vwarn1_irq_enable_work(struct work_struct *work)
+{
+	int ret = 0;
+	struct ocd_info *info = container_of(work,
+						struct ocd_info,
+						vwarn1_irq_work.work);
+
+	dev_dbg(info->dev, "EM_BCU: Inside %s\n", __func__);
+
+	/* Unmasking BCU MVWARN1 Interrupt, to see the interrupt occurrence */
+	ret = intel_scu_ipc_update_register(MBCUIRQ, ~MVWARN1, MVWARN1_MASK);
+	if (ret) {
+		dev_err(info->dev, "EM_BCU: Error in %s updating reg 0x%x\n",
+				__func__, MBCUIRQ);
+	}
+}
+
+static inline struct power_supply *get_psy_battery(void)
+{
+	struct class_dev_iter iter;
+	struct device *dev;
+	static struct power_supply *pst;
+
+	class_dev_iter_init(&iter, power_supply_class, NULL, NULL);
+	while ((dev = class_dev_iter_next(&iter))) {
+		pst = (struct power_supply *)dev_get_drvdata(dev);
+		if (pst->type == POWER_SUPPLY_TYPE_BATTERY) {
+			class_dev_iter_exit(&iter);
+			return pst;
+		}
+	}
+	class_dev_iter_exit(&iter);
+
+	return NULL;
+}
+
+/* Reading the Voltage now value of the battery */
+static inline int bcu_get_battery_voltage(int *volt)
+{
+	struct power_supply *psy;
+	union power_supply_propval val;
+	int ret;
+
+	psy = get_psy_battery();
+	if (!psy)
+		return -EINVAL;
+
+	ret = psy->get_property(psy, POWER_SUPPLY_PROP_VOLTAGE_NOW, &val);
+	if (!ret)
+		*volt = (val.intval);
+
+	return ret;
+}
+
+static void handle_VW1_event(void *dev_data)
 {
 	uint8_t irq_status, beh_data;
 	struct ocd_info *cinfo = (struct ocd_info *)dev_data;
 	int ret;
 	char *bcu_envp[2];
 
-	dev_info(cinfo->dev, "EM_BCU: VW1 Event %d has occured\n", event);
+	dev_info(cinfo->dev, "EM_BCU: VWARN1 Event has occured\n");
 
 	/* Notify using UEvent along with env info */
 	bcu_envp[0] = get_envp(VWARN1);
 	bcu_envp[1] = NULL;
 	kobject_uevent_env(&cinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
 
+
 	ret = intel_scu_ipc_ioread8(S_BCUINT, &irq_status);
 	if (ret)
 		goto ipc_fail;
 	dev_dbg(cinfo->dev, "EM_BCU: S_BCUINT: %x\n", irq_status);
 
-	/* If Vsys is below WARN1 level-No action required from driver */
 	if (!(irq_status & SVWARN1)) {
 		/* Vsys is above WARN1 level */
+		dev_info(cinfo->dev, "EM_BCU: Recovered from VWARN1 Level\n");
 		ret = intel_scu_ipc_ioread8(CAMFLTORCH_BEH, &beh_data);
 		if (ret)
 			goto ipc_fail;
@@ -621,6 +682,27 @@ static void handle_VW1_event(int event, void *dev_data)
 			if (ret)
 				goto ipc_fail;
 		}
+	} else {
+		/**
+		 * Masking BCU VWARN1 Interrupt, to avoid multiple VWARN1
+		 * interrupt occurrence continuously.
+		 */
+		ret = intel_scu_ipc_update_register(MBCUIRQ,
+							MVWARN1,
+							MVWARN1_MASK);
+		if (ret) {
+			dev_err(cinfo->dev,
+				"EM_BCU: Error in %s updating reg 0x%x\n",
+				__func__, MBCUIRQ);
+		}
+
+		cancel_delayed_work_sync(&cinfo->vwarn1_irq_work);
+		/**
+		 * Schedule the work to re-enable the VWARN1 interrupt after
+		 * 30sec delay
+		 */
+		schedule_delayed_work(&cinfo->vwarn1_irq_work,
+					VWARN1_INTR_EN_DELAY);
 	}
 	return;
 
@@ -630,19 +712,31 @@ ipc_fail:
 	return;
 }
 
-static void handle_VW2_event(int event, void *dev_data)
+static void handle_VW2_event(void *dev_data)
 {
 	uint8_t irq_status, beh_data;
 	struct ocd_info *cinfo = (struct ocd_info *)dev_data;
 	int ret;
 	char *bcu_envp[2];
 
-	dev_info(cinfo->dev, "EM_BCU: VW2 Event %d has occured\n", event);
+	dev_info(cinfo->dev, "EM_BCU: VWARN2 Event has occured\n");
 
 	/* Notify using UEvent along with env info */
 	bcu_envp[0] = get_envp(VWARN2);
 	bcu_envp[1] = NULL;
 	kobject_uevent_env(&cinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
+
+	/**
+	 * Masking the BCU MVWARN2 Interrupt, since software does graceful
+	 * shutdown once VWARN2 interrupt occurs. So we never expect another
+	 * VWARN2 interrupt.
+	 */
+	ret = intel_scu_ipc_update_register(MBCUIRQ, MVWARN2, MVWARN2_MASK);
+	if (ret) {
+		dev_err(cinfo->dev, "EM_BCU: Error in %s updating reg 0x%x\n",
+				__func__, MBCUIRQ);
+		goto ipc_fail;
+	}
 
 	ret = intel_scu_ipc_ioread8(S_BCUINT, &irq_status);
 	if (ret)
@@ -652,6 +746,7 @@ static void handle_VW2_event(int event, void *dev_data)
 	/* If Vsys is below WARN2 level-No action required from driver */
 	if (!(irq_status & SVWARN2)) {
 		/* Vsys is above WARN2 level */
+		dev_info(cinfo->dev, "EM_BCU: Recovered from VWARN2 Level\n");
 		ret = intel_scu_ipc_ioread8(CAMFLDIS_BEH, &beh_data);
 		if (ret)
 			goto ipc_fail;
@@ -681,24 +776,35 @@ ipc_fail:
 	return;
 }
 
-static void handle_VC_event(int event, void *dev_data)
+static void handle_VC_event(void *dev_data)
 {
 	struct ocd_info *cinfo = (struct ocd_info *)dev_data;
 	char *bcu_envp[2];
+	int ret = 0;
 
-	dev_info(cinfo->dev, "EM_BCU: VC Event %d has occured\n", event);
+	dev_info(cinfo->dev, "EM_BCU: VCRIT Event has occured\n");
 
 	/* Notify using UEvent along with env info */
 	bcu_envp[0] = get_envp(VCRIT);
 	bcu_envp[1] = NULL;
 	kobject_uevent_env(&cinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
 
+	/**
+	 * Masking BCU VCRIT Interrupt, since hardware does critical hardware
+	 * shutdown once VCRIT interrupt occurs. So we never expect another
+	 * VCRIT interrupt.
+	 */
+	ret = intel_scu_ipc_update_register(MBCUIRQ, MVCRIT, MVCRIT_MASK);
+	if (ret)
+		dev_err(cinfo->dev, "EM_BCU: Error in %s updating reg 0x%x\n",
+			__func__, MBCUIRQ);
 	return;
 }
 
 static irqreturn_t ocd_intrpt_thread_handler(int irq, void *dev_data)
 {
-	int ret, event;
+	int ret;
+	int bat_volt;
 	unsigned int irq_data;
 	struct ocd_info *cinfo = (struct ocd_info *)dev_data;
 
@@ -707,35 +813,35 @@ static irqreturn_t ocd_intrpt_thread_handler(int irq, void *dev_data)
 
 	mutex_lock(&ocd_update_lock);
 
+	ret = bcu_get_battery_voltage(&bat_volt);
+	if (ret)
+		dev_err(cinfo->dev,
+			"EM_BCU: Error in getting battery voltage\n");
+	else
+		dev_info(cinfo->dev, "EM_BCU: Battery Volatge = %dmV\n",
+				(bat_volt/1000));
+
 	irq_data = ioread8(cinfo->bcu_intr_addr);
 
 	/* we are not handling(no action taken) GSMPULSE_IRQ and
 						TXPWRTH_IRQ event */
-
 	if (irq_data & VCRIT_IRQ) {
-		event = VCRIT;
 		++intr_count_lvl3;
-		handle_VC_event(event, dev_data);
+		handle_VC_event(dev_data);
 	}
 	if (irq_data & VWARN2_IRQ) {
-		event = VWARN2;
 		++intr_count_lvl2;
-		handle_VW2_event(event, dev_data);
+		handle_VW2_event(dev_data);
 	}
 	if (irq_data & VWARN1_IRQ) {
-		event = VWARN1;
 		++intr_count_lvl1;
-		handle_VW1_event(event, dev_data);
+		handle_VW1_event(dev_data);
 	}
 	if (irq_data & GSMPULSE_IRQ) {
-		event = GSMPULSE;
-		dev_info(cinfo->dev, "EM_BCU: GSMPULSE Event %d has occured\n",
-									event);
+		dev_info(cinfo->dev, "EM_BCU: GSMPULSE Event has occured\n");
 	}
 	if (irq_data & TXPWRTH_IRQ) {
-		event = TXPWRTH;
-		dev_info(cinfo->dev, "EM_BCU: TXPWRTH Event %d has occured\n",
-									event);
+		dev_info(cinfo->dev, "EM_BCU: TXPWRTH Event has occured\n");
 	}
 
 	/* Unmask BCU Interrupt in the mask register */
@@ -876,6 +982,9 @@ static int mrfl_ocd_probe(struct platform_device *pdev)
 	enable_current_trip_points();
 	cam_flash_state = CAMFLASH_STATE_ON;
 
+	/* Initializing delayed work for re-enabling vwarn1 interrupt */
+	INIT_DELAYED_WORK(&cinfo->vwarn1_irq_work, vwarn1_irq_enable_work);
+
 	/* Create debufs for the basincove bcu registers */
 	bcbcu_create_debugfs(cinfo);
 
@@ -911,6 +1020,7 @@ static int mrfl_ocd_remove(struct platform_device *pdev)
 	struct ocd_info *cinfo = platform_get_drvdata(pdev);
 
 	if (cinfo) {
+		flush_scheduled_work();
 		free_irq(cinfo->irq, cinfo);
 		iounmap(cinfo->bcu_intr_addr);
 		bcbcu_remove_debugfs(cinfo);

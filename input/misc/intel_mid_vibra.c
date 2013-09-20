@@ -248,16 +248,18 @@ static int intel_vibra_runtime_suspend(struct device *dev)
 
 static int intel_vibra_runtime_resume(struct device *dev)
 {
-	struct vibra_info *info = dev_get_drvdata(dev);
-
 	pr_debug("In %s\n", __func__);
-	info->pwm_configure(info, true);
 	return 0;
 }
 
+static void intel_vibra_complete(struct device *dev) {
+	pr_debug("In %s\n", __func__);
+	intel_vibra_runtime_resume(dev);
+}
+
 static const struct dev_pm_ops intel_mid_vibra_pm_ops = {
-	.suspend = intel_vibra_runtime_suspend,
-	.resume = intel_vibra_runtime_resume,
+	.prepare = intel_vibra_runtime_suspend,
+	.complete = intel_vibra_complete,
 	.runtime_suspend = intel_vibra_runtime_suspend,
 	.runtime_resume = intel_vibra_runtime_resume,
 };
