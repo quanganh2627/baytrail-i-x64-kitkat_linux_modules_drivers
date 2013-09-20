@@ -15,3 +15,4 @@ obj-$(CONFIG_STAGING)		+= staging/
 obj-$(CONFIG_SWITCH)		+= switch/
 obj-y               		+= hsu/
 obj-y               		+= mfd/
+obj-y				+= net/wireless/

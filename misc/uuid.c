@@ -38,26 +38,47 @@
 #include <linux/mmc/sdio_ids.h>
 #include <linux/mmc/card.h>
 #include <linux/genhd.h>
-#include <linux/jhashv2.h>
+#include <jhash_uuid.h>
 #include <linux/io.h>
 #include <asm/intel_scu_ipc.h>
+#include <linux/version.h>
 
 #define EMMC0_ID_LENGTH            17
 static char emmc0_id[EMMC0_ID_LENGTH];
 struct proc_dir_entry *emmc0_id_entry;
+static struct mmc_cid_legacy cid_legacy;
 
-static int emmc0_id_read(char *buffer, char **start, off_t offset,
-					int count, int *peof, void *data)
+/* legacy structure to guarantee hash calculation */
+struct mmc_cid_legacy {
+	unsigned int		manfid;
+	char			prod_name[8];
+	unsigned int		serial;
+	unsigned short		oemid;
+	unsigned short		year;
+	unsigned char		hwrev;
+	unsigned char		fwrev;
+	unsigned char		month;
+};
+
+static ssize_t emmc0_id_read(struct file *file, char __user *buffer,
+			     size_t count, loff_t *ppos)
 {
-	if (offset > 0) {
+	if (*ppos > 0) {
 		/* We have finished to read, return 0 */
 		return 0;
 	} else {
 		/* Fill the buffer, return the buffer size */
 		memcpy(buffer, emmc0_id, sizeof(emmc0_id)-1);
+		*ppos += sizeof(emmc0_id)-1;
 		return sizeof(emmc0_id)-1;
 	}
 }
+
+
+static const struct file_operations emmc0_id_entry_fops = {
+	.read = emmc0_id_read
+};
+
 
 static int mmcblk0_match(struct device *dev, void *data)
 {
@@ -78,9 +99,24 @@ static int get_emmc0_cid(void)
 		struct gendisk *disk = dev_to_disk(emmc_disk);
 		struct mmc_card *card = mmc_dev_to_card(disk->driverfs_dev);
 		if (card) {
+			cid_legacy.manfid = card->cid.manfid;
+			cid_legacy.prod_name[0] = card->cid.prod_name[0];
+			cid_legacy.prod_name[1] = card->cid.prod_name[1];
+			cid_legacy.prod_name[2] = card->cid.prod_name[2];
+			cid_legacy.prod_name[3] = card->cid.prod_name[3];
+			cid_legacy.prod_name[4] = card->cid.prod_name[4];
+			cid_legacy.prod_name[5] = card->cid.prod_name[5];
+			cid_legacy.prod_name[6] = card->cid.prod_name[6];
+			cid_legacy.prod_name[7] = card->cid.prod_name[7];
+			cid_legacy.serial = card->cid.serial;
+			cid_legacy.oemid = card->cid.oemid;
+			cid_legacy.year = card->cid.year;
+			cid_legacy.hwrev = card->cid.hwrev;
+			cid_legacy.fwrev = card->cid.fwrev;
+			cid_legacy.month = card->cid.month;
 			snprintf(emmc0_id, sizeof(emmc0_id),
 				 "Medfield%08X",
-				 jhash(&card->cid, sizeof(card->cid), 0));
+				 jhash(&cid_legacy, sizeof(cid_legacy), 0));
 			return 1;
 		}
 	}
@@ -96,9 +132,13 @@ static void set_cmdline_serialno(void)
 	char *end_of_field;
 	int serialno_len;
 	int value_length;
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+	if (intel_platform_ssn[0] != '\0') {
+		serialno = intel_platform_ssn;
+#else
 	if (intel_mid_ssn[0] != '\0') {
 		serialno = intel_mid_ssn;
+#endif
 	} else {
 		if (strlen(emmc0_id)) {
 			serialno = emmc0_id;
@@ -143,15 +183,13 @@ static int __init uuid_init(void)
 
 	memset(emmc0_id, 0x00, sizeof(emmc0_id));
 	if (get_emmc0_cid()) {
-		emmc0_id_entry = create_proc_entry("emmc0_id_entry",
-						S_IFREG | S_IRUGO, NULL);
+		emmc0_id_entry = proc_create("emmc0_id_entry",
+					     S_IFREG | S_IRUGO, NULL,
+					     &emmc0_id_entry_fops);
 		if (emmc0_id_entry == 0) {
 			pr_err("Fail creating procfile emmc0_id_entry\n");
 			return -ENOMEM;
 		}
-		emmc0_id_entry->read_proc = emmc0_id_read;
-		emmc0_id_entry->write_proc = NULL;
-		emmc0_id_entry->size = sizeof(emmc0_id)-1;
 	}
 
 	set_cmdline_serialno();

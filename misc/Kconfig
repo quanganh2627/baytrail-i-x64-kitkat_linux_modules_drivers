@@ -20,5 +20,23 @@ config UUID
 	---help---
 	 Driver for get UUID.
 
+config EMMC_IPANIC
+	bool "Intel kernel panic diagnostics driver FOR EMMC"
+	default n
+	---help---
+	  Driver which handles kernel panics and attempts to write
+	  critical debugging data to EMMC.
+
+config SENSORS_APDS990X_FORK
+	 tristate "APDS990X combined als and proximity sensors"
+	 depends on I2C
+	 default n
+	 ---help---
+	   Say Y here if you want to build a driver for Avago APDS990x
+	   combined ambient light and proximity sensor chip.
+
+	   To compile this driver as a module, choose M here: the
+	   module will be called apds990x. If unsure, say N here.
+
 source "../modules/drivers/misc/bcm-lpm/Kconfig"
 source "../modules/drivers/misc/ti-st/Kconfig"

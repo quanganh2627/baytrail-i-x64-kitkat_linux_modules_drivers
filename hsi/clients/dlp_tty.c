@@ -41,6 +41,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
+#include <linux/version.h>
 
 #include "dlp_main.h"
 
@@ -133,11 +134,15 @@ static void dlp_tty_wakeup(struct dlp_channel *ch_ctx)
 	struct tty_struct *tty;
 	struct dlp_tty_context *tty_ctx = ch_ctx->ch_data;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
+	tty_port_tty_wakeup(&tty_ctx->tty_prt);
+#else
 	tty = tty_port_tty_get(&tty_ctx->tty_prt);
 	if (likely(tty)) {
 		tty_wakeup(tty);
 		tty_kref_put(tty);
 	}
+#endif
 }
 
 /**
@@ -162,6 +167,10 @@ static void _dlp_forward_tty(struct tty_struct *tty,
 	unsigned int copied, data_size, offset, more_packets;
 	int *ptr, do_push, ret;
 	char tty_flag;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
+	struct dlp_channel *ch_ctx = (struct dlp_channel *)tty->driver_data;
+	struct dlp_tty_context *tty_ctx = ch_ctx->ch_data;
+#endif
 
 	/* Initialised to 1 to prevent unexpected TTY forwarding resume
 	 * function when there is no TTY or when it is throttled */
@@ -215,11 +224,20 @@ static void _dlp_forward_tty(struct tty_struct *tty,
 
 			/* Copy the data to the TTY buffer */
 			do {
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
+				copied = (unsigned int)
+					tty_insert_flip_string_fixed_flag(&tty_ctx->tty_prt,
+							data_addr,
+							tty_flag,
+							data_size);
+#else
 				copied = (unsigned int)
 					tty_insert_flip_string_fixed_flag(tty,
 							data_addr,
 							tty_flag,
 							data_size);
+#endif
 
 				data_addr += copied;
 				data_size -= copied;
@@ -256,9 +274,13 @@ no_more_tty_insert:
 		/* Schedule a flip since called from complete_rx()
 		 * in an interrupt context instead of
 		 * tty_flip_buffer_push() */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
+		tty_schedule_flip(&tty_ctx->tty_prt);
+#else
 		tty_schedule_flip(tty);
-	}
+#endif
 
+	}
 	/* Push any available pdus to the CTRL */
 	ret = dlp_pop_recycled_push_ctrl(xfer_ctx);
 
@@ -385,9 +407,9 @@ static void dlp_tty_complete_rx(struct hsi_msg *pdu)
 	if (!dlp_tty_is_link_valid()) {
 		if ((EDLP_TTY_RX_DATA_REPORT) ||
 			(EDLP_TTY_RX_DATA_LEN_REPORT))
-			pr_debug(DRVNAME ": TTY: CH%d RX PDU ignored (close:%d, Time out: %d)\n",
-				xfer_ctx->channel->ch_id,
-				dlp_drv.tty_closed, dlp_drv.tx_timeout);
+				pr_debug(DRVNAME ": TTY: CH%d RX PDU ignored (close:%d, Time out: %d)\n",
+					xfer_ctx->channel->ch_id,
+					dlp_drv.tty_closed, dlp_drv.tx_timeout);
 		return;
 	}
 
@@ -869,11 +891,12 @@ int dlp_tty_do_write(struct dlp_xfer_ctx *xfer_ctx, unsigned char *buf,
 	copied = 0;
 
 	if (!dlp_ctx_have_credits(xfer_ctx, xfer_ctx->channel)) {
-		pr_warn(DRVNAME ": CH%d TX ignored (credits:%d, seq_num:%d, closed:%d, timeout:%d)",
-			xfer_ctx->channel->ch_id,
-			xfer_ctx->channel->credits,
-			xfer_ctx->seq_num,
-			dlp_drv.tty_closed, dlp_drv.tx_timeout);
+		if ((EDLP_TTY_TX_DATA_REPORT) ||
+			(EDLP_TTY_TX_DATA_LEN_REPORT))
+				pr_warn(DRVNAME ": CH%d (HSI CH%d) out of credits (%d)",
+					xfer_ctx->channel->ch_id,
+					xfer_ctx->channel->hsi_channel,
+					xfer_ctx->seq_num);
 		goto out;
 	}
 
@@ -1265,7 +1288,12 @@ struct dlp_channel *dlp_tty_ctx_create(unsigned int ch_id,
 	tty_port_init(&(tty_ctx->tty_prt));
 	tty_ctx->tty_prt.ops = &dlp_port_tty_ops;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)
+	if (!tty_port_register_device(&tty_ctx->tty_prt, new_drv, 0, dev)) {
+#else
 	if (!tty_register_device(new_drv, 0, dev)) {
+#endif
+
 		pr_err(DRVNAME ": tty_register_device failed (%d)\n", ret);
 		goto unreg_drv;
 	}
