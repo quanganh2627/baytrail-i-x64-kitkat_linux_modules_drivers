@@ -61,6 +61,8 @@
  #define MBCUIRQ	0x019
 
  #define VWARNA_THRES	0x04 /*2.9v*/
+ #define VWARNB_THRES	0x04 /*2.9v*/
+ #define VWARNCRIT_THRES	0x01 /*3.2v*/
 
 #else
 
@@ -71,7 +73,10 @@
  #define BCUIRQ		0x007
  #define MBCUIRQ	0x014
 
- #define VWARNA_THRES	0x07 /*2.9v*/
+ #define VWARNA_THRES	0x03 /*3.3v*/
+ #define VWARNB_THRES	0x03 /*3.0v*/
+ #define VWARNCRIT_THRES	0x05 /*2.8v*/
+
 #endif
 
 #define VWARNA_CFG	(OFFSET + 0)
@@ -86,8 +91,8 @@
 #define SBCUCTRL	(OFFSET + 8)
 
 #define VWARNA_VOLT_THRES	VWARNA_THRES
-#define VWARNB_VOLT_THRES	0x04 /* 2.9v*/
-#define VCRIT_VOLT_THRES	0x01 /*3.2v*/
+#define VWARNB_VOLT_THRES	VWARNB_THRES
+#define VCRIT_VOLT_THRES	VWARNCRIT_THRES
 
 #define SBCUCTRL_CLEAR_ASSERT	0x02
 #define SBCUCTRL_STICKY_WARNB	0x04
@@ -784,8 +789,7 @@ static int mid_vdd_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "kzalloc failed");
 			return -ENOMEM;
 		}
-		pdata->disable_unused_comparator = DISABLE_VWARNA |
-						DISABLE_VCRIT;
+		pdata->disable_unused_comparator = false;
 	}
 	vinfo->bcu_intr_addr = BCUIRQ;
 #endif
