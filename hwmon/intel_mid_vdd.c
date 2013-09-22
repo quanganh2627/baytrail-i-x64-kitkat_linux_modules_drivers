@@ -163,10 +163,16 @@
 #define BASE_TIME		30
 #define STEP_TIME		15
 
+/* Generic macro and string to send the
+ * uevent along with env to userspace
+ */
+#define EVT_STR			"BCUEVT="
+#define GET_ENVP(EVT)		(EVT_STR#EVT)
+
 #define CAMFLASH_STATE_ON       1
 #define CAMFLASH_STATE_OFF      0
 
-/* Defined to match the correponding bit positions of the interrupt */
+/* Defined to match the corresponding bit positions of the interrupt */
 enum { VWARNB_EVENT = 1, VWARNA_EVENT = 2, VCRIT_EVENT = 4};
 
 static DEFINE_MUTEX(vdd_update_lock);
@@ -496,20 +502,23 @@ static void unmask_theburst(struct work_struct *work)
 
 /**
   * handle_events - handle different type of interrupts related to BCU
-  * @flag - define what type of interrupt it is
+  * @flag - is the enumeration value for VWARNA, VWARNB or
+  * a VCRIT interrupt.
   * @dev_data - device information
   */
 static void handle_events(int flag, void *dev_data)
 {
 	uint8_t irq_data, sticky_data;
 	struct vdd_info *vinfo = (struct vdd_info *)dev_data;
+	char *bcu_envp[2] = {NULL,};
 	int ret;
 
 	ret = intel_scu_ipc_ioread8(SBCUIRQ, &irq_data);
 	if (ret)
 		goto handle_ipc_fail;
 
-	if (flag & VCRIT_EVENT) {
+	switch (flag) {
+	case VCRIT_EVENT:
 		pr_info_ratelimited("%s: VCRIT_EVENT occurred\n",
 					DRIVER_NAME);
 		if (vinfo->seed_time && time_before((unsigned long)(jiffies_64 -
@@ -551,10 +560,12 @@ static void handle_events(int flag, void *dev_data)
 				if (ret)
 					goto handle_ipc_fail;
 			}
+		} else {
+			bcu_envp[0] = GET_ENVP(VCRIT);
+			bcu_envp[1] = NULL;
 		}
-		kobject_uevent(&vinfo->pdev->dev.kobj, KOBJ_CHANGE);
-	}
-	if (flag & VWARNB_EVENT) {
+		break;
+	case VWARNB_EVENT:
 		pr_info_ratelimited("%s: VWARNB_EVENT occurred\n",
 					DRIVER_NAME);
 		if (!(irq_data & SVWARNB)) {
@@ -573,9 +584,12 @@ static void handle_events(int flag, void *dev_data)
 				if (ret)
 					goto handle_ipc_fail;
 			}
+		} else {
+			bcu_envp[0] = GET_ENVP(VWARN2);
+			bcu_envp[1] = NULL;
 		}
-	}
-	if (flag & VWARNA_EVENT) {
+		break;
+	case VWARNA_EVENT:
 		pr_info_ratelimited("%s: VWARNA_EVENT occurred\n",
 					DRIVER_NAME);
 		if (!(irq_data & SVWARNA)) {
@@ -594,8 +608,20 @@ static void handle_events(int flag, void *dev_data)
 				if (ret)
 					goto handle_ipc_fail;
 			}
+		} else {
+			bcu_envp[0] = GET_ENVP(VWARN1);
+			bcu_envp[1] = NULL;
 		}
+		break;
+	default:
+		dev_warn(&vinfo->pdev->dev, "Unresolved interrupt occurred\n");
 	}
+
+	/* For baytrail notify event type
+	 * using Uevent to userspace */
+	if (bcu_envp[0] && !pdata->is_clvp)
+		kobject_uevent_env(&vinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
+
 	return;
 handle_ipc_fail:
 	if (flag & VCRIT_EVENT)
