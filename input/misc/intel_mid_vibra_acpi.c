@@ -108,8 +108,16 @@ int intel_mid_plat_vibra_probe(struct platform_device *pdev)
 	pr_debug("%s for %s", __func__, hid);
 
 	data = mid_vibra_acpi_get_drvdata(hid);
+	if (!data) {
+		pr_err("Invalid driver data\n");
+		return -ENODEV;
+	}
 
 	data->gpio_en = acpi_get_gpio_by_index(&pdev->dev, 0, NULL);
+	if (data->gpio_en < 0) {
+		pr_err("Invalid gpio number from acpi\n");
+		return -ENODEV;
+	}
 
 	info = mid_vibra_setup(dev, data);
 	if (!info)
