@@ -834,7 +834,7 @@ static int pmic_read_adc_val(int channel, int *sensor_val,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	indio_chan = iio_st_channel_get("BATTEMP", "BATTEMP0");
 #else
-	indio_chan = iio_channel_get(chc->dev, "BATTEMP0");
+	indio_chan = iio_channel_get(NULL, "BATTEMP0");
 #endif
 	if (IS_ERR_OR_NULL(indio_chan)) {
 		ret = PTR_ERR(indio_chan);
