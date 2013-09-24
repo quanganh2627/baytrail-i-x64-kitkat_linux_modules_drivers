@@ -410,7 +410,7 @@ static void dlp_tty_complete_rx(struct hsi_msg *pdu)
 				pr_debug(DRVNAME ": TTY: CH%d RX PDU ignored (close:%d, Time out: %d)\n",
 					xfer_ctx->channel->ch_id,
 					dlp_drv.tty_closed, dlp_drv.tx_timeout);
-		return;
+		goto recycle;
 	}
 
 	/* Check the received PDU header & seq_num */
