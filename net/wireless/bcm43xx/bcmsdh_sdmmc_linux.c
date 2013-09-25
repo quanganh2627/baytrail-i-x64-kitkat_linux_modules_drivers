@@ -113,7 +113,6 @@ extern int bcmsdh_probe(struct device *dev);
 extern int bcmsdh_remove(struct device *dev);
 extern volatile bool dhd_mmc_suspend;
 
-int chip_id = 0;
 
 int bcmsdh_sdmmc_set_power(int on)
 {
@@ -149,7 +148,6 @@ static int bcmsdh_sdmmc_probe(struct sdio_func *func,
 		sd_trace(("Function#: 0x%04x\n", func->num));
 
 		if (func->num == 1) {
-			chip_id = (int)func->device;
 			func->card->host->bus_resume_flags = 0;
 			sdio_func_0.num = 0;
 			sdio_func_0.card = func->card;

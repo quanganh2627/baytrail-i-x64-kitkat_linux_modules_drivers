@@ -3142,6 +3142,8 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 {
 	dhd_info_t *dhd = NULL;
 	struct net_device *net = NULL;
+	int fw_auto_name = 0;
+	int nv_auto_name = 0;
 
 	dhd_attach_states_t dhd_state = DHD_ATTACH_STATE_INIT;
 	DHD_TRACE(("%s: Enter\n", __FUNCTION__));
@@ -3152,14 +3154,13 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 		strncpy(fw_path, firmware_path, sizeof(fw_path) - 1);
 	}
 
-        if (strlen(firmware_path) == 0 || fw_path[strlen(fw_path) -1] == '/') {
-               if (chip_id) {
-			snprintf(fw_path, sizeof(fw_path), "%sfw_bcmdhd.bin", fw_path);
-                       fw_path[sizeof(fw_path) - 1] = '\0';
-               }
-        }
+	if (strlen(firmware_path) == 0 || fw_path[strlen(fw_path) -1] == '/') {
+		fw_auto_name = 1;
+		snprintf(fw_path, sizeof(fw_path), "%sfw_bcmdhd.bin", fw_path);
+		fw_path[sizeof(fw_path) - 1] = '\0';
+	}
 
-        firmware_path[0] = '\0';
+	firmware_path[0] = '\0';
 
 	if (strlen(nvram_path) != 0) {
 		bzero(nv_path, MOD_PARAM_PATHLEN);
@@ -3167,21 +3168,20 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 	}
 	
 	if (strlen(nvram_path) == 0 || nvram_path[strlen(nvram_path) -1] == '/') {
+		nv_auto_name = 1;
 		if (strlen(nv_id)!=0) {
-                       if (chip_id)
-                               snprintf(nv_path, sizeof(nv_path), "%sbcmdhd_%s.cal",
-                                                       nvram_path, nv_id);
-               } else {
-                       if (chip_id)
-                               snprintf(nv_path, sizeof(nv_path), "%sbcmdhd.cal", nvram_path);
-               }
-               nv_path[sizeof(nv_path) - 1] = '\0';
-        }
+				snprintf(nv_path, sizeof(nv_path), "%sbcmdhd_%s.cal", nvram_path, nv_id);
+		} else {
+				snprintf(nv_path, sizeof(nv_path), "%sbcmdhd.cal", nvram_path);
+		}
+		nv_path[sizeof(nv_path) - 1] = '\0';
+	}
 
 #if defined(SUPPORT_MULTIPLE_REVISION)
 	if (strlen(fw_path) != 0 &&
-		concate_revision(bus, fw_path, MOD_PARAM_PATHLEN,
-		nv_path, MOD_PARAM_PATHLEN) != 0) {
+		concate_revision(bus,
+				fw_auto_name?fw_path:NULL, MOD_PARAM_PATHLEN,
+				nv_auto_name?nv_path:NULL, MOD_PARAM_PATHLEN) != 0) {
 		DHD_ERROR(("%s: fail to concatnate revison \n", __FUNCTION__));
 		goto fail;
 	}
