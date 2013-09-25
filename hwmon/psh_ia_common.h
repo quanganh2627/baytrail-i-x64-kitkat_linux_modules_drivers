@@ -305,9 +305,9 @@ static const char sensor_port_str[PORT_SENSOR_NUM][SNR_NAME_MAX_LEN] = {
 };
 
 struct sensor_db {
+	struct list_head list;
 	u8 sid;
 	char sensor_name[SNR_NAME_MAX_LEN];
-	struct list_head list;
 } __packed;
 
 struct trace_data {
