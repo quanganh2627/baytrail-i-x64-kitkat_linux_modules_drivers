@@ -159,8 +159,13 @@ struct uart_hsu_port {
 	unsigned int		port_irq_pio_rx_avb;
 	unsigned int		port_irq_pio_rx_err;
 	unsigned int		port_irq_pio_rx_timeout;
+	unsigned int		cts_status;
 	unsigned int		dma_irq_num;
+	unsigned int		dma_invalid_irq_num;
 	unsigned int		dma_irq_cmddone;
+	unsigned int		dma_tx_irq_cmddone;
+	unsigned int		dma_rx_irq_cmddone;
+	unsigned int		dma_rx_tmt_irq_cmddone;
 	unsigned int		tasklet_done;
 	unsigned int		workq_done;
 	unsigned int		in_workq;
@@ -169,6 +174,8 @@ struct uart_hsu_port {
 	unsigned int		byte_delay;
 
 	int			use_dma;	/* flag for DMA/PIO */
+	unsigned int		dma_irq;
+
 	void			*dma_priv;
 	struct hsu_dma_ops	*dma_ops;
 	int			dma_inited;
@@ -183,6 +190,7 @@ struct hsu_port {
 	void __iomem	*reg;
 	struct uart_hsu_port	port[HSU_PORT_MAX];
 	struct hsu_dma_chan	chans[HSU_PORT_MAX * 2];
+	spinlock_t		dma_lock;
 	struct dentry *debugfs;
 };
 

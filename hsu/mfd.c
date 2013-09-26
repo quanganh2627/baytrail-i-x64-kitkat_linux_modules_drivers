@@ -232,8 +232,7 @@ static void serial_set_alt(int index)
 
 	pm_runtime_get_sync(up->dev);
 	disable_irq(up->port.irq);
-	if (!phsu->irq_port_and_dma)
-		disable_irq(phsu->dma_irq);
+	disable_irq(up->dma_irq);
 	serial_sched_stop(up);
 	if (up->use_dma && up->hw_type == hsu_intel) {
 		txc->uport = up;
@@ -246,8 +245,7 @@ static void serial_set_alt(int index)
 		cfg->hw_set_rts(up->index, 0);
 	set_bit(flag_set_alt, &up->flags);
 	serial_sched_start(up);
-	if (!phsu->irq_port_and_dma)
-		enable_irq(phsu->dma_irq);
+	enable_irq(up->dma_irq);
 	enable_irq(up->port.irq);
 	pm_runtime_put(up->dev);
 }
@@ -262,15 +260,13 @@ static void serial_clear_alt(int index)
 
 	pm_runtime_get_sync(up->dev);
 	disable_irq(up->port.irq);
-	if (!phsu->irq_port_and_dma)
-		disable_irq(phsu->dma_irq);
+	disable_irq(up->dma_irq);
 	serial_sched_stop(up);
 	if (cfg->hw_set_rts)
 		cfg->hw_set_rts(up->index, 1);
 	clear_bit(flag_set_alt, &up->flags);
 	serial_sched_start(up);
-	if (!phsu->irq_port_and_dma)
-		enable_irq(phsu->dma_irq);
+	enable_irq(up->dma_irq);
 	enable_irq(up->port.irq);
 	pm_runtime_put(up->dev);
 }
@@ -422,6 +418,8 @@ static ssize_t hsu_dump_show(struct file *file, char __user *user_buf,
 		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
 				"\tforce_suspend: %d\n", cfg->force_suspend);
 		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
+				"\tcts status: %d\n", up->cts_status);
+		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
 			"\tuse_dma: %s\n",
 			up->use_dma ? "yes" : "no");
 		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
@@ -477,9 +475,21 @@ static ssize_t hsu_dump_show(struct file *file, char __user *user_buf,
 			"\tport irq pio tx request: %d\n",
 			up->port_irq_pio_tx_req);
 		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
+			"\tdma invalid irq count: %d\n",
+			up->dma_invalid_irq_num);
+		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
 			"\tdma irq count: %d\n", up->dma_irq_num);
 		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
 			"\tdma irq cmddone: %d\n", up->dma_irq_cmddone);
+		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
+			"\tdma tx irq cmddone: %d\n",
+			up->dma_tx_irq_cmddone);
+		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
+			"\tport&dma rx irq cmddone: %d\n",
+			up->dma_rx_irq_cmddone);
+		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
+			"\tport&dma rx timeout irq cmddone: %d\n",
+			up->dma_rx_tmt_irq_cmddone);
 		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
 			"\ttasklet done: %d\n", up->tasklet_done);
 		len += snprintf(buf + len, HSU_DBGFS_BUFSIZE - len,
@@ -675,8 +685,11 @@ void intel_dma_do_rx(struct uart_hsu_port *up, u32 int_sts)
 	 */
 
 	/* Timeout IRQ, need wait some time, see Errata 2 */
-	if (int_sts & 0xf00)
+	if (int_sts & 0xf00) {
+		up->dma_rx_tmt_irq_cmddone++;
 		udelay(2);
+	} else
+		up->dma_rx_irq_cmddone++;
 
 	/* Stop the channel */
 	chan_writel(chan, HSU_CH_CR, 0x0);
@@ -894,12 +907,12 @@ static void hsu_dma_chan_handler(struct hsu_port *hsu, int index)
 	up->dma_irq_num++;
 	if (unlikely(!up->use_dma
 		|| !test_bit(flag_startup, &up->flags))) {
+		up->dma_invalid_irq_num++;
 		chan_readl(txc, HSU_CH_SR);
 		chan_readl(rxc, HSU_CH_SR);
 		return;
 	}
-	if (!phsu->irq_port_and_dma)
-		disable_irq_nosync(phsu->dma_irq);
+	disable_irq_nosync(up->dma_irq);
 	spin_lock_irqsave(&up->port.lock, flags);
 	serial_sched_cmd(up, qcmd_dma_irq);
 	spin_unlock_irqrestore(&up->port.lock, flags);
@@ -924,6 +937,7 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 	} else {
 		if (unlikely(test_bit(flag_suspend, &up->flags)))
 			return IRQ_NONE;
+
 		/* On BYT, this IRQ may be shared with other HW */
 		up->iir = serial_in(up, UART_IIR);
 		if (unlikely(up->iir & 0x1)) {
@@ -949,11 +963,6 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 
 	/* DesignWare HW's DMA mode still needs the port irq */
 	if (up->use_dma && up->hw_type == hsu_intel) {
-		if (phsu->irq_port_and_dma) {
-			phsu->int_sts = mfd_readl(phsu, HSU_GBL_DMAISR);
-			if (phsu->int_sts & (3 << (up->index * 2)))
-				hsu_dma_chan_handler(phsu, up->index);
-		}
 		lsr = serial_in(up, UART_LSR);
 		spin_lock_irqsave(&up->port.lock, flags);
 		check_modem_status(up);
@@ -976,13 +985,16 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 static irqreturn_t hsu_dma_irq(int irq, void *dev_id)
 {
 	struct hsu_port *hsu = dev_id;
+	unsigned long flags;
 	int i;
 
+	spin_lock_irqsave(&phsu->dma_lock, flags);
 	hsu->int_sts = mfd_readl(hsu, HSU_GBL_DMAISR);
 	for (i = 0; i < 3; i++) {
 		if (hsu->int_sts & (3 << (i * 2)))
 			hsu_dma_chan_handler(hsu, i);
 	}
+	spin_unlock_irqrestore(&phsu->dma_lock, flags);
 
 	return IRQ_HANDLED;
 }
@@ -1862,8 +1874,7 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 		cfg->hw_set_rts(up->index, 1);
 
 	disable_irq(up->port.irq);
-	if (!phsu->irq_port_and_dma)
-		disable_irq(phsu->dma_irq);
+	disable_irq(up->dma_irq);
 
 	if (cfg->hw_set_rts)
 		usleep_range(up->byte_delay, up->byte_delay + 1);
@@ -1915,8 +1926,7 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 		hsu_regs_context(up, context_save);
 	if (cfg->preamble && cfg->hw_suspend_post)
 		cfg->hw_suspend_post(up->index);
-	if (!phsu->irq_port_and_dma)
-		enable_irq(phsu->dma_irq);
+	enable_irq(up->dma_irq);
 	if (up->hw_type == hsu_dw)
 		enable_irq(up->port.irq);
 
@@ -1931,8 +1941,7 @@ err:
 	enable_irq(up->port.irq);
 	if (up->use_dma && up->hw_type == hsu_intel)
 		intel_dma_do_rx(up, 0);
-	if (!phsu->irq_port_and_dma)
-		enable_irq(phsu->dma_irq);
+	enable_irq(up->dma_irq);
 	serial_sched_start(up);
 	spin_lock_irqsave(&up->port.lock, flags);
 	serial_sched_cmd(up, qcmd_get_msr);
@@ -2182,6 +2191,7 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 			/* Only hsu_intel has this irq */
 			up->dma_irq_cmddone++;
 			if (phsu->int_sts & (1 << txc->id)) {
+				up->dma_tx_irq_cmddone++;
 				status = chan_readl(txc, HSU_CH_SR);
 				up->dma_ops->start_tx(up);
 			}
@@ -2190,8 +2200,7 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 				status = chan_readl(rxc, HSU_CH_SR);
 				intel_dma_do_rx(up, status);
 			}
-			if (!phsu->irq_port_and_dma)
-				enable_irq(phsu->dma_irq);
+			enable_irq(up->dma_irq);
 			break;
 		case qcmd_cmd_off:
 			set_bit(flag_cmd_off, &up->flags);
@@ -2270,10 +2279,30 @@ static int serial_port_setup(struct uart_hsu_port *up,
 	up->qcirc.buf = (char *)up->qbuf;
 	spin_lock_init(&up->cl_lock);
 	set_bit(flag_cmd_off, &up->flags);
-	ret = request_irq(up->port.irq, hsu_port_irq, IRQF_SHARED,
-			up->name, up);
-	if (ret)
-		return ret;
+
+	if (phsu->irq_port_and_dma) {
+		up->dma_irq = up->port.irq;
+		ret = request_irq(up->dma_irq, hsu_dma_irq, IRQF_SHARED,
+				"hsu dma", phsu);
+		if (ret) {
+			dev_err(up->dev, "can not get dma IRQ\n");
+			return ret;
+		}
+		ret = request_irq(up->port.irq, hsu_port_irq, IRQF_SHARED,
+				up->name, up);
+		if (ret) {
+			dev_err(up->dev, "can not get port IRQ\n");
+			return ret;
+		}
+	} else {
+		up->dma_irq = phsu->dma_irq;
+		ret = request_irq(up->port.irq, hsu_port_irq, IRQF_SHARED,
+				up->name, up);
+		if (ret) {
+			dev_err(up->dev, "can not get port IRQ\n");
+			return ret;
+		}
+	}
 
 	if (cfg->type == debug_port) {
 		serial_hsu_reg.cons = SERIAL_HSU_CONSOLE;
@@ -2497,7 +2526,7 @@ static int serial_hsu_dma_probe(struct pci_dev *pdev,
 		phsu->dma_irq = pdev->irq;
 		ret = request_irq(pdev->irq, hsu_dma_irq, 0, "hsu dma", phsu);
 		if (ret) {
-			dev_err(&pdev->dev, "can not get IRQ\n");
+			dev_err(&pdev->dev, "can not get dma IRQ\n");
 			goto err;
 		}
 	}
@@ -2531,6 +2560,7 @@ static int __init hsu_pci_init(void)
 	if (ret)
 		return ret;
 
+	spin_lock_init(&phsu->dma_lock);
 	hsu_debugfs_init(phsu);
 	ret = pci_register_driver(&hsu_dma_pci_driver);
 	if (!ret) {
