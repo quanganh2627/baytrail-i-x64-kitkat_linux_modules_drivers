@@ -428,6 +428,12 @@ void ia_handle_snr_info(struct psh_ia_priv *psh_ia_data,
 		struct sensor_db *sensor_obj =
 				kmalloc(sizeof(struct sensor_db), GFP_KERNEL);
 
+		if (sensor_obj == NULL) {
+			pr_err("ia_handle_snr_info failed kmalloc sensor_obj\n");
+			BUG();
+			return;
+		}
+
 		sensor_obj->sid = sinfo->id;
 		memcpy(sensor_obj->sensor_name, sinfo->name,
 			len < SNR_NAME_MAX_LEN ? len : SNR_NAME_MAX_LEN);
