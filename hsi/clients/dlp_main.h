@@ -364,6 +364,8 @@ struct dlp_driver {
 	unsigned int is_dma_capable;
 	struct hsi_client *client;
 	struct device *controller;
+	struct hsi_client_base_info *sys_info;
+	bool is_dlp_disabled;
 
 	/* Hangup (TX timemout/ TTY close) */
 	spinlock_t lock;
