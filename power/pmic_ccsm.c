@@ -834,7 +834,7 @@ static int pmic_read_adc_val(int channel, int *sensor_val,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	indio_chan = iio_st_channel_get("BATTEMP", "BATTEMP0");
 #else
-	indio_chan = iio_channel_get(chc->dev, "BATTEMP0");
+	indio_chan = iio_channel_get(NULL, "BATTEMP0");
 #endif
 	if (IS_ERR_OR_NULL(indio_chan)) {
 		ret = PTR_ERR(indio_chan);
@@ -1529,9 +1529,9 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0))
 	chc.otg = usb_get_transceiver();
 #else
-	chc.otg = usb_get_phy(USB_PHY_TYPE_USB3);
+	chc.otg = usb_get_phy(USB_PHY_TYPE_USB2);
 #endif
-	if (!chc.otg) {
+	if (!chc.otg || IS_ERR(chc.otg)) {
 		dev_err(&pdev->dev, "Failed to get otg transceiver!!\n");
 		retval = -ENOMEM;
 		goto otg_req_failed;

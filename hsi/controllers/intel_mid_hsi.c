@@ -317,6 +317,7 @@ struct intel_xfer_ctx {
  * @use_oob_cawake: Set to true if intended to be used
  * @hsi_wake_raised: Set to TRUE when interrupt fires on hsi_cawke gpio
  * @hsi_wake_disabled: Set to TRUE when interrupt of hsi_cawake gpio is disabled
+ * @pm_do_reset: reset ARASAN IP in rtpm_resume if needed
  */
 struct intel_controller {
 	/* Devices and resources */
@@ -393,6 +394,7 @@ struct intel_controller {
 	u16 resumed;
 	u16 hsi_wake_raised;
 	u16 hsi_wake_disabled;
+	u16 pm_do_reset;
 
 	bool use_oob_cawake;
 };
@@ -1243,7 +1245,8 @@ static int hsi_ctrl_set_cfg(struct intel_controller *intel_hsi, int do_reset)
  *
  * Returns success or an error if it is not possible to reprogram the device.
  */
-static int hsi_ctrl_resume(struct intel_controller *intel_hsi, int rtpm)
+static int hsi_ctrl_resume(struct intel_controller *intel_hsi, int rtpm,
+	       	int do_reset)
 	__acquires(&intel_hsi->hw_lock) __releases(&intel_hsi->hw_lock)
 {
 	unsigned long flags;
@@ -1251,8 +1254,9 @@ static int hsi_ctrl_resume(struct intel_controller *intel_hsi, int rtpm)
 
 	spin_lock_irqsave(&intel_hsi->hw_lock, flags);
 	if (intel_hsi->suspend_state != DEVICE_READY) {
-		if (hsi_ctrl_set_cfg(intel_hsi, 0))
+		if (hsi_ctrl_set_cfg(intel_hsi, do_reset))
 			err = -EAGAIN;
+
 		intel_hsi->dma_resumed = 0;
 		intel_hsi->suspend_state--;
 	}
@@ -3171,10 +3175,13 @@ static int hsi_mid_setup(struct hsi_client *cl)
 
 	/* Prepare the necessary DMA contexts */
 	err = alloc_xfer_ctx(intel_hsi);
-
 	/* The controller will be configured on resume if necessary */
-	if (unlikely(!err && intel_hsi->suspend_state == DEVICE_READY))
+	if (unlikely(!err && intel_hsi->suspend_state == DEVICE_READY)) {
 		err = hsi_ctrl_set_cfg(intel_hsi, 1);
+		intel_hsi->pm_do_reset = 0;
+	}
+	else
+		intel_hsi->pm_do_reset = 1;
 
 	spin_unlock_irqrestore(&intel_hsi->hw_lock, flags);
 
@@ -4243,7 +4250,8 @@ static int hsi_rtpm_resume(struct device *dev)
 	int err;
 
 	dev_dbg(dev, "hsi enter runtime resume\n");
-	err = hsi_ctrl_resume(intel_hsi, 1);
+	err = hsi_ctrl_resume(intel_hsi, 1, intel_hsi->pm_do_reset);
+	intel_hsi->pm_do_reset = 0;
 	if (!err)
 		hsi_resume_dma_transfers(intel_hsi);
 
@@ -4283,7 +4291,7 @@ static int hsi_pm_resume(struct device *dev)
 	int err;
 
 	dev_dbg(dev, "hsi enter resume\n");
-	err = hsi_ctrl_resume(intel_hsi, 0);
+	err = hsi_ctrl_resume(intel_hsi, 0, 0);
 	if (!err)
 		hsi_resume_dma_transfers(intel_hsi);
 

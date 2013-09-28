@@ -423,11 +423,11 @@ static u8 caculate_checksum(u32 length)
 static int fw_error_found(int use_legacytype)
 {
 	u8 checksum = 0;
-	u32 total_bytes, regid_cnt;
 	union error_log err_log;
 	union error_header err_header;
 
 	if (use_legacytype) {
+
 		err_log.data = log_buffer[FABRIC_ERR_SIGNATURE_IDX];
 
 		/* No SCU/fabric error if tenth
@@ -444,17 +444,10 @@ static int fw_error_found(int use_legacytype)
 		err_header.fields.checksum = 0;
 		log_buffer[FABRIC_ERR_HEADER] = err_header.data;
 
-		/* Figure out how many bytes in the log data */
-		regid_cnt = (err_header.fields.num_flag_regs +
-			err_header.fields.num_err_regs) / 4;
-		regid_cnt += (err_header.fields.num_flag_regs +
-			err_header.fields.num_err_regs) % 4 ? 1 : 0;
-
-		total_bytes = 4 * 4 + 4 * 2 * err_header.fields.num_flag_regs +
-			4 * 3 * err_header.fields.num_err_regs + 4 * regid_cnt;
-
-		if (caculate_checksum(total_bytes) != checksum)
+		if (caculate_checksum(TOTAL_MAX_NUM_FABERR_DWORD<<2) != checksum) {
+			pr_info("fw_error_found: new checksum error\n");
 			return 0;
+		}
 
 		return 1;
 	}

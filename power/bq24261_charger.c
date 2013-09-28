@@ -1592,7 +1592,7 @@ static inline int register_otg_notifications(struct bq24261_charger *chip)
 #else
 	chip->transceiver = usb_get_phy(USB_PHY_TYPE_USB2);
 #endif
-	if (!chip->transceiver) {
+	if (!chip->transceiver || IS_ERR(chip->transceiver)) {
 		dev_err(&chip->client->dev, "failed to get otg transceiver\n");
 		return -EINVAL;
 	}

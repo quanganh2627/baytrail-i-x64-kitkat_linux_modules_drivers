@@ -8201,9 +8201,11 @@ concate_revision_bcm4334x(dhd_bus_t *bus,
 		return -1;
 	}
 
-	strcat(fw_path, chipver_tag);
+	if (fw_path)
+		strcat(fw_path, chipver_tag);
 #if defined(SUPPORT_MULTIPLE_CHIPS)
-	strcat(nv_path, chipver_tag);
+	if (nv_path)
+		strcat(nv_path, chipver_tag);
 #endif /* defined(SUPPORT_MULTIPLE_CHIPS) */
 
 	return 0;
@@ -8253,9 +8255,11 @@ concate_revision_bcm4334(dhd_bus_t *bus,
 		return -1;
 	}
 
-	strcat(fw_path, chipver_tag);
+	if (fw_path)
+		strcat(fw_path, chipver_tag);
 #if defined(SUPPORT_MULTIPLE_CHIPS)
-	strcat(nv_path, chipver_tag);
+	if (nv_path)
+		strcat(nv_path, chipver_tag);
 #endif /* defined(SUPPORT_MULTIPLE_CHIPS) */
 
 #undef REV_ID_ADDR
@@ -8324,8 +8328,10 @@ concate_revision_bcm4339
 			chipver));
 	}
 
-	strcat(fw_path, chipver_tag);
-	strcat(nv_path, chipver_tag);
+	if (fw_path)
+		strcat(fw_path, chipver_tag);
+	if (nv_path)
+		strcat(nv_path, chipver_tag);
 	return 0;
 }
 
@@ -8355,8 +8361,10 @@ static int concate_revision_bcm43241(dhd_bus_t *bus,
 		return -1;
 	}
 
-	strcat(fw_path, chipver_tag);
-	strcat(nv_path, chipver_tag);
+	if (fw_path)
+		strcat(fw_path, chipver_tag);
+	if (nv_path)
+		strcat(nv_path, chipver_tag);
 	return 0;
 }
 
@@ -8370,6 +8378,8 @@ concate_revision(dhd_bus_t *bus, char *fw_path, int fw_path_len, char *nv_path, 
 		return -1;
 	}
 
+	if (!fw_path && !nv_path)
+		return res;
 
 	switch (bus->sih->chip) {
 	case BCM4330_CHIP_ID:
