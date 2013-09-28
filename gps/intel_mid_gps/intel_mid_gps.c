@@ -25,8 +25,6 @@
 
 #define DRIVER_NAME "intel_mid_gps"
 
-#define ACPI_DEVICE_ID_BCM4752 "BCM4752"
-
 /*********************************************************************
  *		Driver GPIO toggling functions
  *********************************************************************/
@@ -242,20 +240,10 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 		if (!pdata)
 			return -ENOMEM;
 
-		if (!strncmp(dev_name(&pdev->dev),
-				ACPI_DEVICE_ID_BCM4752,
-				strlen(ACPI_DEVICE_ID_BCM4752))) {
-			pdata->has_reset = 0;  /* Unavailable */
-			pdata->has_enable = 1; /* Available */
-		}
-
-		pdata->gpio_reset = pdata->has_reset ?
-			acpi_get_gpio_by_index(&pdev->dev, 0, &info)
-			: -EINVAL;
-
-		pdata->gpio_enable = pdata->has_enable ?
-			acpi_get_gpio_by_index(&pdev->dev, 1, &info)
-			: -EINVAL;
+		pdata->gpio_reset = acpi_get_gpio_by_index(&pdev->dev,
+							   0, &info);
+		pdata->gpio_enable = acpi_get_gpio_by_index(&pdev->dev,
+							    1, &info);
 
 		platform_set_drvdata(pdev, pdata);
 	} else {
@@ -302,7 +290,7 @@ static void intel_mid_gps_shutdown(struct platform_device *pdev)
 #ifdef CONFIG_ACPI
 static struct acpi_device_id acpi_gps_id_table[] = {
 	/* ACPI IDs here */
-	{ACPI_DEVICE_ID_BCM4752},
+	{"BCM4752"},
 	{ }
 };
 
