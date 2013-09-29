@@ -19,6 +19,7 @@
 #include <linux/intel_mid_pm.h>
 #include <linux/intel_mid_dma.h>
 #include <linux/irq.h>
+#include <linux/acpi.h>
 #include <asm/intel_mid_hsu.h>
 #include <linux/intel_mid_pm.h>
 #include <linux/pm_qos.h>
@@ -83,7 +84,35 @@ static bool dw_dma_chan_filter(struct dma_chan *chan, void *param)
 {
 	struct dw_dma_priv *dw_dma = param;
 
-	return dw_dma->dmac && (&dw_dma->dmac->dev == chan->device->dev);
+	if (dw_dma->dmac && (&dw_dma->dmac->dev == chan->device->dev))
+		return true;
+	else {
+#ifdef CONFIG_ACPI
+		acpi_handle handle = ACPI_HANDLE(chan->device->dev);
+		struct acpi_device *device;
+		int ret;
+		const char *hid;
+		ret = acpi_bus_get_device(handle, &device);
+		if (ret) {
+			pr_warn("DW HSU: no acpi entry\n");
+			return false;
+		}
+		hid = acpi_device_hid(device);
+		if (!strncmp(hid, "INTL9C60", strlen(hid))) {
+			acpi_status status;
+			unsigned long long tmp;
+			status = acpi_evaluate_integer(handle,
+					"_UID", NULL, &tmp);
+			if (!ACPI_FAILURE(status) && (tmp == 1))
+				return true;
+		}
+		if (!strncmp(hid, "80862286", strlen(hid))) {
+			return true;
+		}
+
+#endif
+		return false;
+	}
 }
 
 /* the RX/TX buffer init should be a common stuff */
@@ -108,8 +137,8 @@ static int dw_dma_init(struct uart_hsu_port *up)
 	 */
 	dw_dma->dmac = pci_get_device(PCI_VENDOR_ID_INTEL, 0x0f06, NULL);
 	if (!dw_dma->dmac) {
-		pr_warn("DW HSU: Can't find LPIO1 DMA controller\n");
-		return -1;
+		/* still have chance to get from ACPI dev */
+		pr_warn("DW HSU: Can't find LPIO1 DMA controller by PCI, try ACPI\n");
 	}
 
 	ret = dma_init_common(up);
