@@ -17,3 +17,4 @@ obj-$(CONFIG_SWITCH)		+= switch/
 obj-y               		+= hsu/
 obj-y               		+= mfd/
 obj-y				+= net/wireless/
+obj-$(CONFIG_WATCHDOG)		+= watchdog/
