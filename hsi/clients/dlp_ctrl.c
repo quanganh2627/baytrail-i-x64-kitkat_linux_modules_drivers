@@ -437,6 +437,8 @@ static void dlp_ctrl_complete_rx(struct hsi_msg *msg)
 			pr_debug(DRVNAME ": CTRL: CH%d RX PDU ignored (close:%d, Time out: %d)\n",
 				params.channel,
 				dlp_drv.tty_closed, dlp_drv.tx_timeout);
+		/* Delete the received msg */
+		dlp_pdu_free(msg, msg->channel);
 		return;
 	}
 

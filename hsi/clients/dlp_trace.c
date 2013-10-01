@@ -193,6 +193,8 @@ static void dlp_trace_complete_rx(struct hsi_msg *msg)
 		pr_debug(DRVNAME ": TRACE: CH%d PDU ignored (close:%d, Time out: %d)\n",
 				ch_ctx->ch_id,
 				dlp_drv.tty_closed, dlp_drv.tx_timeout);
+		/* Delete the received msg */
+		dlp_pdu_free(msg, msg->channel);
 		return;
 	}
 
