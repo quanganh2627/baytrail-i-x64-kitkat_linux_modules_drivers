@@ -1321,6 +1321,13 @@ int wifi_get_gpioen_number(void)
 	return -1;
 }
 
+bool wifi_irq_is_fastirq(void)
+{
+	if (wifi_control_data)
+		return wifi_control_data->use_fast_irq;
+	return false;
+}
+
 int wifi_set_power(int on, unsigned long msec)
 {
 	int ret = 0;

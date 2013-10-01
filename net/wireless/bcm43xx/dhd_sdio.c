@@ -8288,16 +8288,25 @@ concate_revision_bcm4335
 	DHD_ERROR(("CHIP VER = [0x%x]\n", chipver));
 	if (chipver == 0x0) {
 		DHD_ERROR(("----- CHIP bcm4335_A0 -----\n"));
-		strcat(chipver_tag, "_a0");
+		strlcat(chipver_tag, "_a0", sizeof(chipver_tag));
 	} else if (chipver == 0x1) {
 		DHD_ERROR(("----- CHIP bcm4335_B0 -----\n"));
 #if defined(SUPPORT_MULTIPLE_CHIPS)
-		strcat(chipver_tag, "_b0");
+		strlcat(chipver_tag, "_b0", sizeof(chipver_tag));
 #endif /* defined(SUPPORT_MULTIPLE_CHIPS) */
 	}
 
-	strcat(fw_path, chipver_tag);
-	strcat(nv_path, chipver_tag);
+	if (fw_path)
+		strlcat(fw_path, chipver_tag, fw_path_len);
+	if (nv_path) {
+		strlcat(nv_path, chipver_tag, nv_path_len);
+#ifdef HW_OOB
+		strlcat(nv_path, "_level", nv_path_len);
+#else
+		strlcat(nv_path, "_edge", nv_path_len);
+#endif
+	}
+
 	return 0;
 }
 
@@ -8322,16 +8331,23 @@ concate_revision_bcm4339
 	DHD_ERROR(("CHIP VER = [0x%x]\n", chipver));
 	if (chipver == 0x1) {
 		DHD_ERROR(("----- CHIP bcm4339_A0 -----\n"));
-		strcat(chipver_tag, "_a0");
+		strlcat(chipver_tag, "_a0", sizeof(chipver_tag));
 	} else {
 		DHD_ERROR(("----- CHIP bcm4339 unknown revision %d -----\n",
 			chipver));
 	}
 
 	if (fw_path)
-		strcat(fw_path, chipver_tag);
-	if (nv_path)
-		strcat(nv_path, chipver_tag);
+		strlcat(fw_path, chipver_tag, fw_path_len);
+	if (nv_path) {
+		strlcat(nv_path, chipver_tag, nv_path_len);
+#ifdef HW_OOB
+		strlcat(nv_path, "_level", nv_path_len);
+#else
+		strlcat(nv_path, "_edge", nv_path_len);
+#endif
+	}
+
 	return 0;
 }
 
