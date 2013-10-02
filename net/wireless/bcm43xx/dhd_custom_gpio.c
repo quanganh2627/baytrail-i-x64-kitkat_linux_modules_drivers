@@ -72,6 +72,8 @@ extern int sdioh_mmc_irq(int irq);
 #include <mach/gpio.h>
 #endif
 
+#include "wl_android.h"
+
 /* Customer specific Host GPIO defintion  */
 static int dhd_oob_gpio_num = -1;
 
@@ -96,18 +98,20 @@ int dhd_customer_oob_irq_map(unsigned long *irq_flags_ptr)
 #if defined(CUSTOMER_HW2) || defined(CUSTOMER_HW4)
 	host_oob_irq = wifi_get_irq_number(irq_flags_ptr);
 
-	if (gpio_request(host_oob_irq, "bcm43xx_irq") < 0) {
-		WL_ERROR(("%s: Error on gpio_request bcm43xx_irq: %d\n", __func__, host_oob_irq));
-		return 1;
-	}
-	if (gpio_direction_input(host_oob_irq) < 0) {
-		WL_ERROR(("%s: Error on gpio_direction_input\n", __func__));
-		return 1;
-	}
-	if (gpio_set_debounce(host_oob_irq, 0) < 0)
-		WL_ERROR(("%s: Error on gpio_set_debounce\n", __func__));
+	if (!wifi_irq_is_fastirq()) {
+		if (gpio_request(host_oob_irq, "bcm43xx_irq") < 0) {
+			WL_ERROR(("%s: Error on gpio_request bcm43xx_irq: %d\n", __func__, host_oob_irq));
+			return 1;
+		}
+		if (gpio_direction_input(host_oob_irq) < 0) {
+			WL_ERROR(("%s: Error on gpio_direction_input\n", __func__));
+			return 1;
+		}
+		if (gpio_set_debounce(host_oob_irq, 0) < 0)
+			WL_ERROR(("%s: Error on gpio_set_debounce\n", __func__));
 
-	host_oob_irq = gpio_to_irq(host_oob_irq);
+		host_oob_irq = gpio_to_irq(host_oob_irq);
+	}
 
 #else
 #if defined(CUSTOM_OOB_GPIO_NUM)

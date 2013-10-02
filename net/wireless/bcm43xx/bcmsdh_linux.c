@@ -654,6 +654,9 @@ int bcmsdh_register_oob_intr(void * dhdp)
 	dev_set_drvdata(sdhcinfo->dev, dhdp);
 
 	if (!sdhcinfo->oob_irq_registered) {
+#if defined(HW_OOB)
+		sdhcinfo->oob_flags |= IRQF_ONESHOT;
+#endif /* defined(HW_OOB) */
 		pr_info("%s IRQ=%d Type=%X \n", __FUNCTION__,
 			(int)sdhcinfo->oob_irq, (int)sdhcinfo->oob_flags);
 		/* Refer to customer Host IRQ docs about proper irqflags definition */
