@@ -91,6 +91,7 @@
 #define CMD_GET_BEST_CHANNELS	"GET_BEST_CHANNELS"
 #endif /* WL_SUPPORT_AUTO_CHANNEL */
 
+#define CMD_RTCOEX		"MWS_COEX_BITMAP"
 
 /* CCX Private Commands */
 
@@ -947,6 +948,30 @@ resume:
 	return ret;
 }
 
+
+int wl_android_set_rt_coex(struct net_device *dev, char *command, int total_len)
+{
+	int error = 0;
+	int bitmap = 0;
+
+	if (sscanf(command, "%*s %x", &bitmap) != 1) {
+		DHD_ERROR(("%s: Failed to get Parameter\n", __FUNCTION__));
+		return -1;
+	}
+
+	error = wldev_iovar_setint(dev, "mws_coex_bitmap", bitmap);
+	if (error) {
+		DHD_ERROR(("%s: Failed to set rt coex bitmap %x, error = %d\n",
+		__FUNCTION__, bitmap, error));
+		return -1;
+	}
+	else
+		DHD_ERROR(("%s: succeeded to set rt coex bitmap %x, error = %d\n",
+		__FUNCTION__, bitmap, error));
+	return 0;
+}
+
+
 int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 {
 #define PRIVATE_COMMAND_MAX_LEN	8192
@@ -1135,6 +1160,8 @@ int wl_android_priv_cmd(struct net_device *net, struct ifreq *ifr, int cmd)
 		strlen(CMD_SETIBSSBEACONOUIDATA)) == 0)
 		bytes_written = wl_android_set_ibss_beacon_ouidata(net, command,
 			priv_cmd.total_len);
+	else if (strnicmp(command, CMD_RTCOEX, strlen(CMD_RTCOEX)) == 0)
+		bytes_written = wl_android_set_rt_coex(net, command, priv_cmd.total_len);
 	else {
 		DHD_ERROR(("Unknown PRIVATE command %s - ignored\n", command));
 		snprintf(command, 3, "OK");
@@ -1292,6 +1319,13 @@ int wifi_get_gpioen_number(void)
 		return (int)wifi_gpioenres->start;
 
 	return -1;
+}
+
+bool wifi_irq_is_fastirq(void)
+{
+	if (wifi_control_data)
+		return wifi_control_data->use_fast_irq;
+	return false;
 }
 
 int wifi_set_power(int on, unsigned long msec)

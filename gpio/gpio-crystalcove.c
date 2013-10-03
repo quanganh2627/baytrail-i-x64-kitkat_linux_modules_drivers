@@ -238,9 +238,9 @@ static void crystalcove_gpio_dbg_show(struct seq_file *s,
 		ctli = intel_mid_pmic_readb(
 			(gpio < 8 ? GPIO0P0CTLI : GPIO1P0CTLI) + offset);
 		mirqs0 = intel_mid_pmic_readb(
-			gpio < 8 ? MGPIO0IRQS0 : MGPIO0IRQS0);
+			gpio < 8 ? MGPIO0IRQS0 : MGPIO1IRQS0);
 		mirqsx = intel_mid_pmic_readb(
-			gpio < 8 ? MGPIO0IRQSX : MGPIO0IRQSX);
+			gpio < 8 ? MGPIO0IRQSX : MGPIO1IRQSX);
 		irq = intel_mid_pmic_readb(
 			gpio < 8 ? GPIO0IRQ : GPIO1IRQ);
 		seq_printf(s,

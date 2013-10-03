@@ -81,6 +81,8 @@
 #define NEED_ZONE_SPLIT(bprof)\
 	 ((bprof->temp_mon_ranges < MIN_BATT_PROF))
 
+#define USB_WAKE_LOCK_TIMEOUT	(5 * HZ)
+
 /* Type definitions */
 static void pmic_bat_zone_changed(void);
 static void pmic_battery_overheat_handler(bool);
@@ -1006,31 +1008,11 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 	}
 
 	if (int_reg & CHRGRIRQ1_SVBUSDET_MASK) {
-		if (mask) {
+		if (mask)
 			dev_info(chc.dev,
 				"USB VBUS Detected. Notifying OTG driver\n");
-			ret = intel_scu_ipc_ioread8(USBIDSTAT_ADDR,
-							&usb_id_sts);
-			if (unlikely(ret)) {
-				dev_err(chc.dev, "Error reading USBIDSTAT reg\n");
-				return;
-			}
-			if ((stat_reg & CHRGRIRQ1_SUSBIDDET_MASK) &&
-				(!(is_aca(usb_id_sts)))) {
-				dev_dbg(chc.dev, "VBUS drive for device!!\n");
-				if (wake_lock_active(&chc.wakelock)) {
-					dev_dbg(chc.dev,
-						"Releasing wakelock for device!!\n");
-					wake_unlock(&chc.wakelock);
-				}
-			}
-		} else {
+		else
 			dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
-			if (wake_lock_active(&chc.wakelock)) {
-				dev_dbg(chc.dev, "Releasing the wakelock!!\n");
-				wake_unlock(&chc.wakelock);
-			}
-		}
 
 		if (chc.is_internal_usb_phy)
 			handle_internal_usbphy_notifications(mask);
@@ -1073,7 +1055,7 @@ static irqreturn_t pmic_isr(int irq, void *data)
 	u16 pmic_intr;
 	u8 chgrirq0_int;
 	u8 chgrirq1_int;
-	u8 mask = (CHRGRIRQ1_SVBUSDET_MASK);
+	u8 mask = ((CHRGRIRQ1_SVBUSDET_MASK) | (CHRGRIRQ1_SUSBIDDET_MASK));
 
 	pmic_intr = ioread16(chc.pmic_intr_iomap);
 	chgrirq0_int = (u8)pmic_intr;
@@ -1082,8 +1064,12 @@ static irqreturn_t pmic_isr(int irq, void *data)
 	if (!chgrirq1_int && !(chgrirq0_int & PMIC_CHRGR_INT0_MASK))
 		return IRQ_NONE;
 
-	if ((chgrirq1_int & mask) && (!wake_lock_active(&chc.wakelock)))
-		wake_lock(&chc.wakelock);
+	if ((chgrirq1_int & mask) && (!wake_lock_active(&chc.wakelock))) {
+		/*
+		Setting the Usb wake lock hold timeout to a safe value of 5s.
+		*/
+		wake_lock_timeout(&chc.wakelock, USB_WAKE_LOCK_TIMEOUT);
+	}
 
 	dev_dbg(chc.dev, "%s", __func__);
 
@@ -1400,8 +1386,12 @@ static int pmic_check_initial_events(void)
 		schedule_work(&chc.evt_work);
 	}
 
-	if ((evt->chgrirq1_stat & mask) && !wake_lock_active(&chc.wakelock))
-		wake_lock(&chc.wakelock);
+	if ((evt->chgrirq1_stat & mask) && !wake_lock_active(&chc.wakelock)) {
+		/*
+		Setting the Usb wake lock hold timeout to a safe value of 5s.
+		*/
+		wake_lock_timeout(&chc.wakelock, USB_WAKE_LOCK_TIMEOUT);
+	}
 
 	pmic_bat_zone_changed();
 
