@@ -801,11 +801,6 @@ static void handle_VC_event(void *dev_data)
 	return;
 }
 
-static irqreturn_t ocd_intrpt_handler(int irq, void *dev_data)
-{
-	return IRQ_WAKE_THREAD;
-}
-
 static irqreturn_t ocd_intrpt_thread_handler(int irq, void *dev_data)
 {
 	int ret;
@@ -957,7 +952,7 @@ static int mrfl_ocd_probe(struct platform_device *pdev)
 	}
 
 	/* Register for Interrupt Handler */
-	ret = request_threaded_irq(cinfo->irq, ocd_intrpt_handler,
+	ret = request_threaded_irq(cinfo->irq, NULL,
 						ocd_intrpt_thread_handler,
 						IRQF_NO_SUSPEND,
 						DRIVER_NAME, cinfo);
