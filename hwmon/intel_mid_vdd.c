@@ -370,13 +370,24 @@ static ssize_t store_volt_thres(struct device *dev,
 	int ret;
 	uint8_t data;
 	long volt;
+	long volt_limit_offset = 0;
 	struct sensor_device_attribute_2 *s_attr =
 					to_sensor_dev_attr_2(attr);
 
 	if (kstrtol(buf, 10, &volt))
 		return -EINVAL;
+	/*
+	 * In case of baytrail, VWARNA's range is from
+	 * 3.6 volt to 2.9 volt.For this we set
+	 * volt_limit_offset to 300mV.
+	 * It remains zero for all other cases. i.e. Cases
+	 * were the range is from 3.3 volt to 2.6 volt.
+	 */
+	if ((!pdata->is_clvp) && (!s_attr->nr))
+		volt_limit_offset = 300;
 
-	if (volt > MAX_VOLTAGE || volt < MIN_VOLTAGE)
+	if (volt > (MAX_VOLTAGE + volt_limit_offset) ||
+			volt < (MIN_VOLTAGE + volt_limit_offset))
 		return -EINVAL;
 
 	mutex_lock(&vdd_update_lock);
@@ -392,7 +403,8 @@ static ssize_t store_volt_thres(struct device *dev,
 	 * 100(since the values are entered as mV). Then, set bits
 	 * [0-2] to 'diff'
 	 */
-	data = (data & 0xF8) | ((MAX_VOLTAGE - volt)/100);
+	data = (data & 0xF8) | (((MAX_VOLTAGE + volt_limit_offset)
+				- volt)/100);
 
 	ret = intel_scu_ipc_iowrite8(VWARNA_CFG + s_attr->nr, data);
 	if (ret)
@@ -410,6 +422,7 @@ static ssize_t show_volt_thres(struct device *dev,
 {
 	int ret, volt;
 	uint8_t data;
+	long volt_limit_offset = 0;
 	struct sensor_device_attribute_2 *s_attr =
 					to_sensor_dev_attr_2(attr);
 
@@ -417,10 +430,13 @@ static ssize_t show_volt_thres(struct device *dev,
 	if (ret)
 		return ret;
 
+	if ((!pdata->is_clvp) && (!s_attr->nr))
+		volt_limit_offset = 300;
+
 	/* Read bits [0-2] of data and multiply by 100(for mV) */
 	volt = (data & 0x07) * 100;
 
-	return sprintf(buf, "%d\n", MAX_VOLTAGE - volt);
+	return sprintf(buf, "%d\n", (MAX_VOLTAGE + volt_limit_offset) - volt);
 }
 
 static ssize_t show_irq_status(struct device *dev,
