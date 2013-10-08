@@ -150,6 +150,13 @@ int intel_mid_pmic_set_pdata(const char *name, void *data, int len)
 }
 EXPORT_SYMBOL(intel_mid_pmic_set_pdata);
 
+/* wrapper function needed by Baytrail BCU driver */
+int intel_scu_ipc_read_mip(u8 *data, int len, int offset, int issigned)
+{
+	return 0;
+}
+EXPORT_SYMBOL(intel_scu_ipc_read_mip);
+
 static struct intel_mid_pmic intel_mid_pmic;
 static struct intel_mid_pmic *pmic = &intel_mid_pmic;
 
