@@ -309,6 +309,8 @@ struct pmic_chrgr_drv_context {
 	int health;
 	u8 pmic_id;
 	bool is_internal_usb_phy;
+	/* ShadyCove-WA for VBUS removal detect issue */
+	bool vbus_connect_status;
 	struct ps_batt_chg_prof *sfi_bcprof;
 	struct ps_pse_mod_prof *actual_bcprof;
 	struct ps_pse_mod_prof *runtime_bcprof;

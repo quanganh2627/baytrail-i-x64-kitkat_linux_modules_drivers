@@ -1422,6 +1422,10 @@ static int bq24261_handle_irq(struct bq24261_charger *chip, u8 stat_reg)
 
 		case BQ24261_LOW_SUPPLY:
 			notify = false;
+
+			if (chip->pdata->handle_low_supply)
+				chip->pdata->handle_low_supply();
+
 			if (chip->cable_type !=
 					POWER_SUPPLY_CHARGER_TYPE_NONE) {
 				schedule_delayed_work

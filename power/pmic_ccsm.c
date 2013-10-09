@@ -1008,6 +1008,43 @@ static void handle_internal_usbphy_notifications(int mask)
 			USB_EVENT_CHARGER, &cap);
 }
 
+/* ShadyCove-WA for VBUS removal detect issue */
+int pmic_handle_low_supply(void)
+{
+	int ret;
+	u8 val;
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+
+	dev_info(chc.dev, "Low-supply event received from external-charger\n");
+	if (vendor_id == BASINCOVE_VENDORID || !chc.vbus_connect_status) {
+		dev_err(chc.dev, "Ignore Low-supply event received\n");
+		return 0;
+	}
+
+	ret = pmic_read_reg(SCHGRIRQ1_ADDR, &val);
+	if (ret) {
+		dev_err(chc.dev,
+			"Error reading SCHGRIRQ1-register 0x%2x\n",
+			SCHGRIRQ1_ADDR);
+		return ret;
+	}
+
+	if (!(val & SCHRGRIRQ1_SVBUSDET_MASK)) {
+		int mask = 0;
+
+		dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
+		chc.vbus_connect_status = false;
+
+		if (chc.is_internal_usb_phy)
+			handle_internal_usbphy_notifications(mask);
+		else
+			atomic_notifier_call_chain(&chc.otg->notifier,
+					USB_EVENT_VBUS, &mask);
+	}
+
+	return ret;
+}
+
 static void handle_level0_interrupt(u8 int_reg, u8 stat_reg,
 				struct interrupt_info int_info[],
 				int int_info_size)
@@ -1082,11 +1119,14 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 	}
 
 	if (int_reg & CHRGRIRQ1_SVBUSDET_MASK) {
-		if (mask)
+		if (mask) {
 			dev_info(chc.dev,
 				"USB VBUS Detected. Notifying OTG driver\n");
-		else
+			chc.vbus_connect_status = true;
+		} else {
 			dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
+			chc.vbus_connect_status = false;
+		}
 
 		if (chc.is_internal_usb_phy)
 			handle_internal_usbphy_notifications(mask);
