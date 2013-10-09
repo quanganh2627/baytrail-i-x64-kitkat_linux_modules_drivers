@@ -278,7 +278,16 @@ static void psh_remove(struct pci_dev *pdev)
 	/* pci_dev_put(pdev); */
 }
 
-#ifdef CONFIG_PM_RUNTIME
+static int psh_suspend(struct device *dev)
+{
+	return psh_ia_comm_suspend(dev);
+}
+
+static int psh_resume(struct device *dev)
+{
+	return psh_ia_comm_resume(dev);
+}
+
 static int psh_runtime_suspend(struct device *dev)
 {
 	dev_dbg(dev, "runtime suspend called\n");
@@ -291,16 +300,11 @@ static int psh_runtime_resume(struct device *dev)
 	return 0;
 }
 
-#else
-
-#define psh_ipc_runtime_suspend	NULL
-#define psh_ipc_runtime_resume	NULL
-
-#endif
-
 static const struct dev_pm_ops psh_drv_pm_ops = {
-	.runtime_suspend	= psh_runtime_suspend,
-	.runtime_resume		= psh_runtime_resume,
+	SET_SYSTEM_SLEEP_PM_OPS(psh_suspend,
+			psh_resume)
+	SET_RUNTIME_PM_OPS(psh_runtime_suspend,
+			psh_runtime_resume, NULL)
 };
 
 static DEFINE_PCI_DEVICE_TABLE(pci_ids) = {
