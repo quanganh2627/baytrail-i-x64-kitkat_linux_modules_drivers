@@ -43,6 +43,8 @@
 #include <linux/intel_mid_dma.h>
 #include <linux/irq.h>
 #include <asm/intel_mid_hsu.h>
+#include <linux/intel_mid_pm.h>
+#include <linux/pm_qos.h>
 
 #include "mfd.h"
 
