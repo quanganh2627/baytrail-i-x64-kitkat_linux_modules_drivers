@@ -556,6 +556,7 @@ int bcm43xx_bluetooth_resume(struct platform_device *pdev)
 static struct acpi_device_id bcm_id_table[] = {
 	/* ACPI IDs here */
 	{ "BCM2E1A", 0 },
+	{ "BCM2E3A", 0 },
 	{ }
 };
 
