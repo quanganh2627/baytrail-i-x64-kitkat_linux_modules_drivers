@@ -339,7 +339,7 @@ struct mxt_panel_info supported_panels[] = {
 		.build = 0xAB,
 		.info_crc = 0x969531,
 		.config_crc = 0x96CB66,
-		.gpio_switch = -1,
+		.gpio_switch = 211,
 	},
 	/* 1664S 10 inch panel */
 	{
