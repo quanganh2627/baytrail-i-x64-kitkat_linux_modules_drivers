@@ -188,6 +188,21 @@ static const struct ieee80211_iface_combination if_combinations[] = {
 };
 #endif
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+	/* if wowlan is not supported, kernel generate a disconnect at each suspend
+	 * cf: /net/wireless/sysfs.c, so register a stub wowlan.
+	 * Moreover wowlan has to be enabled via a the nl80211_set_wowlan callback.
+	 * (from user space,  e.g. iw phy0 wowlan enable)
+	 */
+static const struct wiphy_wowlan_support wowlan_stub = {
+	.flags = WIPHY_WOWLAN_ANY,
+	.n_patterns = 0,
+	.pattern_max_len = 0,
+	.pattern_min_len = 0,
+	.max_pkt_offset = 0,
+};
+#endif
+
 /* Data Element Definitions */
 #define WPS_ID_CONFIG_METHODS     0x1008
 #define WPS_ID_REQ_TYPE           0x103A
@@ -6547,6 +6562,10 @@ static s32 wl_setup_wiphy(struct wireless_dev *wdev, struct device *sdiofunc_dev
 	wdev->wiphy->flags |= WIPHY_FLAG_HAVE_AP_SME;
 #endif /* WL_SUPPORT_BACKPORTED_KPATCHES) || (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)) */
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+	wdev->wiphy->wowlan = wowlan_stub;
+#endif
+
 #ifdef CONFIG_CFG80211_INTERNAL_REGDB
 	wdev->wiphy->reg_notifier = wl_cfg80211_reg_notifier;
 #endif /* CONFIG_CFG80211_INTERNAL_REGDB */
@@ -9242,6 +9261,17 @@ s32 wl_cfg80211_attach(struct net_device *ndev, void *data)
 		kfree(wdev);
 		return -ENOMEM;
 	}
+#if defined(WL_ENABLE_P2P_IF)
+        /* Workaround: to make p2p working first time after bcm module load (
+         * i.e after boot).Need to disable P2P GO and P2P client modes for wlan0
+         * interface else wpa_supplicant believes it shall send p2p commands
+         * on wlan0. Note this is a workaround valid on JB MR2 , which is not
+         * compatible with kernel 3.10 by default.
+         */
+	wdev->wiphy->interface_modes = (wdev->wiphy->interface_modes)
+					& (~(BIT(NL80211_IFTYPE_P2P_CLIENT)|
+					BIT(NL80211_IFTYPE_P2P_GO)));
+#endif
 	wdev->iftype = wl_mode_to_nl80211_iftype(WL_MODE_BSS);
 	wl = (struct wl_priv *)wiphy_priv(wdev->wiphy);
 	wl->wdev = wdev;

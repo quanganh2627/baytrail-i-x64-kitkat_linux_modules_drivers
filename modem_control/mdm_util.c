@@ -69,7 +69,7 @@ void mdm_ctrl_enable_flashing(unsigned long int param)
 
 	del_timer(&drv->flashing_timer);
 	if (mdm_ctrl_get_state(drv) != MDM_CTRL_STATE_IPC_READY) {
-		mdm_ctrl_launch_work(drv, MDM_CTRL_STATE_FW_DOWNLOAD_READY);
+		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_FW_DOWNLOAD_READY);
 	}
 }
 
@@ -101,28 +101,6 @@ void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
 }
 
 /**
- *  mdm_ctrl_set_reset_ongoing - Set the RESET ongoing flag value
- *  @drv: Reference to the driver structure
- *  @ongoing: Flag value to set
- *
- */
-inline void mdm_ctrl_set_reset_ongoing(struct mdm_ctrl *drv, int ongoing)
-{
-	drv->rst_ongoing = ongoing;
-}
-
-/**
- *  mdm_ctrl_get_reset_ongoing - Return the RESET ongoing flag value
- *  @drv: Reference to the driver structure
- *
- */
-inline int mdm_ctrl_get_reset_ongoing(struct mdm_ctrl *drv)
-{
-
-	return drv->rst_ongoing;
-}
-
-/**
  *  mdm_ctrl_set_func - Set modem sequences functions to use
  *  @drv: Reference to the driver structure
  *
@@ -148,10 +126,8 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
 		drv->pdata->mdm.power_off = mcd_mdm_power_off;
 		drv->pdata->mdm.cleanup = mcd_mdm_cleanup;
-		drv->pdata->mdm.get_wflash_delay =
-		    mcd_mdm_get_wflash_delay;
-		drv->pdata->mdm.get_cflash_delay =
-		    mcd_mdm_get_cflash_delay;
+		drv->pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
+		drv->pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
 		break;
 	default:
 		pr_info(DRVNAME ": Can't retrieve modem specific functions");
@@ -209,38 +185,21 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
  *  @work: Reference to the work structure
  *
  */
-inline void mdm_ctrl_set_state(struct work_struct *work)
+inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
 {
-	struct mdm_ctrl *drv;
-	struct next_state *new_state;
-	unsigned long flags;
+	/* Set the current modem state */
+	atomic_set(&drv->modem_state, state);
+	if (likely(state != MDM_CTRL_STATE_UNKNOWN) &&
+	    (state & drv->polled_states)) {
 
-	drv = container_of(work, struct mdm_ctrl, change_state_work);
+		drv->polled_state_reached = true;
+		/* Waking up the poll work queue */
+		wake_up(&drv->wait_wq);
+		pr_info(DRVNAME ": Waking up polling 0x%x\r\n", state);
 
-	/* List can have several elements */
-	while (!list_empty_careful(&drv->next_state_link)) {
-		spin_lock_irqsave(&drv->state_lck, flags);
-		new_state = list_first_entry(&drv->next_state_link,
-					     struct next_state, link);
-		list_del_init(&new_state->link);
-		spin_unlock_irqrestore(&drv->state_lck, flags);
-
-		/* Set the current modem state */
-		drv->modem_state = new_state->state;
-		if (likely(drv->modem_state != MDM_CTRL_STATE_UNKNOWN) &&
-		    (drv->modem_state & drv->polled_states)) {
-
-			drv->polled_state_reached = true;
-			/* Waking up the poll work queue */
-			wake_up(&drv->wait_wq);
-			pr_info(DRVNAME ": Waking up polling 0x%x\r\n",
-				drv->modem_state);
-
-		}
-		/* Waking up the wait_for_state work queue */
-		wake_up(&drv->event);
-		kfree(new_state);
 	}
+	/* Waking up the wait_for_state work queue */
+	wake_up(&drv->event);
 }
 
 /**
@@ -252,33 +211,7 @@ inline void mdm_ctrl_set_state(struct work_struct *work)
  */
 inline int mdm_ctrl_get_state(struct mdm_ctrl *drv)
 {
-	return drv->modem_state;
-}
-
-/**
- *  mdm_ctrl_launch_work - Launch work to change modem state
- *  @drv: Reference to the driver structure
- *  @state: New state
- *
- *  Defer and queue change of state in order to avoid race condition
- *  with IRQ and timer expiration management.
- */
-inline void mdm_ctrl_launch_work(struct mdm_ctrl *drv, int state)
-{
-	struct next_state *new_state;
-	unsigned long flags;
-
-	new_state = kzalloc(sizeof(struct next_state), GFP_ATOMIC);
-	if (!new_state) {
-		pr_err(DRVNAME ": Can't allocate new_state memory");
-		return;
-	}
-	new_state->state = state;
-
-	spin_lock_irqsave(&drv->state_lck, flags);
-	list_add_tail(&new_state->link, &drv->next_state_link);
-	queue_work(drv->change_state_wq, &drv->change_state_work);
-	spin_unlock_irqrestore(&drv->state_lck, flags);
+	return atomic_read(&drv->modem_state);
 }
 
 /**
@@ -297,8 +230,9 @@ struct mcd_base_info *modem_ctrl_get_dev_data(struct platform_device *pdev)
 			__func__);
 		/* FOR ACPI HANDLING */
 		if (retrieve_modem_platform_data(pdev)) {
-			pr_err(DRVNAME"%s: No registered info found. Disabling driver.",
-				__func__);
+			pr_err(DRVNAME
+			       "%s: No registered info found. Disabling driver.",
+			       __func__);
 			return NULL;
 		}
 	}

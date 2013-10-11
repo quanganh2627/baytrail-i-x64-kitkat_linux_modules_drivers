@@ -54,8 +54,8 @@
 
 #define DRIVER_NAME "bcove_bcu"
 
-#define CAMFLASH_STATE_ON	1
-#define CAMFLASH_STATE_OFF	0
+#define CAMFLASH_STATE_NORMAL	0
+#define CAMFLASH_STATE_CRITICAL	3
 
 /* 'enum' of BCU events */
 enum bcu_events { VWARN1, VWARN2, VCRIT, GSMPULSE, TXPWRTH, UNKNOWN, __COUNT };
@@ -400,7 +400,8 @@ static ssize_t store_camflash_ctrl(struct device *dev,
 	if (kstrtou8(buf, 10, &value))
 		return -EINVAL;
 
-	if ((value != CAMFLASH_STATE_ON) && (value != CAMFLASH_STATE_OFF))
+	if ((value < CAMFLASH_STATE_NORMAL) ||
+		(value > CAMFLASH_STATE_CRITICAL))
 		return -EINVAL;
 
 	cam_flash_state = value;
@@ -801,11 +802,6 @@ static void handle_VC_event(void *dev_data)
 	return;
 }
 
-static irqreturn_t ocd_intrpt_handler(int irq, void *dev_data)
-{
-	return IRQ_WAKE_THREAD;
-}
-
 static irqreturn_t ocd_intrpt_thread_handler(int irq, void *dev_data)
 {
 	int ret;
@@ -957,7 +953,7 @@ static int mrfl_ocd_probe(struct platform_device *pdev)
 	}
 
 	/* Register for Interrupt Handler */
-	ret = request_threaded_irq(cinfo->irq, ocd_intrpt_handler,
+	ret = request_threaded_irq(cinfo->irq, NULL,
 						ocd_intrpt_thread_handler,
 						IRQF_NO_SUSPEND,
 						DRIVER_NAME, cinfo);
@@ -985,7 +981,7 @@ static int mrfl_ocd_probe(struct platform_device *pdev)
 
 	enable_volt_trip_points();
 	enable_current_trip_points();
-	cam_flash_state = CAMFLASH_STATE_ON;
+	cam_flash_state = CAMFLASH_STATE_NORMAL;
 
 	/* Initializing delayed work for re-enabling vwarn1 interrupt */
 	INIT_DELAYED_WORK(&cinfo->vwarn1_irq_work, vwarn1_irq_enable_work);
