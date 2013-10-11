@@ -24,6 +24,7 @@
 #include <linux/acpi.h>
 #include <asm/intel_vlv2.h>
 #include <linux/version.h>
+#include <linux/debugfs.h>
 
 #define PMIC_IRQ_NUM	7
 
@@ -132,6 +133,290 @@ static struct mfd_cell crystal_cove_data[] = {
 	},
 	{NULL, },
 };
+
+
+/*TLP init - begin*/
+struct tlp_data {
+	u16 rsvd;
+	u8  high;
+	u8  low;
+};
+
+#define TLP_END_MASK_H 0xE0
+#define TLP_END_MASK_L 0x03
+#define TLP_ADDR_BASE 0xCA
+
+#define VR_ON 0
+#define VR_OFF 1
+
+enum {
+	_0_Us,
+	_0_5_Us,
+	_0_75_Us,
+	_1_Us,
+	_2_Us,
+	_3_Us,
+	_4_Us,
+	_5_Us,
+	_10_Us,
+	_15_Us,
+	_20_Us,
+	_30_Us,
+	_40_Us,
+	_50_Us,
+	_60_Us,
+	_80_Us,
+	_100_Us,
+	_250_Us,
+	_500_Us,
+	_1ms,
+	_2ms,
+	_3ms,
+	_5ms,
+	_10ms,
+	_20ms,
+	_30ms,
+	_50ms,
+	_80ms,
+	_100ms
+};
+
+enum {
+	VCC,
+	VNN,
+	VDDQ,
+	VSDIO,
+	VDDQ_VTT,
+	V_USBPHY,
+	VSYS_U,
+	VSYS_S,
+	VSYS_SX,
+	VHDMI,
+	VHOST,
+	VBUS,
+	VREFDQ,
+	V1P0A,
+	V1P2A,
+	V1P8A,
+	V3P3A,
+	V1P0S,
+	V1P2S,
+	V1P8S,
+	V2P85S,
+	V3P3S,
+	V5P0S,
+	V1P0SX,
+	V1P05S,
+	V1P2SX,
+	V1P8SX,
+	V2P85SX,
+	V1P8U,
+	V3P3U,
+	RSVD
+};
+
+static struct tlp_data tlpdata[0x7F];
+static u8 TLP_ADDR[10];
+
+void tlp_write(u8 addr, u8 high, u8 low)
+{
+	int ret;
+
+	/* write the address */
+	ret = intel_mid_pmic_writeb(0xc7, addr);
+	if (ret)
+		printk(KERN_ALERT "pmic write failed\n");
+
+	/* write data high */
+	ret = intel_mid_pmic_writeb(0xc8, high);
+	if (ret)
+		printk(KERN_ALERT "pmic write failed\n");
+
+	/* write data low */
+	ret = intel_mid_pmic_writeb(0xc9, low);
+	if (ret)
+		printk(KERN_ALERT "pmic write failed\n");
+}
+
+void tlp_read(u8 addr, u8 *high, u8 *low)
+{
+	int ret;
+	/* write the address */
+	ret = intel_mid_pmic_writeb(0xc7, addr);
+	if (ret)
+		printk(KERN_ALERT "pmic write failed\n");
+
+	/* read data high */
+	*high = intel_mid_pmic_readb(0xc8);
+	if (ret)
+		printk(KERN_ALERT "pmic read failed\n");
+
+	/* read data low */
+	*low  = intel_mid_pmic_readb(0xc9);
+	if (ret)
+		printk(KERN_ALERT "pmic read failed\n");
+}
+
+bool is_tlp_end_instr(u8 h, u8 l)
+{
+	if (((h & TLP_END_MASK_H) == TLP_END_MASK_H) &&
+		((l & TLP_END_MASK_L) == TLP_END_MASK_L))
+		return true;
+	else
+		return false;
+}
+
+bool is_tlp_end_boundary(u8 index, u8 addr)
+{
+	int i;
+	for (i = 0; i < 10; i++) {
+		if (i == index)
+			continue;
+		if (TLP_ADDR[i] == addr)
+			return true;
+	}
+	return false;
+}
+
+void tlp_insert(u8 index, u8 op, u8 wait, u8 vr)
+{
+	u8 addr = intel_mid_pmic_readb(TLP_ADDR_BASE + index);
+	u8 high, low;
+	u8 tlp_new_high, tlp_new_low;
+	bool end, end_boundary;
+	do {
+		tlp_read(addr, &high, &low);
+		end = is_tlp_end_instr(high, low);
+		addr++;
+		end_boundary = is_tlp_end_boundary(index, addr);
+	} while (!((end == true) || (end_boundary == true)));
+	tlp_new_high = op << 5 | wait;
+	tlp_new_low  = vr;
+	tlp_write(addr-1, tlp_new_high, tlp_new_low);
+	tlp_write(addr, TLP_END_MASK_H, TLP_END_MASK_L);
+}
+
+u8 tlp_shift(u8 index, u8 new_addr)
+{
+	u8 old_addr = TLP_ADDR[index];
+	bool end, end_boundary;
+
+	intel_mid_pmic_writeb(TLP_ADDR_BASE+index, new_addr);
+	do {
+		tlp_write(new_addr, tlpdata[old_addr].high,
+			tlpdata[old_addr].low);
+		end = is_tlp_end_instr(tlpdata[old_addr].high,
+			tlpdata[old_addr].low);
+		end_boundary = is_tlp_end_boundary(index, old_addr);
+		old_addr++;
+		new_addr++;
+	} while (!((end == true) || (end_boundary == true)));
+
+	return new_addr;
+}
+
+static ssize_t tlp_program_write(struct file *file,
+		const char __user *userbuf, size_t count, loff_t *ppos)
+{
+	char buf[32];
+	int res;
+	int buf_size = min(count, sizeof(buf)-1);
+	u32 vr;
+
+	if (copy_from_user(buf, userbuf, buf_size))
+		return -EFAULT;
+
+	buf[buf_size] = 0;
+
+	res = kstrtou32(buf, 10, &vr);
+
+	if (res)
+		return -EINVAL;
+
+	if ((vr < 0) || (vr > 0x1F))
+		return -EINVAL;
+
+	/*S0ix Entry*/
+	tlp_insert(4, VR_OFF, _0_Us, vr);
+	/*S0ix Exit*/
+	tlp_insert(3, VR_ON, _0_Us, vr);
+
+	return buf_size;
+}
+
+static int tlp_program_show(struct seq_file *s, void *unused)
+{
+	seq_printf(s, "PMIC Task List Processor Program...\n");
+	return 0;
+}
+
+static int tlp_program_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, tlp_program_show, NULL);
+}
+
+static const struct file_operations tlp_program_ops = {
+	.open		= tlp_program_open,
+	.read		= seq_read,
+	.write		= tlp_program_write,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static void tlp_init()
+{
+	int i;
+	u8 last_addr;
+
+	/*cache the existing TLP programming*/
+	for (i = 0; i < 10; i++)
+		TLP_ADDR[i] = intel_mid_pmic_readb(TLP_ADDR_BASE + i);
+
+	/*Move the sections to make space for S0ix*/
+	last_addr = tlp_shift(0, 0x6);
+	last_addr = tlp_shift(7, last_addr);
+	last_addr = tlp_shift(8, last_addr);
+	last_addr = tlp_shift(9, last_addr);
+
+	/*exit S4*/
+	tlp_write(last_addr, TLP_END_MASK_H, TLP_END_MASK_L);
+	intel_mid_pmic_writeb(0xCB, last_addr);
+	last_addr++;
+
+	/*exit S3*/
+	tlp_write(last_addr, TLP_END_MASK_H, TLP_END_MASK_L);
+	intel_mid_pmic_writeb(0xCC, last_addr);
+	last_addr++;
+
+	/*enter S3*/
+	tlp_write(last_addr, TLP_END_MASK_H, TLP_END_MASK_L);
+	intel_mid_pmic_writeb(0xCF, last_addr);
+	last_addr++;
+
+	/*enter S4*/
+	tlp_write(last_addr, TLP_END_MASK_H, TLP_END_MASK_L);
+	intel_mid_pmic_writeb(0xD0, last_addr);
+	last_addr++;
+
+	/*enter S0ix*/
+	last_addr = tlp_shift(4, last_addr);
+
+	/*exit S0ix*/
+	last_addr = tlp_shift(3, last_addr+0x20);
+
+	/*
+	 * Insert the following to add any VR to OFF/ON 
+	 * during standby. Example for V2P85S rail as follows:
+	 * tlp_insert(4, VR_OFF, _0_Us, V2P85S);
+	 * tlp_insert(3, VR_ON, _0_Us, V2P85S);
+	*/
+
+	/* /sys/kernel/debug/tlp_program */
+	(void) debugfs_create_file("tlp_program",
+		S_IFREG | S_IRUGO, NULL, NULL, &tlp_program_ops);
+}
+/*TLP init - end*/
+
 
 int intel_mid_pmic_set_pdata(const char *name, void *data, int len)
 {
@@ -427,7 +712,7 @@ static int pmic_irq_init(void)
 static int pmic_i2c_probe(struct i2c_client *i2c,
 			    const struct i2c_device_id *id)
 {
-	int i;
+	int i, ret;
 	struct mfd_cell *cell_dev = crystal_cove_data;
 
 	mutex_init(&pmic->io_lock);
@@ -445,12 +730,17 @@ static int pmic_i2c_probe(struct i2c_client *i2c,
 	for (i = 0; cell_dev[i].name != NULL; i++)
 		;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 1))
-	return mfd_add_devices(pmic->dev, -1, cell_dev, i,
+	ret = mfd_add_devices(pmic->dev, -1, cell_dev, i,
 			NULL, pmic->irq_base, NULL);
 #else
-	return mfd_add_devices(pmic->dev, -1, cell_dev, i,
+	ret = mfd_add_devices(pmic->dev, -1, cell_dev, i,
 			NULL, pmic->irq_base);
 #endif
+
+	/*TLP programming*/
+	tlp_init();
+
+	return ret;
 }
 
 static int pmic_i2c_remove(struct i2c_client *i2c)
