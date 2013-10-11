@@ -855,13 +855,13 @@ const struct pci_device_id *id)
 	}
 #endif
 
-	pm_runtime_put_noidle(&pdev->dev);
-	pm_runtime_allow(&pdev->dev);
-	pm_runtime_use_autosuspend(&pdev->dev);
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
-
 	if (controller->acpi_name)
 		i2c_dw_scan_devices(adap, controller->acpi_name);
+
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_put_noidle(&pdev->dev);
+	pm_runtime_allow(&pdev->dev);
 
 	return 0;
 
