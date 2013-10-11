@@ -360,6 +360,22 @@ extern void *pktoffset(osl_t *osh, void *p,  uint offset);
 #define	PKTPRIO_UPD	0x400		/* DSCP used to update VLAN prio */
 #define	PKTPRIO_DSCP	0x800		/* DSCP prio found */
 
+/* DSCP type definitions (RFC4594) */
+/* AF1x: High-Throughput Data (RFC2597) */
+#define DSCP_AF11	0x0A
+#define DSCP_AF12	0x0C
+#define DSCP_AF13	0x0E
+/* AF2x: Low-Latency Data (RFC2597) */
+#define DSCP_AF21	0x12
+#define DSCP_AF22	0x14
+#define DSCP_AF23	0x16
+/* AF3x: Multimedia Streaming (RFC2597) */
+#define DSCP_AF31	0x1A
+#define DSCP_AF32	0x1C
+#define DSCP_AF33	0x1E
+/* EF: Telephony (RFC3246) */
+#define DSCP_EF		0x2E
+
 extern uint pktsetprio(void *pkt, bool update_vtag);
 
 /* string */
@@ -862,6 +878,11 @@ extern bcm_tlv_t *find_vendor_ie(void *tlvs, int tlvs_len,
 extern void bcm_uint64_multiple_add(uint32* r_high, uint32* r_low, uint32 a, uint32 b, uint32 c);
 /* calculate a / b */
 extern void bcm_uint64_divide(uint32* r, uint32 a_high, uint32 a_low, uint32 b);
+
+/* return chip ID */
+#if defined(SUPPORT_MULTIPLE_REVISION)
+extern uint bcm_get_chip_id(void);
+#endif /* SUPPORT_MULTIPLE_REVISION */
 
 #ifdef __cplusplus
 	}

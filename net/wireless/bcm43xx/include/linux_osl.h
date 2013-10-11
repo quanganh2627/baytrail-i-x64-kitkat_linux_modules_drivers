@@ -67,6 +67,9 @@ extern void osl_assert(const char *exp, const char *file, int line);
 #define	OSL_DELAY(usec)		osl_delay(usec)
 extern void osl_delay(uint usec);
 
+#define OSL_SLEEP(ms)			osl_sleep(ms)
+extern void osl_sleep(uint ms);
+
 #define	OSL_PCMCIA_READ_ATTR(osh, offset, buf, size) \
 	osl_pcmcia_read_attr((osh), (offset), (buf), (size))
 #define	OSL_PCMCIA_WRITE_ATTR(osh, offset, buf, size) \

@@ -2310,6 +2310,7 @@ dhd_wlfc_enable(dhd_pub_t *dhd)
 	if (wlfc->hanger == NULL) {
 		MFREE(dhd->osh, dhd->wlfc_state, sizeof(athost_wl_status_info_t));
 		dhd->wlfc_state = NULL;
+		DHD_ERROR(("Failed to malloc dhd->wlfc_state\n"));
 		return BCME_NOMEM;
 	}
 

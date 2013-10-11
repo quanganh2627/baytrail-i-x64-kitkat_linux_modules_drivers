@@ -294,6 +294,7 @@
 #define BCM4360_CHIP_ID		0x4360          /* 4360 chipcommon chipid */
 #define BCM4352_CHIP_ID		0x4352          /* 4352 chipcommon chipid */
 #define BCM43526_CHIP_ID	0xAA06
+#define BCM43340_CHIP_ID	43340		/* 43340 chipcommon chipid */
 #define BCM43341_CHIP_ID	43341		/* 43341 chipcommon chipid */
 #define BCM43342_CHIP_ID	43342		/* 43342 chipcommon chipid */
 #define BCM4350_CHIP_ID		0x4350          /* 4350 chipcommon chipid */
