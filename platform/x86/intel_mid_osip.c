@@ -239,12 +239,6 @@ bd_put:
    The attribute of OS image is selected for Reboot/boot reason.
 */
 
-#define SIGNED_MOS_ATTR		0x0
-#define SIGNED_COS_ATTR		0x0A
-#define SIGNED_POS_ATTR		0x0E
-#define SIGNED_RECOVERY_ATTR	0x0C
-#define SIGNED_POSCOS_ATTR	0x10
-
 static int osip_reboot_notifier_call(struct notifier_block *notifier,
 				     unsigned long what, void *data)
 {
