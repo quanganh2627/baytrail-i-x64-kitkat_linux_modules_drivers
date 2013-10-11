@@ -1860,11 +1860,16 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 	 */
 	tty = tty_port_tty_get(tport);
 
-	if (up->use_dma) {
-		if (test_bit(flag_startup, &up->flags)
-				&& serial_in(up, UART_FOR) & 0x7F)
+	if (test_bit(flag_startup, &up->flags)) {
+		if (up->hw_type == hsu_intel &&
+			serial_in(up, UART_FOR) & 0x7F)
 			goto busy;
+		else if (up->hw_type == hsu_dw &&
+			serial_in(up, 0x7c / 4) & BIT(3))
+			goto busy;
+	}
 
+	if (up->use_dma) {
 		if (up->hw_type == hsu_intel) {
 			if (chan_readl(up->rxc, HSU_CH_D0SAR) >
 					up->rxbuf.dma_addr)
@@ -1919,6 +1924,13 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 
 	if (up->use_dma) {
 		if (up->dma_ops->suspend(up))
+			goto err;
+	} else if (test_bit(flag_startup, &up->flags)) {
+		if (up->hw_type == hsu_intel &&
+			serial_in(up, UART_FOR) & 0x7F)
+			goto err;
+		else if (up->hw_type == hsu_dw &&
+			serial_in(up, 0x7c / 4) & BIT(3))
 			goto err;
 	}
 
