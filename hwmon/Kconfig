@@ -65,10 +65,14 @@ config SENSORS_LSM303_MAG
 
 config SENSORS_MID_VDD
 	tristate "Voltage drop detection driver for Intel Clovertrail plus platform"
-        depends on INTEL_SCU_IPC
+        depends on INTEL_SCU_IPC || CRYSTAL_COVE
         help
 	  Say Y here to enable Voltage drop detection driver on Intel
-	  Clovertrail plus Platform.
+	  Clovertrail plus Platform and Baytrail platform.
+
+	  This driver will enable BCU unit for baytrail or clovertrail.
+	  BCU unit will prevent any extreme drops appearing in
+	  system voltage.
 
 config SENSORS_MRFL_OCD
 	tristate "Basincove BCU driver for Merrifield"

@@ -65,11 +65,6 @@ struct hsu_dma_chan {
 	u32	tsr;
 };
 
-enum hsu_type {
-	HSU_INTEL,
-	HSU_DW,
-};
-
 struct dw_dma_priv {
 	struct intel_mid_dma_slave	txs;
 	struct intel_mid_dma_slave	rxs;
@@ -164,8 +159,13 @@ struct uart_hsu_port {
 	unsigned int		port_irq_pio_rx_avb;
 	unsigned int		port_irq_pio_rx_err;
 	unsigned int		port_irq_pio_rx_timeout;
+	unsigned int		cts_status;
 	unsigned int		dma_irq_num;
+	unsigned int		dma_invalid_irq_num;
 	unsigned int		dma_irq_cmddone;
+	unsigned int		dma_tx_irq_cmddone;
+	unsigned int		dma_rx_irq_cmddone;
+	unsigned int		dma_rx_tmt_irq_cmddone;
 	unsigned int		tasklet_done;
 	unsigned int		workq_done;
 	unsigned int		in_workq;
@@ -173,9 +173,9 @@ struct uart_hsu_port {
 
 	unsigned int		byte_delay;
 
-	void (*hw_reset)(struct uart_hsu_port *up);
-
 	int			use_dma;	/* flag for DMA/PIO */
+	unsigned int		dma_irq;
+
 	void			*dma_priv;
 	struct hsu_dma_ops	*dma_ops;
 	int			dma_inited;
@@ -190,6 +190,7 @@ struct hsu_port {
 	void __iomem	*reg;
 	struct uart_hsu_port	port[HSU_PORT_MAX];
 	struct hsu_dma_chan	chans[HSU_PORT_MAX * 2];
+	spinlock_t		dma_lock;
 	struct dentry *debugfs;
 };
 
@@ -203,7 +204,7 @@ static inline unsigned int serial_in(struct uart_hsu_port *up, int offset)
 {
 	unsigned int val;
 
-	if (offset > UART_MSR || up->hw_type == HSU_DW) {
+	if (offset > UART_MSR || up->hw_type == hsu_dw) {
 		offset <<= 2;
 		val = readl(up->port.membase + offset);
 	} else
@@ -214,7 +215,7 @@ static inline unsigned int serial_in(struct uart_hsu_port *up, int offset)
 
 static inline void serial_out(struct uart_hsu_port *up, int offset, int value)
 {
-	if (offset > UART_MSR || up->hw_type == HSU_DW) {
+	if (offset > UART_MSR || up->hw_type == hsu_dw) {
 		offset <<= 2;
 		writel(value, up->port.membase + offset);
 	} else {

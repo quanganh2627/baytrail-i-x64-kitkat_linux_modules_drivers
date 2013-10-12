@@ -6214,9 +6214,9 @@ clkwait:
 		DHD_INTR(("%s: enable SDIO interrupts, rxdone %d framecnt %d\n",
 		          __FUNCTION__, rxdone, framecnt));
 		bus->intdis = FALSE;
-#if defined(OOB_INTR_ONLY)
+#if defined(OOB_INTR_ONLY) && defined(HW_OOB)
 		bcmsdh_oob_intr_set(1);
-#endif /* defined(OOB_INTR_ONLY) */
+#endif /* defined(OOB_INTR_ONLY) && defined(HW_OOB) */
 		bcmsdh_intr_enable(sdh);
 	}
 
