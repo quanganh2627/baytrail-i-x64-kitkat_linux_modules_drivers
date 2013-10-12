@@ -474,7 +474,9 @@ static int i2c_dw_find_slaves(struct acpi_resource *ares, void *data)
 				i2c->master_cfg |= DW_IC_CON_SPEED_HIGH;
 			}
 
+			down(&i2c->lock);
 			i2c_dw_init(i2c);
+			up(&i2c->lock);
 
 			dev_info(dev, "I2C speed get from acpi is %dKHz\n",
 				connection_speed/1000);
