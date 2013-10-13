@@ -170,8 +170,8 @@
 #define EVT_STR			"BCUEVT="
 #define GET_ENVP(EVT)		(EVT_STR#EVT)
 
-#define CAMFLASH_STATE_ON       1
-#define CAMFLASH_STATE_OFF      0
+#define CAMFLASH_STATE_NORMAL       0
+#define CAMFLASH_STATE_CRITICAL      3
 
 /* Defined to match the corresponding bit positions of the interrupt */
 enum { VWARNB_EVENT = 1, VWARNA_EVENT = 2, VCRIT_EVENT = 4};
@@ -511,7 +511,8 @@ static ssize_t store_camflash_ctrl(struct device *dev,
 	if (kstrtou8(buf, 10, &value))
 		return -EINVAL;
 
-	if ((value != CAMFLASH_STATE_ON) && (value != CAMFLASH_STATE_OFF))
+	if ((value < CAMFLASH_STATE_NORMAL) ||
+		(value > CAMFLASH_STATE_CRITICAL))
 		return -EINVAL;
 
 	cam_flash_state = value;
@@ -962,7 +963,7 @@ static int mid_vdd_probe(struct platform_device *pdev)
 
 	INIT_DELAYED_WORK(&(vinfo->vdd_intr_dwork), unmask_theburst);
 
-	cam_flash_state = CAMFLASH_STATE_ON;
+	cam_flash_state = CAMFLASH_STATE_NORMAL;
 
 	ret = program_bcu(pdev, vinfo);
 	if (!ret)
