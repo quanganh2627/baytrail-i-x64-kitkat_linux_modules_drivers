@@ -84,6 +84,9 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 	pm_runtime_get_sync(&psh_if_info->pshc->dev);
 	/* Loop read till error or no more valid data */
 	while (1) {
+		char *ptr;
+		int len;
+
 		if (ia_data->cmd_in_progress == CMD_RESET)
 			break;
 		else if (ia_data->cmd_in_progress != CMD_NONE)
@@ -111,7 +114,8 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 			break;
 		}
 
-		msg[1].len = frame_size(fh.length) - sizeof(fh);
+		len = frame_size(fh.length) - sizeof(fh);
+		msg[1].len = len;
 		ret = i2c_transfer(psh_if_info->pshc->adapter, msg + 1, 1);
 		if (ret != 1) {
 			dev_err(&psh_if_info->pshc->dev, "Read main frame error!"
@@ -119,16 +123,23 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 			break;
 		}
 
-		ret = ia_handle_frame(ia_data,
-					psh_if_info->psh_frame, fh.length);
-		if (ret > 0) {
-			cur_read += ret;
+		ptr = psh_if_info->psh_frame;
+		while (len > 0) {
+			struct cmd_resp *resp = (struct cmd_resp *)ptr;
+			u32 size = sizeof(*resp) + resp->data_len;
 
-			if (cur_read > 250) {
-				cur_read = 0;
-				sysfs_notify(&psh_if_info->pshc->dev.kobj,
-							NULL, "data_size");
+			ret = ia_handle_frame(ia_data, ptr, size);
+			if (ret > 0) {
+				cur_read += ret;
+
+				if (cur_read > 250) {
+					cur_read = 0;
+					sysfs_notify(&psh_if_info->pshc->dev.kobj,
+						NULL, "data_size");
+				}
 			}
+			ptr += frame_size(size);
+			len -= frame_size(size);
 		}
 
 	}
