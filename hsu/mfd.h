@@ -178,6 +178,7 @@ struct uart_hsu_port {
 
 	void			*dma_priv;
 	struct hsu_dma_ops	*dma_ops;
+	struct pm_qos_request   qos;
 	int			dma_inited;
 };
 

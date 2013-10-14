@@ -20,6 +20,8 @@
 #include <linux/intel_mid_dma.h>
 #include <linux/irq.h>
 #include <asm/intel_mid_hsu.h>
+#include <linux/intel_mid_pm.h>
+#include <linux/pm_qos.h>
 
 #include "mfd.h"
 
@@ -153,6 +155,9 @@ static int dw_dma_init(struct uart_hsu_port *up)
 	/* TX/RX reg share the same addr */
 	dw_dma->dma_addr = up->port.mapbase + UART_RX;
 
+	pm_qos_add_request(&up->qos, PM_QOS_CPU_DMA_LATENCY,
+			PM_QOS_DEFAULT_VALUE);
+
 	dw_dma->up = up;
 	up->dma_inited = 1;
 	return 0;
@@ -187,6 +192,7 @@ static int dw_dma_suspend(struct uart_hsu_port *up)
 
 	txchan->device->device_control(txchan, DMA_PAUSE, 0);
 	rxchan->device->device_control(rxchan, DMA_PAUSE, 0);
+	pm_qos_update_request(&up->qos, PM_QOS_DEFAULT_VALUE);
 	return 0;
 }
 
@@ -204,6 +210,7 @@ static int dw_dma_resume(struct uart_hsu_port *up)
 
 	txchan->device->device_control(txchan, DMA_RESUME, 0);
 	rxchan->device->device_control(rxchan, DMA_RESUME, 0);
+	pm_qos_update_request(&up->qos, CSTATE_EXIT_LATENCY_C2);
 	return 0;
 }
 
@@ -214,6 +221,7 @@ static int dw_dma_exit(struct uart_hsu_port *up)
 	struct dma_chan *txchan = dw_dma->txchan;
 	struct dma_chan *rxchan = dw_dma->rxchan;
 
+	pm_qos_remove_request(&up->qos);
 	txchan->device->device_control(txchan, DMA_TERMINATE_ALL, 0);
 	rxchan->device->device_control(rxchan, DMA_TERMINATE_ALL, 0);
 	dma_release_channel(dw_dma->txchan);

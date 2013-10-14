@@ -84,10 +84,15 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 	pm_runtime_get_sync(&psh_if_info->pshc->dev);
 	/* Loop read till error or no more valid data */
 	while (1) {
+		if (ia_data->cmd_in_progress == CMD_RESET)
+			break;
+		else if (ia_data->cmd_in_progress != CMD_NONE)
+			schedule();
+
 		ret = i2c_transfer(psh_if_info->pshc->adapter, msg, 1);
 		if (ret != 1) {
-			dev_err(&psh_if_info->pshc->dev, "Read frame header error!\n");
-			ret = -EPERM;
+			dev_err(&psh_if_info->pshc->dev, "Read frame header error!"
+					" ret=%d\n", ret);
 			break;
 		}
 
@@ -97,14 +102,20 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 				ret = -EPERM;
 				break;
 			}
-		} else
+		} else {
+			if (fh.sign || fh.length) {
+				dev_err(&psh_if_info->pshc->dev, "wrong fh (0x%x, 0x%x)\n",
+						fh.sign, fh.length);
+				ret = -EPERM;
+			}
 			break;
+		}
 
 		msg[1].len = frame_size(fh.length) - sizeof(fh);
 		ret = i2c_transfer(psh_if_info->pshc->adapter, msg + 1, 1);
 		if (ret != 1) {
-			dev_err(&psh_if_info->pshc->dev, "Read main frame error!\n");
-			ret = -EPERM;
+			dev_err(&psh_if_info->pshc->dev, "Read main frame error!"
+				   " ret=%d\n", ret);
 			break;
 		}
 
@@ -204,6 +215,33 @@ static irqreturn_t psh_byt_irq_thread(int irq, void *dev)
 
 static int psh_byt_suspend(struct device *dev)
 {
+	int ret;
+	struct i2c_client *client =
+		container_of(dev, struct i2c_client, dev);
+
+	ret = psh_ia_comm_suspend(dev);
+	if (ret)
+		return ret;
+	disable_irq(client->irq);
+	enable_irq_wake(client->irq);
+	return 0;
+}
+
+static int psh_byt_resume(struct device *dev)
+{
+	struct psh_ia_priv *ia_data =
+			(struct psh_ia_priv *)dev_get_drvdata(dev);
+	struct i2c_client *client =
+		container_of(dev, struct i2c_client, dev);
+
+	read_psh_data(ia_data);
+	enable_irq(client->irq);
+	disable_irq_wake(client->irq);
+	return psh_ia_comm_resume(dev);
+}
+
+static int psh_byt_runtime_suspend(struct device *dev)
+{
 	struct psh_ia_priv *ia_data =
 			(struct psh_ia_priv *)dev_get_drvdata(dev);
 	struct psh_ext_if *psh_if_info =
@@ -214,12 +252,13 @@ static int psh_byt_suspend(struct device *dev)
 	return 0;
 }
 
-static int psh_byt_resume(struct device *dev)
+static int psh_byt_runtime_resume(struct device *dev)
 {
 	struct psh_ia_priv *ia_data =
 			(struct psh_ia_priv *)dev_get_drvdata(dev);
 	struct psh_ext_if *psh_if_info =
 			(struct psh_ext_if *)ia_data->platform_priv;
+
 	if (psh_if_info->gpio_psh_ctl > 0) {
 		gpio_set_value(psh_if_info->gpio_psh_ctl, 1);
 		usleep_range(1800, 1800);
@@ -231,8 +270,8 @@ static int psh_byt_resume(struct device *dev)
 static const struct dev_pm_ops psh_byt_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(psh_byt_suspend,
 			psh_byt_resume)
-	SET_RUNTIME_PM_OPS(psh_byt_suspend,
-			psh_byt_resume, NULL)
+	SET_RUNTIME_PM_OPS(psh_byt_runtime_suspend,
+			psh_byt_runtime_resume, NULL)
 };
 
 /* FIXME: it will be a platform device */
