@@ -83,26 +83,6 @@ struct wake_src {
 	const char *name;
 };
 
-
-enum intel_mid_target_os {
-	MAIN = 0x00,
-	CHARGING = 0x0A,
-	RECOVERY = 0x0C,
-	FASTBOOT = 0x0E,
-	FACTORY = 0x12,
-	DNX = 0x14,
-	RESERVED_INTEL_BEGIN = 0x0F,
-	RESERVED_INTEL_END = 0xEF,
-	RESERVED_OEM_BEGIN = 0xF0,
-	RESERVED_OEM_END = 0xFF
-};
-
-struct target_os {
-	const char *name;
-	u32 id;
-};
-
-
 struct cmos_osnib {
 
 	struct {
@@ -229,7 +209,7 @@ int intel_mid_ilb_is_osnib_valid(struct cmos_osnib *osnib);
  * @rr: target os
  *
  */
-int intel_mid_ilb_write_osnib_rr(const char *target);
+int intel_mid_ilb_write_osnib_rr(const char *target, int id);
 
 /**
  * intel_mid_ilb_read_osnib_rr() - read reboot reason from osnib
