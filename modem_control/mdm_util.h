@@ -104,9 +104,6 @@ struct mdm_ctrl {
 
 	struct timer_list flashing_timer;
 
-	/* Wait queue for WAIT_FOR_STATE ioctl */
-	wait_queue_head_t event;
-
 	bool is_mdm_ctrl_disabled;
 
 };

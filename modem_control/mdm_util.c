@@ -200,8 +200,6 @@ inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
 		pr_info(DRVNAME ": Waking up polling 0x%x\r\n", state);
 
 	}
-	/* Waking up the wait_for_state work queue */
-	wake_up(&drv->event);
 }
 
 /**

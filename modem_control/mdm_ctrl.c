@@ -453,27 +453,6 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		}
 		break;
 
-	case MDM_CTRL_WAIT_FOR_STATE:
-		/* Actively wait for state untill timeout */
-		ret = copy_from_user(&cmd_params,
-				     (void __user *)arg, sizeof(cmd_params));
-		if (ret < 0) {
-			pr_info(DRVNAME ": copy from user failed ret = %ld\r\n",
-				ret);
-			break;
-		}
-		pr_err(DRVNAME ": WAIT_FOR_STATE 0x%x ! \r\n",
-		       cmd_params.param);
-
-		ret = wait_event_interruptible_timeout(drv->event,
-						       mdm_ctrl_get_state(drv)
-						       == cmd_params.param,
-						       msecs_to_jiffies
-						       (cmd_params.timeout));
-		if (!ret)
-			pr_err(DRVNAME ": WAIT_FOR_STATE timed out ! \r\n");
-		break;
-
 	case MDM_CTRL_GET_HANGUP_REASONS:
 		/* Return last hangup reason. Can be cumulative
 		 * if they were not cleared since last hangup.
@@ -653,7 +632,6 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 
 	/* Initialization */
 	mutex_init(&new_drv->lock);
-	init_waitqueue_head(&new_drv->event);
 	init_waitqueue_head(&new_drv->wait_wq);
 
 	/* Create a high priority ordered workqueue to change modem state */
