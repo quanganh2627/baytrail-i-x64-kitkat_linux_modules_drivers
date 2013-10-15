@@ -621,10 +621,8 @@ ssize_t ia_get_version(struct device *dev,
 	struct ia_cmd cmd;
 	struct psh_ia_priv *psh_ia_data =
 			(struct psh_ia_priv *)dev_get_drvdata(dev);
-	char version[VERSION_STR_MAX_SIZE];
 	cmd.cmd_id = CMD_GET_VERSION;
 	cmd.sensor_id = 0;
-	psh_ia_data->version_str = version;
 
 	ret = ia_send_cmd(psh_ia_data, PSH2IA_CHANNEL0, &cmd, 3);
 	if (ret) {
@@ -632,11 +630,10 @@ ssize_t ia_get_version(struct device *dev,
 		return ret;
 	}
 
-	if (!wait_for_completion_timeout(&psh_ia_data->cmd_version_comp, HZ))
+	if (!wait_for_completion_timeout(&psh_ia_data->cmd_version_comp, 2*HZ))
 		return snprintf(buf, PAGE_SIZE, "no response\n");
 
 	ret = snprintf(buf, PAGE_SIZE, "%s\n", psh_ia_data->version_str);
-	psh_ia_data->version_str = NULL;
 	return ret;
 }
 static SENSOR_DEVICE_ATTR(status_mask, S_IWUSR | S_IRUGO,
@@ -917,6 +914,12 @@ int psh_ia_common_init(struct device *dev, struct psh_ia_priv **data)
 		goto dbg_err;
 	}
 
+	psh_ia_data->version_str = kmalloc(VERSION_STR_MAX_SIZE, GFP_KERNEL);
+	if (!psh_ia_data->version_str) {
+		dev_err(dev, "can not allocate version string\n");
+		goto dbg_err;
+	}
+
 	psh_ia_data->status_bitmask = ((u32)-1) & ~SNR_RUNONLY_BITMASK;
 
 	dev_set_drvdata(dev, psh_ia_data);
@@ -1001,6 +1004,7 @@ void psh_ia_common_deinit(struct device *dev)
 		list_del(&sensor_obj->list);
 		kfree(sensor_obj);
 	}
+	kfree(psh_ia_data->version_str);
 
 	kfree(psh_ia_data->circ.buf);
 
