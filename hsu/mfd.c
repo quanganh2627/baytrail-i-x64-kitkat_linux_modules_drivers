@@ -2282,7 +2282,7 @@ static int serial_port_setup(struct uart_hsu_port *up,
 	snprintf(up->name, sizeof(up->name) - 1, "%s_p", cfg->name);
 	up->index = index;
 
-	if (hsu_dma_enable & (1 << index))
+	if ((hsu_dma_enable & (1 << index)) && up->dma_ops)
 		up->use_dma = 1;
 	else
 		up->use_dma = 0;
@@ -2433,7 +2433,7 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 		up->rxc = &phsu->chans[index * 2 + 1];
 		up->dma_ops = &intel_dma_ops;
 	} else {
-		up->dma_ops = &dw_dma_ops;
+		up->dma_ops = pdw_dma_ops;
 	}
 
 	if (cfg->has_alt) {

@@ -225,7 +225,7 @@ static inline void serial_out(struct uart_hsu_port *up, int offset, int value)
 	}
 }
 void serial_sched_cmd(struct uart_hsu_port *up, char cmd);
-extern struct hsu_dma_ops dw_dma_ops;
+extern struct hsu_dma_ops *pdw_dma_ops;
 extern struct hsu_dma_ops intel_dma_ops;
 
 #endif
