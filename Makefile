@@ -15,5 +15,4 @@ obj-$(CONFIG_REGULATOR)         += regulator/
 obj-$(CONFIG_STAGING)		+= staging/
 obj-y               		+= hsu/
 obj-y               		+= mfd/
-obj-y				+= net/wireless/
 obj-$(CONFIG_WATCHDOG)		+= watchdog/
