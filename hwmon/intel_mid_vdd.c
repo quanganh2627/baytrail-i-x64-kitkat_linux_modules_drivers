@@ -184,6 +184,9 @@ static struct intel_msic_vdd_pdata *pdata;
 
 struct vdd_info {
 	unsigned int irq;
+	uint32_t intr_count_lvl1;
+	uint32_t intr_count_lvl2;
+	uint32_t intr_count_lvl3;
 	struct device *dev;
 	struct platform_device *pdev;
 	/* mapping SRAM address for BCU interrupts */
@@ -471,6 +474,35 @@ static ssize_t show_action_status(struct device *dev,
 	return sprintf(buf, "%x\n", action_status);
 }
 
+static ssize_t show_intr_count(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	uint32_t value;
+	int level = to_sensor_dev_attr(attr)->index;
+	struct vdd_info *vinfo = dev_get_drvdata(dev);
+
+	if (vinfo == NULL) {
+		dev_err(dev, "Unable to get driver private data.\n");
+		return -EIO;
+	}
+
+	switch (level) {
+	case VWARNA_EVENT:
+		value = vinfo->intr_count_lvl1;
+		break;
+	case VWARNB_EVENT:
+		value = vinfo->intr_count_lvl2;
+		break;
+	case VCRIT_EVENT:
+		value = vinfo->intr_count_lvl3;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return sprintf(buf, "%d\n", value);
+}
+
 static ssize_t store_camflash_ctrl(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -675,15 +707,21 @@ static irqreturn_t vdd_interrupt_thread_handler(int irq, void *dev_data)
 	}
 
 	mutex_lock(&vdd_update_lock);
-	if (irq_data & VCRIT_IRQ)
+	if (irq_data & VCRIT_IRQ) {
 		/* BCU VCRIT Interrupt */
 		event |= VCRIT_EVENT;
-	if (irq_data & VWARNA_IRQ)
+		vinfo->intr_count_lvl3 += 1;
+	}
+	if (irq_data & VWARNA_IRQ) {
 		/* BCU WARNA Interrupt */
 		event |= VWARNA_EVENT;
-	if (irq_data & VWARNB_IRQ)
+		vinfo->intr_count_lvl1 += 1;
+	}
+	if (irq_data & VWARNB_IRQ) {
 		/* BCU WARNB Interrupt */
 		event |= VWARNB_EVENT;
+		vinfo->intr_count_lvl2 += 1;
+	}
 
 	handle_events(event, dev_data);
 
@@ -711,6 +749,12 @@ static SENSOR_DEVICE_ATTR_2(irq_status, S_IRUGO, show_irq_status,
 				NULL, 0, 0);
 static SENSOR_DEVICE_ATTR_2(action_status, S_IRUGO, show_action_status,
 				NULL, 0, 0);
+static SENSOR_DEVICE_ATTR(intr_count_level1, S_IRUGO,
+				show_intr_count, NULL, 2);
+static SENSOR_DEVICE_ATTR(intr_count_level2, S_IRUGO,
+				show_intr_count, NULL, 1);
+static SENSOR_DEVICE_ATTR(intr_count_level3, S_IRUGO,
+				show_intr_count, NULL, 4);
 static SENSOR_DEVICE_ATTR(camflash_ctrl, S_IRUGO | S_IWUSR,
 				show_camflash_ctrl, store_camflash_ctrl, 0);
 
@@ -722,6 +766,9 @@ static struct attribute *mid_vdd_attrs[] = {
 	&sensor_dev_attr_bcu_status.dev_attr.attr,
 	&sensor_dev_attr_irq_status.dev_attr.attr,
 	&sensor_dev_attr_action_status.dev_attr.attr,
+	&sensor_dev_attr_intr_count_level1.dev_attr.attr,
+	&sensor_dev_attr_intr_count_level2.dev_attr.attr,
+	&sensor_dev_attr_intr_count_level3.dev_attr.attr,
 	&sensor_dev_attr_camflash_ctrl.dev_attr.attr,
 	NULL
 };
