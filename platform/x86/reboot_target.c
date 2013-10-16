@@ -81,10 +81,17 @@ static int set_reboot_target(const char *name)
 static int reboot_target_notify(struct notifier_block *notifier,
 				unsigned long what, void *data)
 {
-	if (what == SYS_RESTART)
-		set_reboot_target(data ? (const char *)data :
-				  NAME2ID[DEFAULT_TARGET_INDEX].name);
+	const char *target = (const char *)data;
 
+	if (what != SYS_RESTART)
+		goto out;
+
+	if (!target || target[0] == '\0')
+		target = NAME2ID[DEFAULT_TARGET_INDEX].name;
+
+	set_reboot_target(target);
+
+out:
 	return NOTIFY_DONE;
 }
 
