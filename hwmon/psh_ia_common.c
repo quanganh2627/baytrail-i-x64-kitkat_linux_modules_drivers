@@ -1028,8 +1028,9 @@ int psh_ia_comm_suspend(struct device *dev)
 
 	param->id = IA_NOTIFY_SUSPEND;
 	ret = ia_send_cmd(psh_ia_data, PSH2IA_CHANNEL0, &cmd, 4);
-	dev_dbg(dev, "PSH: %s, ret=%d\n", __func__, ret);
-	return ret;
+	if (ret)
+		dev_warn(dev, "PSH: IA_NOTIFY_SUSPEND ret=%d\n", ret);
+	return 0;
 }
 
 int psh_ia_comm_resume(struct device *dev)
@@ -1045,6 +1046,7 @@ int psh_ia_comm_resume(struct device *dev)
 
 	param->id = IA_NOTIFY_RESUME;
 	ret = ia_send_cmd(psh_ia_data, PSH2IA_CHANNEL0, &cmd, 4);
-	dev_dbg(dev, "PSH: %s, ret=%d\n", __func__, ret);
-	return ret;
+	if (ret)
+		dev_warn(dev, "PSH: IA_NOTIFY_RESUME ret=%d\n", ret);
+	return 0;
 }
