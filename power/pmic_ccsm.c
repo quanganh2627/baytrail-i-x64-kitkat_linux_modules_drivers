@@ -380,7 +380,8 @@ static int pmic_chrgr_reg_open(struct inode *inode, struct file *file)
 }
 
 static struct dentry *charger_debug_dir;
-static struct pmic_regs_def pmic_regs[] = {
+static struct pmic_regs_def pmic_regs_bc[] = {
+	PMIC_REG_DEF(PMIC_ID_ADDR),
 	PMIC_REG_DEF(IRQLVL1_ADDR),
 	PMIC_REG_DEF(IRQLVL1_MASK_ADDR),
 	PMIC_REG_DEF(CHGRIRQ0_ADDR),
@@ -400,17 +401,53 @@ static struct pmic_regs_def pmic_regs[] = {
 	PMIC_REG_DEF(USBIDCTRL_ADDR),
 	PMIC_REG_DEF(USBIDSTAT_ADDR),
 	PMIC_REG_DEF(WAKESRC_ADDR),
-	PMIC_REG_DEF(THRMBATZONE_ADDR),
-	PMIC_REG_DEF(THRMZN0L_ADDR),
-	PMIC_REG_DEF(THRMZN0H_ADDR),
-	PMIC_REG_DEF(THRMZN1L_ADDR),
-	PMIC_REG_DEF(THRMZN1H_ADDR),
-	PMIC_REG_DEF(THRMZN2L_ADDR),
-	PMIC_REG_DEF(THRMZN2H_ADDR),
-	PMIC_REG_DEF(THRMZN3L_ADDR),
-	PMIC_REG_DEF(THRMZN3H_ADDR),
-	PMIC_REG_DEF(THRMZN4L_ADDR),
-	PMIC_REG_DEF(THRMZN4H_ADDR),
+	PMIC_REG_DEF(THRMBATZONE_ADDR_BC),
+	PMIC_REG_DEF(THRMZN0L_ADDR_BC),
+	PMIC_REG_DEF(THRMZN0H_ADDR_BC),
+	PMIC_REG_DEF(THRMZN1L_ADDR_BC),
+	PMIC_REG_DEF(THRMZN1H_ADDR_BC),
+	PMIC_REG_DEF(THRMZN2L_ADDR_BC),
+	PMIC_REG_DEF(THRMZN2H_ADDR_BC),
+	PMIC_REG_DEF(THRMZN3L_ADDR_BC),
+	PMIC_REG_DEF(THRMZN3H_ADDR_BC),
+	PMIC_REG_DEF(THRMZN4L_ADDR_BC),
+	PMIC_REG_DEF(THRMZN4H_ADDR_BC),
+};
+
+static struct pmic_regs_def pmic_regs_sc[] = {
+	PMIC_REG_DEF(PMIC_ID_ADDR),
+	PMIC_REG_DEF(IRQLVL1_ADDR),
+	PMIC_REG_DEF(IRQLVL1_MASK_ADDR),
+	PMIC_REG_DEF(CHGRIRQ0_ADDR),
+	PMIC_REG_DEF(SCHGRIRQ0_ADDR),
+	PMIC_REG_DEF(MCHGRIRQ0_ADDR),
+	PMIC_REG_DEF(LOWBATTDET0_ADDR),
+	PMIC_REG_DEF(LOWBATTDET1_ADDR),
+	PMIC_REG_DEF(BATTDETCTRL_ADDR),
+	PMIC_REG_DEF(VBUSDETCTRL_ADDR),
+	PMIC_REG_DEF(VDCINDETCTRL_ADDR),
+	PMIC_REG_DEF(CHRGRIRQ1_ADDR),
+	PMIC_REG_DEF(SCHGRIRQ1_ADDR),
+	PMIC_REG_DEF(MCHGRIRQ1_ADDR),
+	PMIC_REG_DEF(CHGRCTRL0_ADDR),
+	PMIC_REG_DEF(CHGRCTRL1_ADDR),
+	PMIC_REG_DEF(CHGRSTATUS_ADDR),
+	PMIC_REG_DEF(USBIDCTRL_ADDR),
+	PMIC_REG_DEF(USBIDSTAT_ADDR),
+	PMIC_REG_DEF(WAKESRC_ADDR),
+	PMIC_REG_DEF(USBPATH_ADDR),
+	PMIC_REG_DEF(USBSRCDETSTATUS_ADDR),
+	PMIC_REG_DEF(THRMBATZONE_ADDR_SC),
+	PMIC_REG_DEF(THRMZN0L_ADDR_SC),
+	PMIC_REG_DEF(THRMZN0H_ADDR_SC),
+	PMIC_REG_DEF(THRMZN1L_ADDR_SC),
+	PMIC_REG_DEF(THRMZN1H_ADDR_SC),
+	PMIC_REG_DEF(THRMZN2L_ADDR_SC),
+	PMIC_REG_DEF(THRMZN2H_ADDR_SC),
+	PMIC_REG_DEF(THRMZN3L_ADDR_SC),
+	PMIC_REG_DEF(THRMZN3H_ADDR_SC),
+	PMIC_REG_DEF(THRMZN4L_ADDR_SC),
+	PMIC_REG_DEF(THRMZN4H_ADDR_SC),
 };
 
 static struct pmic_regs_def pmic_tt_regs[] = {
@@ -467,11 +504,20 @@ static struct pmic_regs_def pmic_tt_regs[] = {
 
 void dump_pmic_regs(void)
 {
-	u32 pmic_reg_cnt = ARRAY_SIZE(pmic_regs);
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+	u32 pmic_reg_cnt = 0;
 	u32 reg_index;
 	u8 data;
 	int retval;
+	struct pmic_regs_def *pmic_regs = NULL;
 
+	if (vendor_id == BASINCOVE_VENDORID) {
+		pmic_reg_cnt = ARRAY_SIZE(pmic_regs_bc);
+		pmic_regs = pmic_regs_bc;
+	} else if (vendor_id == SHADYCOVE_VENDORID) {
+		pmic_reg_cnt = ARRAY_SIZE(pmic_regs_sc);
+		pmic_regs = pmic_regs_sc;
+	}
 
 	dev_info(chc.dev, "PMIC Register dump\n");
 	dev_info(chc.dev, "====================\n");
@@ -479,7 +525,7 @@ void dump_pmic_regs(void)
 	for (reg_index = 0; reg_index < pmic_reg_cnt; reg_index++) {
 
 		retval = intel_scu_ipc_ioread8(pmic_regs[reg_index].addr,
-						&data);
+				&data);
 		if (retval)
 			dev_err(chc.dev, "Error in reading %x\n",
 				pmic_regs[reg_index].addr);
@@ -534,9 +580,19 @@ static void pmic_debugfs_init(void)
 	struct dentry *pmic_tt_regs_dir;
 
 	u32 reg_index;
-	u32 pmic_reg_cnt = ARRAY_SIZE(pmic_regs);
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+	u32 pmic_reg_cnt = 0;
 	u32 pmic_tt_reg_cnt = ARRAY_SIZE(pmic_tt_regs);
 	char name[PMIC_REG_NAME_LEN] = {0};
+	struct pmic_regs_def *pmic_regs = NULL;
+
+	if (vendor_id == BASINCOVE_VENDORID) {
+		pmic_reg_cnt = ARRAY_SIZE(pmic_regs_bc);
+		pmic_regs = pmic_regs_bc;
+	} else if (vendor_id == SHADYCOVE_VENDORID) {
+		pmic_reg_cnt = ARRAY_SIZE(pmic_regs_sc);
+		pmic_regs = pmic_regs_sc;
+	}
 
 	/* Creating a directory under debug fs for charger */
 	charger_debug_dir = debugfs_create_dir(DRIVER_NAME , NULL) ;
@@ -553,7 +609,7 @@ static void pmic_debugfs_init(void)
 	for (reg_index = 0; reg_index < pmic_reg_cnt; reg_index++) {
 
 		sprintf(name, "%s",
-				pmic_regs[reg_index].reg_name);
+			pmic_regs[reg_index].reg_name);
 
 		fentry = debugfs_create_file(name,
 				S_IRUGO,
@@ -607,12 +663,18 @@ static void pmic_bat_zone_changed(void)
 {
 	int retval;
 	int cur_zone;
+	u16 addr = 0;
 	u8 data = 0;
 	struct power_supply *psy_bat;
 	int vendor_id;
 
 	vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
-	retval = intel_scu_ipc_ioread8(GET_THRMBATZONE_ADDR(vendor_id), &data);
+	if (vendor_id == BASINCOVE_VENDORID)
+		addr = THRMBATZONE_ADDR_BC;
+	else if (vendor_id == SHADYCOVE_VENDORID)
+		addr = THRMBATZONE_ADDR_SC;
+
+	retval = intel_scu_ipc_ioread8(addr, &data);
 	if (retval) {
 		dev_err(chc.dev, "Error in reading battery zone\n");
 		return;
@@ -718,7 +780,19 @@ static inline int update_zone_cv(int zone, u8 reg_val)
 static inline int update_zone_temp(int zone, u16 adc_val)
 {
 	int ret;
-	u16 addr_tzone = THRMZN4H_ADDR - (2 * zone);
+	u16 addr_tzone;
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+
+	if (vendor_id == BASINCOVE_VENDORID)
+		addr_tzone = THRMZN4H_ADDR_BC - (2 * zone);
+	else if (vendor_id == SHADYCOVE_VENDORID) {
+		/* to take care of address-discontinuity of zone-registers */
+		int offset_zone = zone;
+		if (zone >= 3)
+			offset_zone += 1;
+
+		addr_tzone = THRMZN4H_ADDR_SC - (2 * offset_zone);
+	}
 
 	ret = intel_scu_ipc_iowrite8(addr_tzone, (u8)(adc_val >> 8));
 	if (unlikely(ret))
@@ -934,6 +1008,43 @@ static void handle_internal_usbphy_notifications(int mask)
 			USB_EVENT_CHARGER, &cap);
 }
 
+/* ShadyCove-WA for VBUS removal detect issue */
+int pmic_handle_low_supply(void)
+{
+	int ret;
+	u8 val;
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+
+	dev_info(chc.dev, "Low-supply event received from external-charger\n");
+	if (vendor_id == BASINCOVE_VENDORID || !chc.vbus_connect_status) {
+		dev_err(chc.dev, "Ignore Low-supply event received\n");
+		return 0;
+	}
+
+	ret = pmic_read_reg(SCHGRIRQ1_ADDR, &val);
+	if (ret) {
+		dev_err(chc.dev,
+			"Error reading SCHGRIRQ1-register 0x%2x\n",
+			SCHGRIRQ1_ADDR);
+		return ret;
+	}
+
+	if (!(val & SCHRGRIRQ1_SVBUSDET_MASK)) {
+		int mask = 0;
+
+		dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
+		chc.vbus_connect_status = false;
+
+		if (chc.is_internal_usb_phy)
+			handle_internal_usbphy_notifications(mask);
+		else
+			atomic_notifier_call_chain(&chc.otg->notifier,
+					USB_EVENT_VBUS, &mask);
+	}
+
+	return ret;
+}
+
 static void handle_level0_interrupt(u8 int_reg, u8 stat_reg,
 				struct interrupt_info int_info[],
 				int int_info_size)
@@ -1008,11 +1119,14 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 	}
 
 	if (int_reg & CHRGRIRQ1_SVBUSDET_MASK) {
-		if (mask)
+		if (mask) {
 			dev_info(chc.dev,
 				"USB VBUS Detected. Notifying OTG driver\n");
-		else
+			chc.vbus_connect_status = true;
+		} else {
 			dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
+			chc.vbus_connect_status = false;
+		}
 
 		if (chc.is_internal_usb_phy)
 			handle_internal_usbphy_notifications(mask);
@@ -1411,7 +1525,6 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 {
 	int retval = 0;
 	u8 val;
-	int reg_index;
 
 	if (!pdev)
 		return -ENODEV;
@@ -1435,8 +1548,8 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 	}
 
 	dev_info(chc.dev, "PMIC-ID: %x\n", chc.pmic_id);
-	if ((chc.pmic_id & PMIC_VENDOR_ID_MASK) != BASINCOVE_VENDORID) {
-		retval = pmic_read_reg(CHGRSTATUS_ADDR, &val);
+	if ((chc.pmic_id & PMIC_VENDOR_ID_MASK) == SHADYCOVE_VENDORID) {
+		retval = pmic_read_reg(USBPATH_ADDR, &val);
 		if (retval) {
 			dev_err(chc.dev,
 				"Error reading CHGRSTATUS-register 0x%2x\n",
@@ -1444,17 +1557,11 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 			return retval;
 		}
 
-		if (val & CHGRSTATUS_USBSEL_MASK) {
+		if (val & USBPATH_USBSEL_MASK) {
 			dev_info(chc.dev, "SOC-Internal-USBPHY used\n");
 			chc.is_internal_usb_phy = true;
-		}
-	}
-
-	for (reg_index = 0; reg_index < ARRAY_SIZE(pmic_regs); reg_index++) {
-		int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
-		if (!strcmp(pmic_regs[reg_index].reg_name, "THRMBATZONE_ADDR"))
-			pmic_regs[reg_index].addr
-				= GET_THRMBATZONE_ADDR(vendor_id);
+		} else
+			dev_info(chc.dev, "External-USBPHY used\n");
 	}
 
 	chc.sfi_bcprof = kzalloc(sizeof(struct ps_batt_chg_prof),
