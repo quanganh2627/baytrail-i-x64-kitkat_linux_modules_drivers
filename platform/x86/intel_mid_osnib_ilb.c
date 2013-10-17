@@ -72,7 +72,6 @@ static struct target_os oses[] = {
 	{ "bootloader", FASTBOOT },
 	{ "factory", FACTORY },
 	{ "dnx", DNX},
-	{ "ramconsole", RAMCONSOLE},
 };
 
 static int is_valleyview()
