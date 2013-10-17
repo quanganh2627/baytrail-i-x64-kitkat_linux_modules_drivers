@@ -162,6 +162,7 @@
 #define BCU_QUEUE		"bcu-queue"
 #define BASE_TIME		30
 #define STEP_TIME		15
+#define VWARNA_INTR_EN_DELAY	(30 * HZ)
 
 /* Generic macro and string to send the
  * uevent along with env to userspace
@@ -193,7 +194,7 @@ struct vdd_info {
 	void __iomem *bcu_intr_addr;
 	unsigned int delay;
 	u64 seed_time;
-	struct delayed_work vcrit_burst;
+	struct delayed_work vdd_intr_dwork;
 };
 
 static uint8_t cam_flash_state;
@@ -527,9 +528,15 @@ static void unmask_theburst(struct work_struct *work)
 {
 	struct delayed_work *dwork = to_delayed_work(work);
 	struct vdd_info *vinfo = container_of(dwork, struct vdd_info,
-				 vcrit_burst);
-	intel_scu_ipc_update_register(MBCUIRQ, ~MASK_VCRIT, MASK_VCRIT);
-	vinfo->seed_time = jiffies_64;
+				 vdd_intr_dwork);
+	if (pdata->is_clvp) {
+		intel_scu_ipc_update_register(MBCUIRQ,
+				~MASK_VCRIT, MASK_VCRIT);
+		vinfo->seed_time = jiffies_64;
+	} else {
+		intel_scu_ipc_update_register(MBCUIRQ,
+				~BCUIRQ_CLEARA, BCUIRQ_CLEARA);
+	}
 }
 
 /**
@@ -567,9 +574,11 @@ static void handle_events(int flag, void *dev_data)
 				dev_err(&vinfo->pdev->dev,
 				"VCRIT mask failed\n");
 			} else {
-				queue_delayed_work(bcu_workqueue,
-				&(vinfo->vcrit_burst),
-				msecs_to_jiffies(vinfo->delay));
+				if (pdata->is_clvp) {
+					queue_delayed_work(bcu_workqueue,
+					&(vinfo->vdd_intr_dwork),
+					msecs_to_jiffies(vinfo->delay));
+				}
 			}
 		} else {
 			dev_warn(&vinfo->pdev->dev,
@@ -595,6 +604,14 @@ static void handle_events(int flag, void *dev_data)
 		} else {
 			bcu_envp[0] = GET_ENVP(VCRIT);
 			bcu_envp[1] = NULL;
+			/* Masking VCRIT after one event occurs */
+			if (!pdata->is_clvp) {
+				ret = intel_scu_ipc_update_register(MBCUIRQ,
+						MASK_VCRIT, MASK_VCRIT);
+				if (ret)
+					dev_err(&vinfo->pdev->dev,
+						"VCRIT mask failed\n");
+			}
 		}
 		break;
 	case VWARNB_EVENT:
@@ -619,6 +636,13 @@ static void handle_events(int flag, void *dev_data)
 		} else {
 			bcu_envp[0] = GET_ENVP(VWARN2);
 			bcu_envp[1] = NULL;
+			if (!pdata->is_clvp) {
+				ret = intel_scu_ipc_update_register(MBCUIRQ,
+						BCUIRQ_CLEARB, BCUIRQ_CLEARB);
+				if (ret)
+					dev_err(&vinfo->pdev->dev,
+						"VWARNB mask failed\n");
+			}
 		}
 		break;
 	case VWARNA_EVENT:
@@ -643,6 +667,22 @@ static void handle_events(int flag, void *dev_data)
 		} else {
 			bcu_envp[0] = GET_ENVP(VWARN1);
 			bcu_envp[1] = NULL;
+
+			if (!pdata->is_clvp && bcu_workqueue) {
+				ret = intel_scu_ipc_update_register(
+					MBCUIRQ, BCUIRQ_CLEARA, BCUIRQ_CLEARA);
+				if (ret) {
+					dev_err(&vinfo->pdev->dev,
+						"VWARNA mask failed\n");
+				} else {
+					/* Schedule to unmask after
+					 * 30 seconds
+					 */
+					queue_delayed_work(bcu_workqueue,
+						&vinfo->vdd_intr_dwork,
+						VWARNA_INTR_EN_DELAY);
+				}
+			}
 		}
 		break;
 	default:
@@ -919,8 +959,8 @@ static int mid_vdd_probe(struct platform_device *pdev)
 	bcu_workqueue = create_singlethread_workqueue(BCU_QUEUE);
 	if (!bcu_workqueue)
 		dev_err(&pdev->dev, "workqueue creation failed\n");
-	else
-		INIT_DELAYED_WORK(&(vinfo->vcrit_burst), unmask_theburst);
+
+	INIT_DELAYED_WORK(&(vinfo->vdd_intr_dwork), unmask_theburst);
 
 	cam_flash_state = CAMFLASH_STATE_ON;
 
