@@ -51,8 +51,6 @@
 #define VALLEYVIEW2_FAMILY	0x30670
 #define CPUID_MASK		0xffff0
 
-#define DRV_VERSION	"1.00"
-
 struct OSII {                   /* os image identifier */
 	uint16_t os_rev_minor;
 	uint16_t os_rev_major;
@@ -80,7 +78,6 @@ struct OSIP_header {            /* os image profile */
 	struct OSII desc[MAX_OSII];
 };
 
-#ifdef CONFIG_INTEL_SCU_IPC
 /* A boolean variable, that is set, when wants to make the platform
     force shuts down */
 static int force_shutdown_occured;
@@ -95,6 +92,20 @@ MODULE_PARM_DESC(force_shutdown_occured,
 		" when a force shudown condition occurs, to allow"
 		" system shut down even with charger connected");
 
+enum cpuid_regs {
+	CR_EAX = 0,
+	CR_ECX,
+	CR_EDX,
+	CR_EBX
+};
+
+static int is_valleyview()
+{
+	u32 regs[4];
+	cpuid(1, &regs[CR_EAX], &regs[CR_EBX], &regs[CR_ECX], &regs[CR_EDX]);
+
+	return ((regs[CR_EAX] & CPUID_MASK) == VALLEYVIEW2_FAMILY);
+}
 
 int get_force_shutdown_occured()
 {
@@ -103,7 +114,6 @@ int get_force_shutdown_occured()
 	return force_shutdown_occured;
 }
 EXPORT_SYMBOL(get_force_shutdown_occured);
-#endif
 
 int emmc_match(struct device *dev, void *data)
 {
@@ -227,8 +237,6 @@ bd_put:
 	return 0;
 }
 
-
-#ifdef CONFIG_INTEL_SCU_IPC
 /*
    OSHOB - OS Handoff Buffer
    OSNIB - OS No Init Buffer
@@ -351,7 +359,6 @@ module_param_call(test, osip_test_write,
 static struct notifier_block osip_reboot_notifier = {
 	.notifier_call = osip_reboot_notifier_call,
 };
-#endif
 
 /* useful for engineering, not for product */
 #ifdef CONFIG_INTEL_MID_OSIP_DEBUG_FS
@@ -615,27 +622,36 @@ static void remove_debugfs_files(void)
 
 static int osip_init(void)
 {
-#ifdef CONFIG_INTEL_SCU_IPC
-	pr_info("%s: reboot_notifier registered\n", __func__);
-	if (register_reboot_notifier(&osip_reboot_notifier))
-		pr_warning("osip: unable to register reboot notifier");
+	/*
+	 * FIXME: shouldn't be cpu based, scu flag needed
+	 */
+	if (!is_valleyview()) {
+		pr_info("%s: reboot_notifier registered\n", __func__);
+		if (register_reboot_notifier(&osip_reboot_notifier))
+			pr_warning("osip: unable to register reboot notifier");
 
-#endif
+	} else
+		pr_info("%s: reboot_notifier not registered\n", __func__);
+
 	create_debugfs_files();
 	return 0;
 }
 
 static void osip_exit(void)
 {
-#ifdef CONFIG_INTEL_SCU_IPC
-	pr_info("%s: reboot_notifier unregistered\n", __func__);
-	unregister_reboot_notifier(&osip_reboot_notifier);
+	/*
+	 * FIXME: shouldn't be cpu based, scu flag needed
+	 */
+	if (!is_valleyview()) {
+		pr_info("%s: reboot_notifier unregistered\n", __func__);
+		unregister_reboot_notifier(&osip_reboot_notifier);
 
-#endif
+	} else
+		pr_info("%s: reboot_notifier not unregistered\n", __func__);
+
 	remove_debugfs_files();
 }
 
-#ifdef CONFIG_INTEL_SCU_IPC
 static int osip_rpmsg_probe(struct rpmsg_channel *rpdev)
 {
 	if (rpdev == NULL) {
@@ -689,48 +705,6 @@ static void __exit osip_rpmsg_exit(void)
 	return unregister_rpmsg_driver(&osip_rpmsg_driver);
 }
 module_exit(osip_rpmsg_exit);
-
-#else /* ! defined(CONFIG_INTEL_SCU_IPC) */
-
-static int __init osip_probe(struct platform_device *dev)
-{
-	return osip_init();
-}
-
-static int osip_remove(struct platform_device *dev)
-{
-	osip_exit();
-	return 0;
-}
-
-static struct platform_driver osip_driver = {
-	.remove         = osip_remove,
-	.driver         = {
-		.owner  = THIS_MODULE,
-		.name   = KBUILD_MODNAME,
-	},
-};
-
-static int __init osip_init_module(void)
-{
-	int err=0;
-
-	pr_info("Intel OSIP Driver v%s\n", DRV_VERSION);
-
-        platform_device_register_simple(KBUILD_MODNAME, -1, NULL, 0);
-	err =  platform_driver_probe(&osip_driver,osip_probe);
-
-	return err;
-}
-
-static void __exit osip_cleanup_module(void)
-{
-	platform_driver_unregister(&osip_driver);
-	pr_info("OSIP Module Unloaded\n");
-}
-module_init(osip_init_module);
-module_exit(osip_cleanup_module);
-#endif
 
 MODULE_AUTHOR("Pierre Tardy <pierre.tardy@intel.com>");
 MODULE_AUTHOR("Xiaokang Qin <xiaokang.qin@intel.com>");

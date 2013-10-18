@@ -22,6 +22,7 @@ config INTEL_MID_OSNIB_ILB
 
 config INTEL_MID_OSIP
 	tristate "osip driver for Intel MID platforms"
+	depends on INTEL_SCU_IPC
 	default y
 	help
 	  This driver modifies the osip header when rebooting,
