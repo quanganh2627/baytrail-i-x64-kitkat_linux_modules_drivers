@@ -20,22 +20,24 @@
 
 #ifndef _CMD_ENGINE_H_
 enum cmd_id {
-	CMD_RESET,
+	CMD_RESET = 0,
 	CMD_SETUP_DDR,
 	CMD_GET_SINGLE,
 	CMD_CFG_STREAM,
 	CMD_STOP_STREAM,
-	CMD_ADD_EVENT,
+	CMD_ADD_EVENT = 5,
 	CMD_CLEAR_EVENT,
 	CMD_SELF_TEST,
 	CMD_DEBUG,
 	CMD_CALIBRATION,
-	CMD_UPDATE_DDR,
+	CMD_UPDATE_DDR = 10,
 	CMD_GET_STATUS,
 	CMD_SET_PROPERTY,
 	CMD_COUNTER,
 	CMD_GET_VERSION,
+	CMD_IA_NOTIFY = 15,
 	CMD_ID_MAX,
+	CMD_NONE = 244,
 	CMD_FW_UPDATE = 255,
 };
 
@@ -73,6 +75,20 @@ struct cmd_resp {
 	u16 data_len;
 	char buf[0];
 } __packed;
+
+#define IA_NOTIFY_SUSPEND ((u8)0x1)
+#define IA_NOTIFY_RESUME  ((u8)0x2)
+struct cmd_ia_notify_param {
+	u8 id;
+	char extra[0];
+} __attribute__ ((packed));
+
+
+struct resp_cmd_ack {
+	u8 cmd_id;
+	int ret;
+	char extra[0];
+} __attribute__ ((packed));
 
 #define SCMD_DEBUG_SET_MASK ((u16)0x1)
 #define SCMD_DEBUG_GET_MASK ((u16)0x2)
@@ -146,9 +162,10 @@ struct snr_info {
 
 
 #ifndef _SENSOR_DEF_H
-struct sensor_cfg {
+struct sensor_cfg_param {
 	u16 sample_freq; /* HZ */
 	u16 buff_delay; /* max time(ms) for data bufferring */
+	u16 bit_cfg;
 	char extra[0];
 } __packed;
 
@@ -206,6 +223,7 @@ struct psh_ia_priv {
 	struct circ_buf circ, circ_dbg;	/* circ buf for sysfs data node */
 	struct resp_debug_get_mask dbg_mask;
 	struct resp_counter counter;
+	struct resp_cmd_ack *cmd_ack;
 	char *version_str;
 	struct mutex cmd_mutex;
 	struct completion cmpl;
@@ -214,7 +232,9 @@ struct psh_ia_priv {
 	struct completion cmd_load_comp;
 	struct completion cmd_counter_comp;
 	struct completion cmd_version_comp;
+	struct completion sync_cmd_comp;
 	struct list_head sensor_list;
+	u8 cmd_in_progress;
 	u32 reset_in_progress;
 	u32 load_in_progress;
 	u32 status_bitmask;
@@ -260,18 +280,14 @@ enum sensor_type {
 	PORT_SENSOR_BASE = 200,
 	CS_PORT,        /* port for streaming configuration and uploading */
 	GS_PORT,        /* port for get_single configuration and uploading */
-#if defined(CONFIG_HAVE_SENSOR_EVENT)
 	EVT_PORT,       /* port for event configuration and uploading */
-#endif
 	PORT_SENSOR_MAX_NUM,
 };
 
 static const char sensor_port_str[PORT_SENSOR_NUM][SNR_NAME_MAX_LEN] = {
 	"CSPRT",
 	"GSPRT",
-#if defined(CONFIG_HAVE_SENSOR_EVENT)
 	"EVPRT",
-#endif
 };
 
 struct sensor_db {
@@ -288,4 +304,6 @@ struct trace_data {
 	u8 sensor_cnt;
 } __packed;
 
+int psh_ia_comm_suspend(struct device *dev);
+int psh_ia_comm_resume(struct device *dev);
 #endif

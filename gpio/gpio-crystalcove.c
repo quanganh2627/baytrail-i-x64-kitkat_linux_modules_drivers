@@ -286,13 +286,6 @@ static int crystalcove_gpio_probe(struct platform_device *pdev)
 		return retval;
 	}
 
-	retval = request_threaded_irq(irq, NULL, crystalcove_gpio_irq_handler,
-			IRQF_ONESHOT, "crystalcove_gpio", cg);
-	if (retval) {
-		pr_warn("Interrupt request failed\n");
-		return retval;
-	}
-
 	irq_base = irq_alloc_descs(cg->irq_base, 0, NUM_GPIO, 0);
 	if (cg->irq_base != irq_base)
 		panic("gpio base irq fail, needs %d, return %d\n",
@@ -305,6 +298,14 @@ static int crystalcove_gpio_probe(struct platform_device *pdev)
 					      handle_simple_irq,
 					      "demux");
 	}
+
+        retval = request_threaded_irq(irq, NULL, crystalcove_gpio_irq_handler,
+                        IRQF_ONESHOT, "crystalcove_gpio", cg);
+
+        if (retval) {
+                pr_warn("Interrupt request failed\n");
+                return retval;
+        }
 
 	return 0;
 }

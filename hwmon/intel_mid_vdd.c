@@ -715,6 +715,9 @@ static int program_bcu(struct platform_device *pdev, struct vdd_info *vinfo)
 	int ret;
 	struct vdd_smip_data vdata = {0};
 
+	/* will be useful in case of clvp only
+	 * in baytrail we are calling a dummy function
+	 */
 	ret = intel_scu_ipc_read_mip((u8 *)&vdata, sizeof(struct
 		vdd_smip_data), BCU_SMIP_OFFSET, 1);
 	if (ret) {
@@ -790,6 +793,7 @@ static int mid_vdd_probe(struct platform_device *pdev)
 			return -ENOMEM;
 		}
 		pdata->disable_unused_comparator = false;
+		pdata->is_clvp = false;
 	}
 	vinfo->bcu_intr_addr = BCUIRQ;
 #endif

@@ -183,20 +183,32 @@ int ia_send_cmd(struct psh_ia_priv *psh_ia_data,
 			int ch, struct ia_cmd *cmd, int len)
 {
 	int ret;
+	static struct resp_cmd_ack cmd_ack;
 
 	mutex_lock(&psh_ia_data->cmd_mutex);
-	if (ch == 0 && cmd->cmd_id == CMD_RESET) {
-		cmd->tran_id = 0;
-		psh_ia_data->reset_in_progress = 1;
-		ia_lbuf_read_reset(&psh_ia_data->lbuf);
-		ia_circ_reset_off(&psh_ia_data->circ);
+	if (ch == 0) {
+		if (cmd->cmd_id == CMD_RESET) {
+			cmd->tran_id = 0;
+			psh_ia_data->reset_in_progress = 1;
+			ia_lbuf_read_reset(&psh_ia_data->lbuf);
+			ia_circ_reset_off(&psh_ia_data->circ);
+		} else if (cmd->cmd_id == CMD_IA_NOTIFY) {
+			cmd_ack.cmd_id = cmd->cmd_id;
+			psh_ia_data->cmd_ack = &cmd_ack;
+		}
 	}
+
+	psh_ia_data->cmd_in_progress = cmd->cmd_id;
 	ret = process_send_cmd(psh_ia_data, ch, cmd, len);
+	psh_ia_data->cmd_in_progress = CMD_NONE;
 	mutex_unlock(&psh_ia_data->cmd_mutex);
 	if (ret)
 		return ret;
 
-	if (ch == 0 && cmd->cmd_id == CMD_RESET) {
+	if (!(ch == 0))
+		return 0;
+
+	if (cmd->cmd_id == CMD_RESET) {
 		struct ia_cmd cmd;
 		struct get_status_param *param;
 
@@ -217,12 +229,22 @@ int ia_send_cmd(struct psh_ia_priv *psh_ia_data,
 			return ret;
 		}
 
-	} else if (ch == 0 && cmd->cmd_id == CMD_GET_STATUS) {
+	} else if (cmd->cmd_id == CMD_GET_STATUS) {
 		if (!wait_for_completion_timeout(&psh_ia_data->get_status_comp,
 					HZ)) {
 			pr_warn("no status back when query pshfw!\n");
 			return -1;
 		}
+	} else if (cmd->cmd_id == CMD_IA_NOTIFY) {
+		if (!wait_for_completion_timeout(&psh_ia_data->sync_cmd_comp,
+					5 * HZ)) {
+			pr_warn("no CMD_ACK back, timeout!\n");
+			psh_ia_data->cmd_ack = NULL;
+			return -1;
+		} else if (cmd_ack.ret)
+			pr_warn("SYNC_CMD %d return %d!\n", cmd_ack.cmd_id,
+					cmd_ack.ret);
+		psh_ia_data->cmd_ack = NULL;
 	}
 	return 0;
 }
@@ -599,10 +621,8 @@ ssize_t ia_get_version(struct device *dev,
 	struct ia_cmd cmd;
 	struct psh_ia_priv *psh_ia_data =
 			(struct psh_ia_priv *)dev_get_drvdata(dev);
-	char version[VERSION_STR_MAX_SIZE];
 	cmd.cmd_id = CMD_GET_VERSION;
 	cmd.sensor_id = 0;
-	psh_ia_data->version_str = version;
 
 	ret = ia_send_cmd(psh_ia_data, PSH2IA_CHANNEL0, &cmd, 3);
 	if (ret) {
@@ -610,11 +630,10 @@ ssize_t ia_get_version(struct device *dev,
 		return ret;
 	}
 
-	if (!wait_for_completion_timeout(&psh_ia_data->cmd_version_comp, HZ))
+	if (!wait_for_completion_timeout(&psh_ia_data->cmd_version_comp, 2*HZ))
 		return snprintf(buf, PAGE_SIZE, "no response\n");
 
 	ret = snprintf(buf, PAGE_SIZE, "%s\n", psh_ia_data->version_str);
-	psh_ia_data->version_str = NULL;
 	return ret;
 }
 static SENSOR_DEVICE_ATTR(status_mask, S_IWUSR | S_IRUGO,
@@ -725,6 +744,7 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 	struct cmd_resp *resp = dbuf;
 	const struct snr_info *sinfo;
 	const struct resp_version *version;
+	const struct resp_cmd_ack *cmd_ack;
 	u32 curtime;
 	int len;
 	const char *sensor_name;
@@ -734,6 +754,18 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 	char msg_str[STR_BUFF_SIZE];
 
 	switch (resp->type) {
+	case RESP_CMD_ACK:
+		cmd_ack = (struct resp_cmd_ack *)resp->buf;
+		if (!psh_ia_data->cmd_ack)
+			pr_err("Unexpected CMD_ACK recevied, %d\n", cmd_ack->cmd_id);
+		else if (cmd_ack->cmd_id == psh_ia_data->cmd_ack->cmd_id) {
+			psh_ia_data->cmd_ack->ret = cmd_ack->ret;
+			complete(&psh_ia_data->sync_cmd_comp);
+		} else
+			pr_err("Unmatched CMD_ACK recevied, %d(EXP: %d)\n",
+					cmd_ack->cmd_id,
+					psh_ia_data->cmd_ack->cmd_id);
+		return 0;
 	case RESP_BIST_RESULT:
 		if (psh_ia_data->reset_in_progress) {
 			psh_ia_data->reset_in_progress = 0;
@@ -744,7 +776,7 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 	case RESP_DEBUG_MSG:
 		ia_circ_put_data(&psh_ia_data->circ_dbg,
 				resp->buf, resp->data_len);
-		return size;
+		return 0;
 	case RESP_GET_STATUS:
 		sinfo = (struct snr_info *)resp->buf;
 		if (!resp->data_len) {
@@ -786,7 +818,7 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 		return 0;
 	case RESP_TRACE_MSG:
 		out_data = (struct trace_data *)resp->buf;
-		while (out_data < resp->buf + resp->data_len) {
+		while ((char *)out_data < resp->buf + resp->data_len) {
 			curtime = out_data->timestamp;
 			sensor_name = sensor_get_name(out_data->sensor_id,
 								psh_ia_data);
@@ -804,7 +836,7 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 					msg_str, len);
 			out_data++;
 		}
-		return size;
+		return 0;
 	default:
 		break;
 	}
@@ -851,12 +883,14 @@ int psh_ia_common_init(struct device *dev, struct psh_ia_priv **data)
 	}
 
 	mutex_init(&psh_ia_data->cmd_mutex);
+	psh_ia_data->cmd_in_progress = CMD_NONE;
 	init_completion(&psh_ia_data->cmpl);
 	init_completion(&psh_ia_data->get_status_comp);
 	init_completion(&psh_ia_data->cmd_reset_comp);
 	init_completion(&psh_ia_data->cmd_load_comp);
 	init_completion(&psh_ia_data->cmd_counter_comp);
 	init_completion(&psh_ia_data->cmd_version_comp);
+	init_completion(&psh_ia_data->sync_cmd_comp);
 	INIT_LIST_HEAD(&psh_ia_data->sensor_list);
 
 	psh_ia_data->reset_in_progress = 0;
@@ -877,6 +911,12 @@ int psh_ia_common_init(struct device *dev, struct psh_ia_priv **data)
 	psh_ia_data->circ_dbg.buf = kmalloc(CIRC_SIZE, GFP_KERNEL);
 	if (!psh_ia_data->circ_dbg.buf) {
 		dev_err(dev, "can not allocate circ buffer\n");
+		goto dbg_err;
+	}
+
+	psh_ia_data->version_str = kmalloc(VERSION_STR_MAX_SIZE, GFP_KERNEL);
+	if (!psh_ia_data->version_str) {
+		dev_err(dev, "can not allocate version string\n");
 		goto dbg_err;
 	}
 
@@ -964,6 +1004,7 @@ void psh_ia_common_deinit(struct device *dev)
 		list_del(&sensor_obj->list);
 		kfree(sensor_obj);
 	}
+	kfree(psh_ia_data->version_str);
 
 	kfree(psh_ia_data->circ.buf);
 
@@ -974,3 +1015,36 @@ void psh_ia_common_deinit(struct device *dev)
 	kfree(psh_ia_data);
 }
 
+int psh_ia_comm_suspend(struct device *dev)
+{
+	struct psh_ia_priv *psh_ia_data =
+			(struct psh_ia_priv *)dev_get_drvdata(dev);
+	struct ia_cmd cmd = {
+		.cmd_id = CMD_IA_NOTIFY,
+	};
+	struct cmd_ia_notify_param *param =
+			(struct cmd_ia_notify_param *)cmd.param;
+	int ret;
+
+	param->id = IA_NOTIFY_SUSPEND;
+	ret = ia_send_cmd(psh_ia_data, PSH2IA_CHANNEL0, &cmd, 4);
+	dev_dbg(dev, "PSH: %s, ret=%d\n", __func__, ret);
+	return ret;
+}
+
+int psh_ia_comm_resume(struct device *dev)
+{
+	struct psh_ia_priv *psh_ia_data =
+			(struct psh_ia_priv *)dev_get_drvdata(dev);
+	struct ia_cmd cmd = {
+		.cmd_id = CMD_IA_NOTIFY,
+	};
+	struct cmd_ia_notify_param *param =
+			(struct cmd_ia_notify_param *)cmd.param;
+	int ret;
+
+	param->id = IA_NOTIFY_RESUME;
+	ret = ia_send_cmd(psh_ia_data, PSH2IA_CHANNEL0, &cmd, 4);
+	dev_dbg(dev, "PSH: %s, ret=%d\n", __func__, ret);
+	return ret;
+}

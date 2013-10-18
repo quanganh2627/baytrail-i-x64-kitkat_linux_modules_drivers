@@ -474,7 +474,9 @@ static int i2c_dw_find_slaves(struct acpi_resource *ares, void *data)
 				i2c->master_cfg |= DW_IC_CON_SPEED_HIGH;
 			}
 
+			down(&i2c->lock);
 			i2c_dw_init(i2c);
+			up(&i2c->lock);
 
 			dev_info(dev, "I2C speed get from acpi is %dKHz\n",
 				connection_speed/1000);
@@ -624,8 +626,8 @@ static int i2c_dw_pci_runtime_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops i2c_dw_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(i2c_dw_pci_suspend,
-				i2c_dw_pci_resume)
+	.suspend_late = i2c_dw_pci_suspend,
+	.resume_early = i2c_dw_pci_resume,
 	SET_RUNTIME_PM_OPS(i2c_dw_pci_runtime_suspend,
 			   i2c_dw_pci_runtime_resume,
 			   NULL)
@@ -855,13 +857,13 @@ const struct pci_device_id *id)
 	}
 #endif
 
-	pm_runtime_put_noidle(&pdev->dev);
-	pm_runtime_allow(&pdev->dev);
-	pm_runtime_use_autosuspend(&pdev->dev);
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
-
 	if (controller->acpi_name)
 		i2c_dw_scan_devices(adap, controller->acpi_name);
+
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_put_noidle(&pdev->dev);
+	pm_runtime_allow(&pdev->dev);
 
 	return 0;
 
