@@ -115,6 +115,35 @@ static void dlp_net_credits_available_cb(struct dlp_channel *ch_ctx)
 }
 
 /**
+ *	dlp_net_resume_cb - Notify the client the device is resumed
+ *	@ch_ctx: channel pointer
+ */
+void dlp_net_resume_cb(struct dlp_channel *ch_ctx)
+{
+	struct dlp_net_context *net_ctx = ch_ctx->ch_data;
+
+	pr_debug(DRVNAME ": %s restart the net queue\n", __func__);
+
+	/* Restart the NET stack if it was stopped */
+	if (netif_queue_stopped(net_ctx->ndev))
+		netif_wake_queue(net_ctx->ndev);
+}
+
+/**
+ *	dlp_net_suspend_cb - Notify the client the device is suspended
+ *	@ch_ctx: channel pointer
+ */
+void dlp_net_suspend_cb(struct dlp_channel *ch_ctx)
+{
+	struct dlp_net_context *net_ctx = ch_ctx->ch_data;
+
+	/* Stop the NET stack */
+	pr_debug(DRVNAME ": %s stop the net queue\n", __func__);
+
+	netif_stop_queue(net_ctx->ndev);
+}
+
+/**
  *	dlp_net_type_trans
  *
  */
@@ -801,11 +830,13 @@ struct dlp_channel *dlp_net_ctx_create(unsigned int ch_id,
 	/* Hangup context */
 	dlp_ctrl_hangup_ctx_init(ch_ctx, dlp_net_hsi_tx_timeout_cb);
 
-	/* Register the Credits, Reset/Coredump, cleanup CBs */
+	/* Register the Credits, cleanup CBs, suspend/resume notification CB */
 	ch_ctx->credits_available_cb = dlp_net_credits_available_cb;
 	ch_ctx->push_rx_pdus = dlp_net_push_rx_pdus;
 	ch_ctx->dump_state = dlp_dump_channel_state;
 	ch_ctx->cleanup = dlp_net_ctx_cleanup;
+	ch_ctx->resume_cb = dlp_net_resume_cb;
+	ch_ctx->suspend_cb = dlp_net_suspend_cb;
 
 	dlp_xfer_ctx_init(ch_ctx,
 			  DLP_NET_TX_PDU_SIZE, DLP_HSI_TX_DELAY,

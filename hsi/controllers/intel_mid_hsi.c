@@ -4277,9 +4277,17 @@ static int hsi_pm_suspend(struct device *dev)
 		(struct hsi_controller *)dev_get_drvdata(dev);
 	struct intel_controller *intel_hsi =
 		(struct intel_controller *)hsi_controller_drvdata(hsi);
+	int err;
+	unsigned int i;
 
 	dev_dbg(dev, "hsi enter suspend\n");
-	return hsi_ctrl_suspend(intel_hsi, 0);
+	err = hsi_ctrl_suspend(intel_hsi, 0);
+	if (!err) {
+		for (i = 0; i < hsi->num_ports; i++)
+			hsi_event(hsi->port[i], HSI_EVENT_SUSPEND);
+	}
+
+	return err;
 }
 
 /**
@@ -4295,11 +4303,16 @@ static int hsi_pm_resume(struct device *dev)
 	struct intel_controller *intel_hsi =
 		(struct intel_controller *)hsi_controller_drvdata(hsi);
 	int err;
+	unsigned int i;
 
 	dev_dbg(dev, "hsi enter resume\n");
 	err = hsi_ctrl_resume(intel_hsi, 0, 0);
-	if (!err)
+	if (!err) {
 		hsi_resume_dma_transfers(intel_hsi);
+		for (i = 0; i < hsi->num_ports; i++)
+			hsi_event(hsi->port[i], HSI_EVENT_RESUME);
+
+	}
 
 	return err;
 }

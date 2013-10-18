@@ -319,7 +319,8 @@ struct dlp_channel {
 
 	/* TX Timeout/TTY close */
 	void (*modem_tx_timeout_cb) (struct dlp_channel *ch_ctx);
-	void (*tty_close_cb) (struct dlp_channel *ch_ctx);
+	void (*resume_cb)(struct dlp_channel *ch_ctx);
+	void (*suspend_cb)(struct dlp_channel *ch_ctx);
 
 	/* Credits callback */
 	void (*credits_available_cb)(struct dlp_channel *ch_ctx);
