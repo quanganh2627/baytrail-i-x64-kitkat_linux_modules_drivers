@@ -163,10 +163,16 @@
 #define BASE_TIME		30
 #define STEP_TIME		15
 
+/* Generic macro and string to send the
+ * uevent along with env to userspace
+ */
+#define EVT_STR			"BCUEVT="
+#define GET_ENVP(EVT)		(EVT_STR#EVT)
+
 #define CAMFLASH_STATE_ON       1
 #define CAMFLASH_STATE_OFF      0
 
-/* Defined to match the correponding bit positions of the interrupt */
+/* Defined to match the corresponding bit positions of the interrupt */
 enum { VWARNB_EVENT = 1, VWARNA_EVENT = 2, VCRIT_EVENT = 4};
 
 static DEFINE_MUTEX(vdd_update_lock);
@@ -178,6 +184,9 @@ static struct intel_msic_vdd_pdata *pdata;
 
 struct vdd_info {
 	unsigned int irq;
+	uint32_t intr_count_lvl1;
+	uint32_t intr_count_lvl2;
+	uint32_t intr_count_lvl3;
 	struct device *dev;
 	struct platform_device *pdev;
 	/* mapping SRAM address for BCU interrupts */
@@ -370,13 +379,24 @@ static ssize_t store_volt_thres(struct device *dev,
 	int ret;
 	uint8_t data;
 	long volt;
+	long volt_limit_offset = 0;
 	struct sensor_device_attribute_2 *s_attr =
 					to_sensor_dev_attr_2(attr);
 
 	if (kstrtol(buf, 10, &volt))
 		return -EINVAL;
+	/*
+	 * In case of baytrail, VWARNA's range is from
+	 * 3.6 volt to 2.9 volt.For this we set
+	 * volt_limit_offset to 300mV.
+	 * It remains zero for all other cases. i.e. Cases
+	 * were the range is from 3.3 volt to 2.6 volt.
+	 */
+	if ((!pdata->is_clvp) && (!s_attr->nr))
+		volt_limit_offset = 300;
 
-	if (volt > MAX_VOLTAGE || volt < MIN_VOLTAGE)
+	if (volt > (MAX_VOLTAGE + volt_limit_offset) ||
+			volt < (MIN_VOLTAGE + volt_limit_offset))
 		return -EINVAL;
 
 	mutex_lock(&vdd_update_lock);
@@ -392,7 +412,8 @@ static ssize_t store_volt_thres(struct device *dev,
 	 * 100(since the values are entered as mV). Then, set bits
 	 * [0-2] to 'diff'
 	 */
-	data = (data & 0xF8) | ((MAX_VOLTAGE - volt)/100);
+	data = (data & 0xF8) | (((MAX_VOLTAGE + volt_limit_offset)
+				- volt)/100);
 
 	ret = intel_scu_ipc_iowrite8(VWARNA_CFG + s_attr->nr, data);
 	if (ret)
@@ -410,6 +431,7 @@ static ssize_t show_volt_thres(struct device *dev,
 {
 	int ret, volt;
 	uint8_t data;
+	long volt_limit_offset = 0;
 	struct sensor_device_attribute_2 *s_attr =
 					to_sensor_dev_attr_2(attr);
 
@@ -417,10 +439,13 @@ static ssize_t show_volt_thres(struct device *dev,
 	if (ret)
 		return ret;
 
+	if ((!pdata->is_clvp) && (!s_attr->nr))
+		volt_limit_offset = 300;
+
 	/* Read bits [0-2] of data and multiply by 100(for mV) */
 	volt = (data & 0x07) * 100;
 
-	return sprintf(buf, "%d\n", MAX_VOLTAGE - volt);
+	return sprintf(buf, "%d\n", (MAX_VOLTAGE + volt_limit_offset) - volt);
 }
 
 static ssize_t show_irq_status(struct device *dev,
@@ -447,6 +472,35 @@ static ssize_t show_action_status(struct device *dev,
 		return ret;
 
 	return sprintf(buf, "%x\n", action_status);
+}
+
+static ssize_t show_intr_count(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	uint32_t value;
+	int level = to_sensor_dev_attr(attr)->index;
+	struct vdd_info *vinfo = dev_get_drvdata(dev);
+
+	if (vinfo == NULL) {
+		dev_err(dev, "Unable to get driver private data.\n");
+		return -EIO;
+	}
+
+	switch (level) {
+	case VWARNA_EVENT:
+		value = vinfo->intr_count_lvl1;
+		break;
+	case VWARNB_EVENT:
+		value = vinfo->intr_count_lvl2;
+		break;
+	case VCRIT_EVENT:
+		value = vinfo->intr_count_lvl3;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return sprintf(buf, "%d\n", value);
 }
 
 static ssize_t store_camflash_ctrl(struct device *dev,
@@ -480,20 +534,23 @@ static void unmask_theburst(struct work_struct *work)
 
 /**
   * handle_events - handle different type of interrupts related to BCU
-  * @flag - define what type of interrupt it is
+  * @flag - is the enumeration value for VWARNA, VWARNB or
+  * a VCRIT interrupt.
   * @dev_data - device information
   */
 static void handle_events(int flag, void *dev_data)
 {
 	uint8_t irq_data, sticky_data;
 	struct vdd_info *vinfo = (struct vdd_info *)dev_data;
+	char *bcu_envp[2] = {NULL,};
 	int ret;
 
 	ret = intel_scu_ipc_ioread8(SBCUIRQ, &irq_data);
 	if (ret)
 		goto handle_ipc_fail;
 
-	if (flag & VCRIT_EVENT) {
+	switch (flag) {
+	case VCRIT_EVENT:
 		pr_info_ratelimited("%s: VCRIT_EVENT occurred\n",
 					DRIVER_NAME);
 		if (vinfo->seed_time && time_before((unsigned long)(jiffies_64 -
@@ -535,10 +592,12 @@ static void handle_events(int flag, void *dev_data)
 				if (ret)
 					goto handle_ipc_fail;
 			}
+		} else {
+			bcu_envp[0] = GET_ENVP(VCRIT);
+			bcu_envp[1] = NULL;
 		}
-		kobject_uevent(&vinfo->pdev->dev.kobj, KOBJ_CHANGE);
-	}
-	if (flag & VWARNB_EVENT) {
+		break;
+	case VWARNB_EVENT:
 		pr_info_ratelimited("%s: VWARNB_EVENT occurred\n",
 					DRIVER_NAME);
 		if (!(irq_data & SVWARNB)) {
@@ -557,9 +616,12 @@ static void handle_events(int flag, void *dev_data)
 				if (ret)
 					goto handle_ipc_fail;
 			}
+		} else {
+			bcu_envp[0] = GET_ENVP(VWARN2);
+			bcu_envp[1] = NULL;
 		}
-	}
-	if (flag & VWARNA_EVENT) {
+		break;
+	case VWARNA_EVENT:
 		pr_info_ratelimited("%s: VWARNA_EVENT occurred\n",
 					DRIVER_NAME);
 		if (!(irq_data & SVWARNA)) {
@@ -578,8 +640,20 @@ static void handle_events(int flag, void *dev_data)
 				if (ret)
 					goto handle_ipc_fail;
 			}
+		} else {
+			bcu_envp[0] = GET_ENVP(VWARN1);
+			bcu_envp[1] = NULL;
 		}
+		break;
+	default:
+		dev_warn(&vinfo->pdev->dev, "Unresolved interrupt occurred\n");
 	}
+
+	/* For baytrail notify event type
+	 * using Uevent to userspace */
+	if (bcu_envp[0] && !pdata->is_clvp)
+		kobject_uevent_env(&vinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
+
 	return;
 handle_ipc_fail:
 	if (flag & VCRIT_EVENT)
@@ -633,15 +707,21 @@ static irqreturn_t vdd_interrupt_thread_handler(int irq, void *dev_data)
 	}
 
 	mutex_lock(&vdd_update_lock);
-	if (irq_data & VCRIT_IRQ)
+	if (irq_data & VCRIT_IRQ) {
 		/* BCU VCRIT Interrupt */
 		event |= VCRIT_EVENT;
-	if (irq_data & VWARNA_IRQ)
+		vinfo->intr_count_lvl3 += 1;
+	}
+	if (irq_data & VWARNA_IRQ) {
 		/* BCU WARNA Interrupt */
 		event |= VWARNA_EVENT;
-	if (irq_data & VWARNB_IRQ)
+		vinfo->intr_count_lvl1 += 1;
+	}
+	if (irq_data & VWARNB_IRQ) {
 		/* BCU WARNB Interrupt */
 		event |= VWARNB_EVENT;
+		vinfo->intr_count_lvl2 += 1;
+	}
 
 	handle_events(event, dev_data);
 
@@ -669,6 +749,12 @@ static SENSOR_DEVICE_ATTR_2(irq_status, S_IRUGO, show_irq_status,
 				NULL, 0, 0);
 static SENSOR_DEVICE_ATTR_2(action_status, S_IRUGO, show_action_status,
 				NULL, 0, 0);
+static SENSOR_DEVICE_ATTR(intr_count_level1, S_IRUGO,
+				show_intr_count, NULL, 2);
+static SENSOR_DEVICE_ATTR(intr_count_level2, S_IRUGO,
+				show_intr_count, NULL, 1);
+static SENSOR_DEVICE_ATTR(intr_count_level3, S_IRUGO,
+				show_intr_count, NULL, 4);
 static SENSOR_DEVICE_ATTR(camflash_ctrl, S_IRUGO | S_IWUSR,
 				show_camflash_ctrl, store_camflash_ctrl, 0);
 
@@ -680,6 +766,9 @@ static struct attribute *mid_vdd_attrs[] = {
 	&sensor_dev_attr_bcu_status.dev_attr.attr,
 	&sensor_dev_attr_irq_status.dev_attr.attr,
 	&sensor_dev_attr_action_status.dev_attr.attr,
+	&sensor_dev_attr_intr_count_level1.dev_attr.attr,
+	&sensor_dev_attr_intr_count_level2.dev_attr.attr,
+	&sensor_dev_attr_intr_count_level3.dev_attr.attr,
 	&sensor_dev_attr_camflash_ctrl.dev_attr.attr,
 	NULL
 };
