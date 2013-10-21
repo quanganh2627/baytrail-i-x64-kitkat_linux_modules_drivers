@@ -20,7 +20,9 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/types.h>
+#include <linux/ctype.h>
 #include <linux/delay.h>
+#include <linux/firmware.h>
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 #include <linux/miscdevice.h>
@@ -28,6 +30,7 @@
 #include <linux/io.h>
 #include <linux/gpio.h>
 #include <linux/uaccess.h>
+#include <linux/workqueue.h>
 
 #define CONFIG_R69001_POLLING_TIME 10
 #include <linux/r69001-ts.h>
@@ -54,6 +57,9 @@
 #define COMMAND_BOOT                0x10
 #define COMMAND_FIRMWARE_UPDATE     0x20
 
+/* RESET */
+#define MPU_RESET                   0x01
+
 /* Control register address */
 #define REG_CONTROL                 0x1c    /* High */
 #define REG_SCAN_MODE               0x00    /* Low */
@@ -63,7 +69,10 @@
 #define REG_WRITE_DATA_CTRL         0x04
 #define REG_READY_DATA              0x05
 #define REG_SCAN_COUNTER            0x06
+#define REG_FW_UPDATE               0x07
+#define REG_RESET                   0x09
 #define REG_FUNC_CTRL               0x0b
+#define REG_FW_VER                  0x14
 #define REG_LOW_POWER               0x17
 
 /* Ready data */
@@ -87,6 +96,9 @@
 #define POLLING_LOW_EDGE_MODE       R69001_TS_POLLING_LOW_EDGE_MODE
 #define UNKNOW_MODE                 255
 
+/* Firmware update mode */
+#define FW_UPDATE_MODE              0x01
+
 struct r69001_ts_finger {
 	u16 x;
 	u16 y;
@@ -106,9 +118,120 @@ struct r69001_ts_data {
 	struct r69001_io_data data;
 	struct r69001_ts_before_regs regs;
 	struct r69001_platform_data *pdata;
+	struct workqueue_struct *workqueue;
+	struct work_struct fw_update_work;
 	u8 mode;
 	u8 t_num;
+	u8 fw_update_sig;
 };
+
+/* firmware update signal */
+#define SIG_NO_INIT		0
+#define SIG_INIT		1
+#define SIG_UPDATE_NORMAL	2
+#define SIG_UPDATE_FROM_BOOT	3
+#define SIG_UPDATE_DONE		4
+#define SIG_UPDATE_NO_NEED	5
+
+/* following is for firmware update use case */
+#define T_FW_V			0 /* fw version */
+#define T_FW_D			1 /* fw data */
+
+#define OP_READ			0
+#define OP_WRITE		1
+
+struct fw_block_data {
+	u8 type;
+	u8 num;
+	u8 op;		/* read or write */
+	u8 addr;	/* client addr */
+	int delay;	/* after operator, delay */
+	int size;	/* data size */
+	u8 buf[512];	/* data buffer */
+};
+
+#define TOLOWER(x) ((x) | 0x20)
+/* translate string to u8 value */
+static u8 strtou8(u8 *fw, u32 *pointer, unsigned int base)
+{
+	char *str = (char *)(fw + *pointer);
+	u8 value = 0;
+
+	while (isxdigit(*str)) {
+		unsigned int temp_value;
+
+		if ('0' <= *str && *str <= '9')
+			temp_value = *str - '0';
+		else
+			temp_value = TOLOWER(*str) - 'a' + 10;
+
+		if (temp_value >= base)
+			break;
+
+		value = value * base + temp_value;
+
+		str = (char *)(fw + ++(*pointer));
+	}
+
+	return value;
+}
+
+static int read_block_from_fw(u8 *fw, u32 *pointer, u32 max_size,
+				struct fw_block_data *data)
+{
+	int ret = 1;
+
+	while (*pointer < (max_size - 1)) {
+		char *str = (char *)(fw + *pointer);
+
+		if (str[0] == 'p') {
+			*pointer += 1;
+			ret = 0;
+			break;
+		} else if (str[0] == 'v') {
+			*pointer += 1;
+			if (data->type == T_FW_V) {
+				continue;
+			} else {
+				ret = -1;
+				break;
+			}
+		} else if (str[0] == 'w') {
+			*pointer += 2;
+			data->op = OP_WRITE;
+			data->addr = strtou8(fw, pointer, 16);
+			continue;
+		} else if (str[0] == '[') {
+			if ((str[1] == 'd') &&
+				(str[2] == 'e') &&
+				(str[3] == 'l') &&
+				(str[4] == 'a') &&
+				(str[5] == 'y')) {
+				*pointer += 7;
+				data->delay = strtou8(fw, pointer, 10);
+			}
+
+			if (data->type == T_FW_D) {
+				*pointer += 2;
+				if (data->num != strtou8(fw, pointer, 16)) {
+					ret = -1;
+					break;
+				}
+				else
+					data->buf[data->size++] = data->num;
+			}
+			continue;
+		} else if (isxdigit(str[0])) {
+			if (data->type == T_FW_V ||
+				data->type == T_FW_D)
+				data->buf[data->size++]
+					= strtou8(fw, pointer, 16);
+		} else
+			*pointer += 1;
+	}
+
+	return ret;
+}
 
 static void r69001_set_mode(struct r69001_ts_data *ts, u8 mode, u16 poll_time);
 
@@ -140,14 +263,14 @@ static int r69001_ts_read_data(struct r69001_ts_data *ts,
 		error = i2c_transfer(client->adapter, msg + 1, 1);
 	if (error < 0)
 		dev_err(&client->dev,
-			"I2C read error high: 0x%02x low:0x%02x size:%d ret:%d\n",
+			"I2C read error high: 0x%x low:0x%x size:%d ret:%d\n",
 			addr_h, addr_l, size, error);
 
 	return error;
 }
 
-static int
-r69001_ts_write_data(struct r69001_ts_data *ts, u8 addr_h, u8 addr_l, u8 data)
+static int r69001_ts_write_data(struct r69001_ts_data *ts,
+				u8 addr_h, u8 addr_l, u8 data)
 {
 	struct i2c_client *client = ts->client;
 	struct i2c_msg msg;
@@ -167,8 +290,62 @@ r69001_ts_write_data(struct r69001_ts_data *ts, u8 addr_h, u8 addr_l, u8 data)
 	error = i2c_transfer(client->adapter, &msg, 1);
 	if (error < 0)
 		dev_err(&client->dev,
-			"I2C write error high: 0x%02x low:0x%02x data:0x%02x ret:%d\n",
+			"I2C write error high: 0x%x low:0x%x data:0x%x ret:%d\n",
 			addr_h, addr_l, data, error);
+	return error;
+}
+
+static int r69001_ts_write_fw(struct r69001_ts_data *ts, u8 *data, u16 size)
+{
+	struct i2c_client *client = ts->client;
+	struct i2c_msg msg;
+	int error;
+
+	msg.addr = client->addr;
+	msg.flags = 0;
+	msg.len = size;
+	msg.buf = data;
+
+	error = i2c_transfer(client->adapter, &msg, 1);
+	if (error < 0)
+		dev_err(&client->dev, "I2C write fw error ret:%d\n", error);
+
+	return error;
+}
+
+static int r69001_ts_send_cmd(struct r69001_ts_data *ts, u8 command)
+{
+	struct i2c_client *client = ts->client;
+	struct i2c_msg msg;
+	int error;
+
+	msg.addr = client->addr;
+	msg.flags = 0;
+	msg.len = 1;
+	msg.buf = &command;
+
+	error = i2c_transfer(client->adapter, &msg, 1);
+	if (error < 0)
+		dev_err(&client->dev, "I2C send command error ret:%d\n", error);
+
+	return error;
+}
+
+static int r69001_ts_get_status(struct r69001_ts_data *ts, u8 *status)
+{
+	struct i2c_client *client = ts->client;
+	struct i2c_msg msg;
+	int error;
+
+	msg.addr = client->addr;
+	msg.flags = I2C_M_RD;
+	msg.len = 1;
+	msg.buf = status;
+
+	error = i2c_transfer(client->adapter, &msg, 1);
+	if (error < 0)
+		dev_err(&client->dev, "I2C get status error ret:%d\n", error);
+
 	return error;
 }
 
@@ -245,7 +422,32 @@ static int r69001_ts_read_coordinates_data(struct r69001_ts_data *ts)
 static irqreturn_t r69001_ts_irq_handler(int irq, void *dev_id)
 {
 	struct r69001_ts_data *ts = dev_id;
-	u8 mode = 0;
+	u8 mode = 0, status = 0;
+
+	if (ts->fw_update_sig != SIG_UPDATE_NO_NEED) {
+		if (ts->fw_update_sig == SIG_NO_INIT)
+			ts->fw_update_sig = SIG_INIT;
+		else if (ts->fw_update_sig == SIG_INIT) {
+			r69001_ts_get_status(ts, &status);
+			if (status & (0xa0 | 0x80))
+				ts->fw_update_sig = SIG_UPDATE_FROM_BOOT;
+			else
+				ts->fw_update_sig = SIG_UPDATE_NORMAL;
+
+			schedule_work(&ts->fw_update_work);
+		} else if (ts->fw_update_sig == SIG_UPDATE_DONE) {
+			/* just update fw finished, so need calibration here */
+			r69001_ts_write_data(ts, REG_CONTROL,
+					REG_SCAN_MODE, SCAN_MODE_STOP);
+			r69001_ts_write_data(ts, REG_CONTROL,
+					REG_SCAN_MODE, SCAN_MODE_CALIBRATION);
+			usleep_range(500000, 500000);
+			r69001_ts_write_data(ts, REG_CONTROL,
+					REG_SCAN_MODE, SCAN_MODE_STOP);
+
+			ts->fw_update_sig = SIG_UPDATE_NO_NEED;
+		}
+	}
 
 	r69001_ts_read_data(ts, REG_CONTROL, REG_SCAN_MODE, 1, &mode);
 
@@ -263,6 +465,117 @@ static irqreturn_t r69001_ts_irq_handler(int irq, void *dev_id)
 	r69001_ts_report_coordinates_data(ts);
 
 	return IRQ_HANDLED;
+}
+
+static int check_and_update_fw(struct r69001_ts_data *ts, u8 *fw, int size)
+{
+	int ret = 0;
+	int count;
+	u32 pointer = 0;
+	u16 current_fw_v = 0, file_fw_v = 0;
+	u8 vbuf[2];
+	struct fw_block_data data;
+	struct r69001_platform_data *pdata = ts->client->dev.platform_data;
+
+	/* read fw version from file */
+	memset(&data, 0, sizeof(struct fw_block_data));
+	data.type = T_FW_V;
+	ret = read_block_from_fw(fw, &pointer, size, &data);
+	if (!ret){
+		file_fw_v = data.buf[0] + (data.buf[1] << 8);
+	} else {
+		dev_err(&ts->client->dev, "Read fw version failed!\n");
+		return -1;
+	}
+
+	if (ts->fw_update_sig == SIG_UPDATE_NORMAL) {
+		/* read current fw version from touch panel */
+		if (r69001_ts_read_data(ts,
+			REG_CONTROL, REG_FW_VER, 2, vbuf) >= 0) {
+			current_fw_v = vbuf[0] + (vbuf[1] << 8);
+		} else {
+			dev_err(&ts->client->dev,
+				"Read fw version from touchsreen failed!\n");
+			return -1;
+		}
+
+		if (file_fw_v == current_fw_v) {
+			ts->fw_update_sig = SIG_UPDATE_NO_NEED;
+			printk("r69001: Current touch fw is up-to-date!\n");
+			return 0;
+		}
+
+		/* if need to update fw, change to firmware update mode */
+		if (r69001_ts_write_data(ts,
+			REG_CONTROL, REG_FW_UPDATE, FW_UPDATE_MODE) < 0) {
+			dev_err(&ts->client->dev,
+				"fail to change to fw update mode!\n");
+			return -1;
+		}
+	} else if (ts->fw_update_sig == SIG_UPDATE_FROM_BOOT) {
+		/* firmware update failed at last time,
+		 * so the only way to recovery is update from boot mode */
+		if (r69001_ts_send_cmd(ts, COMMAND_FIRMWARE_UPDATE) < 0 ) {
+			dev_err(&ts->client->dev,
+				"fail to change to boot fw update mode!\n");
+			return -1;
+		}
+	}
+
+	free_irq(ts->client->irq, ts);
+
+	/* then starting read data  */
+	count = 0;
+
+	do {
+		memset(&data, 0, sizeof(struct fw_block_data));
+		data.type = T_FW_D;
+		data.num = count;
+		ret = read_block_from_fw(fw, &pointer, size, &data);
+		if (ret)
+			break;
+
+		if (r69001_ts_write_fw(ts, data.buf, data.size) < 0) {
+			dev_err(&ts->client->dev,
+				"write touch fw data failed!\n");
+			ret = -1;
+			break;
+		}
+
+		usleep_range(data.delay * 1000, data.delay * 1000);
+
+		count++;
+	} while (1);
+
+	if (ret >= 0)
+		ret = request_threaded_irq(ts->client->irq, NULL,
+					r69001_ts_irq_handler,
+					pdata->irq_type, ts->client->name, ts);
+
+	return ret;
+}
+
+static void ts_fw_update_handler(struct work_struct *work)
+{
+	struct r69001_ts_data *ts =
+		container_of(work, struct r69001_ts_data, fw_update_work);
+	const struct firmware *fw_entry;
+
+	disable_irq(ts->client->irq);
+
+	if (!request_firmware(&fw_entry,
+			"ts_firmware.iic", &ts->client->dev)) {
+		if (fw_entry) {
+			check_and_update_fw(ts, (u8 *)fw_entry->data,
+						fw_entry->size);
+			release_firmware(fw_entry);
+		}
+	}
+
+	if (ts->fw_update_sig != SIG_UPDATE_NO_NEED)
+		ts->fw_update_sig = SIG_UPDATE_DONE;
+
+	enable_irq(ts->client->irq);
 }
 
 /*
@@ -383,16 +696,28 @@ r69001_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 
 	i2c_set_clientdata(client, ts);
 
+	ts->workqueue = create_singlethread_workqueue("r69001_ts_workqueue");
+	if (!ts->workqueue) {
+		dev_err(&client->dev, "Unable to create workqueue\n");
+		error = -ENOMEM;
+		goto err4;
+	}
+
+	INIT_WORK(&ts->fw_update_work, ts_fw_update_handler);
+
+	ts->fw_update_sig = SIG_NO_INIT;
 	ts->mode = INTERRUPT_MODE;
 
 	error = request_threaded_irq(client->irq, NULL, r69001_ts_irq_handler,
 			pdata->irq_type, client->name, ts);
 	if (error) {
 		dev_err(&client->dev, "Failed to register interrupt\n");
-		goto err4;
+		goto err5;
 	}
-	return 0;
 
+	return 0;
+err5:
+	destroy_workqueue(ts->workqueue);
 err4:
 	input_unregister_device(ts->input_dev);
 err3:
@@ -407,6 +732,7 @@ static int r69001_ts_remove(struct i2c_client *client)
 {
 	struct r69001_ts_data *ts = i2c_get_clientdata(client);
 
+	destroy_workqueue(ts->workqueue);
 	input_unregister_device(ts->input_dev);
 	if (client->irq)
 		free_irq(client->irq, ts);
