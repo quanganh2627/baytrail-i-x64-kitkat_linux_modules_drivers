@@ -83,6 +83,25 @@ struct wake_src {
 	const char *name;
 };
 
+enum intel_mid_target_os {
+	MAIN = 0x00,
+	CHARGING = 0x0A,
+	RECOVERY = 0x0C,
+	FASTBOOT = 0x0E,
+	FACTORY = 0x12,
+	DNX = 0x14,
+	RAMCONSOLE = 0x16,
+	RESERVED_INTEL_BEGIN = 0x0F,
+	RESERVED_INTEL_END = 0xEF,
+	RESERVED_OEM_BEGIN = 0xF0,
+	RESERVED_OEM_END = 0xFF
+};
+
+struct target_os {
+	const char *name;
+	u32 id;
+};
+
 struct cmos_osnib {
 
 	struct {
