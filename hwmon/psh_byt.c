@@ -224,6 +224,20 @@ static irqreturn_t psh_byt_irq_thread(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
+static void psh_byt_toggle_ctl_pin(struct device *dev,
+		int value)
+{
+	struct psh_ia_priv *ia_data =
+			(struct psh_ia_priv *)dev_get_drvdata(dev);
+	struct psh_ext_if *psh_if_info =
+			(struct psh_ext_if *)ia_data->platform_priv;
+	if (psh_if_info->gpio_psh_ctl > 0) {
+		gpio_set_value(psh_if_info->gpio_psh_ctl, value);
+		if (value)
+			usleep_range(1800, 1800);
+	}
+}
+
 static int psh_byt_suspend(struct device *dev)
 {
 	int ret;
@@ -233,6 +247,7 @@ static int psh_byt_suspend(struct device *dev)
 	ret = psh_ia_comm_suspend(dev);
 	if (ret)
 		return ret;
+	psh_byt_toggle_ctl_pin(dev, 0);
 	disable_irq(client->irq);
 	enable_irq_wake(client->irq);
 	return 0;
@@ -245,6 +260,7 @@ static int psh_byt_resume(struct device *dev)
 	struct i2c_client *client =
 		container_of(dev, struct i2c_client, dev);
 
+	psh_byt_toggle_ctl_pin(dev, 1);
 	read_psh_data(ia_data);
 	enable_irq(client->irq);
 	disable_irq_wake(client->irq);
@@ -253,28 +269,15 @@ static int psh_byt_resume(struct device *dev)
 
 static int psh_byt_runtime_suspend(struct device *dev)
 {
-	struct psh_ia_priv *ia_data =
-			(struct psh_ia_priv *)dev_get_drvdata(dev);
-	struct psh_ext_if *psh_if_info =
-			(struct psh_ext_if *)ia_data->platform_priv;
-	if (psh_if_info->gpio_psh_ctl > 0)
-		gpio_set_value(psh_if_info->gpio_psh_ctl, 0);
 	dev_dbg(dev, "PSH_BYT: %s\n", __func__);
+	psh_byt_toggle_ctl_pin(dev, 0);
 	return 0;
 }
 
 static int psh_byt_runtime_resume(struct device *dev)
 {
-	struct psh_ia_priv *ia_data =
-			(struct psh_ia_priv *)dev_get_drvdata(dev);
-	struct psh_ext_if *psh_if_info =
-			(struct psh_ext_if *)ia_data->platform_priv;
-
-	if (psh_if_info->gpio_psh_ctl > 0) {
-		gpio_set_value(psh_if_info->gpio_psh_ctl, 1);
-		usleep_range(1800, 1800);
-	}
 	dev_dbg(dev, "PSH_BYT: %s\n", __func__);
+	psh_byt_toggle_ctl_pin(dev, 1);
 	return 0;
 }
 
