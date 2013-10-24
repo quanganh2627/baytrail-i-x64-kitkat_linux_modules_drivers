@@ -29,7 +29,13 @@ static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
 	{ "808622C1" },
 	/* CHT HSU */
 	{ "8086228A" },
-
+	/* MID LPSS DMA controller*/
+	/* BYT DMA */
+	{ "INTL9C60" },
+	/* CHT DMA1 */
+	{ "80862286" },
+	/* CHT DMA2 */
+	{ "808622C0" },
 	{ }
 };
 
