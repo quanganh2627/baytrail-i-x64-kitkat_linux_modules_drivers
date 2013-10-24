@@ -498,7 +498,7 @@ static int check_and_update_fw(struct r69001_ts_data *ts, u8 *fw, int size)
 			return -1;
 		}
 
-		if (file_fw_v == current_fw_v || current_fw_v == 0x31) {
+		if (file_fw_v == current_fw_v) {
 			ts->fw_update_sig = SIG_UPDATE_NO_NEED;
 			printk("r69001: Current touch fw is up-to-date!\n");
 			return 0;
