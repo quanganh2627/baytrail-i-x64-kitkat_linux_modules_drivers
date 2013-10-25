@@ -30,7 +30,7 @@ DHDCFLAGS += -Wall -Wstrict-prototypes -Dlinux -DBCMDRIVER                      
 	-I$(src) -I$(src)/include -I$(src)/common/include
 
 DHDOFILES = aiutils.o bcmsdh_sdmmc_linux.o dhd_linux.o siutils.o bcmutils.o   \
-	dhd_linux_sched.o dhd_sdio.o bcmwifi_channels.o bcmevent.o hndpmu.o   \
+	dhd_pno.o dhd_linux_sched.o dhd_sdio.o bcmwifi_channels.o bcmevent.o hndpmu.o   \
 	bcmsdh.o dhd_cdc.o bcmsdh_linux.o dhd_common.o dhd_wlfc.o dhd_ip.o linux_osl.o \
 	bcmsdh_sdmmc.o dhd_custom_gpio.o sbutils.o wldev_common.o wl_android.o
 
@@ -44,7 +44,9 @@ DHDCFLAGS += -DSOFTAP -DWL_WIRELESS_EXT -DUSE_IW
 endif
 ifneq ($(CONFIG_CFG80211),)
 $(BCM43XX_DRIVER)-objs += wl_cfg80211.o wl_cfgp2p.o wl_linux_mon.o dhd_cfg80211.o
-DHDCFLAGS += -DWL_CFG80211 -DWL_CFG80211_STA_EVENT -DWL_ENABLE_P2P_IF
+DHDCFLAGS += -DWL_CFG80211 -DWL_CFG80211_STA_EVENT
+#DHDCFLAGS += -DWL_ENABLE_P2P_IF
+DHDCFLAGS += -DWL_CFG80211_P2P_DEV_IF
 DHDCFLAGS += -DCUSTOM_ROAM_TRIGGER_SETTING=-65
 DHDCFLAGS += -DCUSTOM_ROAM_DELTA_SETTING=15
 DHDCFLAGS += -DCUSTOM_KEEP_ALIVE_SETTING=10000
@@ -120,6 +122,7 @@ $(info bcmdhd: Compiling for 4335 chip)
   DHDCFLAGS += -DREPEAT_READFRAME
   DHDCFLAGS += -DUSE_WL_FRAMEBURST
   DHDCFLAGS += -DCUSTOM_MAX_TXGLOM_SIZE=32
+  DHDCFLAGS += -DCUSTOM_DEF_TXGLOM_SIZE=14
   DHDCFLAGS += -DUSE_DYNAMIC_MAXPKT_RXGLOM
   DHDCFLAGS += -DCUSTOM_SDIO_F2_BLKSIZE=512
 # For BT LOCK

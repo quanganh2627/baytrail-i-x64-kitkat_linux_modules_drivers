@@ -652,7 +652,7 @@ int bq24192_get_charger_health(void)
  */
 int bq24192_get_battery_health(void)
 {
-	int ret, temp, count;
+	int  temp,vnow;
 	struct bq24192_chip *chip;
 	if (!bq24192_client)
 		return POWER_SUPPLY_HEALTH_UNKNOWN;
@@ -678,20 +678,18 @@ int bq24192_get_battery_health(void)
 	if ((temp <= chip->min_temp) ||
 		(temp > chip->max_temp))
 		return POWER_SUPPLY_HEALTH_OVERHEAT;
-
-	/* Check if battery OVP condition occured. Reading the register
-	value two times to get reliable reg value, recommended by vendor*/
-	for (count = 0; count <= MAX_TRY; count++) {
-		ret = bq24192_read_reg(chip->client, BQ24192_FAULT_STAT_REG);
-		msleep(22);
-	}
-	if (ret < 0) {
-		dev_warn(&chip->client->dev,
-			"read reg failed %s\n", __func__);
-		return POWER_SUPPLY_HEALTH_UNKNOWN;
+	/* read the battery voltage */
+	vnow = fg_chip_get_property(POWER_SUPPLY_PROP_VOLTAGE_NOW);
+	if (vnow == -ENODEV || vnow == -EINVAL) {
+		dev_err(&chip->client->dev, "Can't read voltage from FG\n");
+		return POWER_SUPPLY_HEALTH_UNSPEC_FAILURE;
 	}
 
-	if (ret & FAULT_STAT_BATT_FLT)
+	/* convert voltage into millivolts */
+	vnow /= 1000;
+	dev_warn(&chip->client->dev, "vnow = %d\n", vnow);
+
+	if (vnow > chip->max_cv)
 		return POWER_SUPPLY_HEALTH_OVERVOLTAGE;
 
 	dev_dbg(&chip->client->dev, "-%s\n", __func__);
@@ -1547,8 +1545,9 @@ static void bq24192_task_worker(struct work_struct *work)
 {
 	struct bq24192_chip *chip =
 	    container_of(work, struct bq24192_chip, chrg_task_wrkr.work);
-	int ret, jiffy = CHARGER_TASK_JIFFIES, vbatt = 0;
-	static int prev_health;
+	int ret, jiffy = CHARGER_TASK_JIFFIES, vbatt;
+	static int prev_health = POWER_SUPPLY_HEALTH_GOOD;
+	int curr_health;
 	u8 vindpm = INPUT_SRC_VOLT_LMT_DEF;
 
 	dev_info(&chip->client->dev, "%s\n", __func__);
@@ -1618,14 +1617,14 @@ static void bq24192_task_worker(struct work_struct *work)
 
 sched_task_work:
 
-	if ((POWER_SUPPLY_HEALTH_OVERHEAT  == bq24192_get_battery_health()) ||
-		(POWER_SUPPLY_HEALTH_OVERHEAT == prev_health)) {
-			power_supply_changed(&chip->usb);
-			prev_health = bq24192_get_battery_health();
-			dev_warn(&chip->client->dev,
-				"%s health status  %d",
-					__func__, prev_health);
+	curr_health = bq24192_get_battery_health();
+	if (prev_health != curr_health) {
+		power_supply_changed(&chip->usb);
+		dev_warn(&chip->client->dev,
+			"%s health status  %d",
+				__func__, prev_health);
 	}
+	prev_health = curr_health;
 
 	if (BQ24192_CHRGR_STAT_BAT_FULL == bq24192_is_charging(chip)) {
 		power_supply_changed(&chip->usb);
@@ -1882,7 +1881,7 @@ static int bq24192_probe(struct i2c_client *client,
 					chip->pdata->num_throttle_states;
 		chip->usb.supported_cables = chip->pdata->supported_cables;
 		chip->max_cc = 1216;
-		chip->max_cv = 4320;
+		chip->max_cv = 4200;
 		chip->bat_health = POWER_SUPPLY_HEALTH_GOOD;
 		chip->chgr_stat = BQ24192_CHRGR_STAT_UNKNOWN;
 		chip->usb.properties = bq24192_usb_props;

@@ -63,6 +63,9 @@ typedef struct wl_iw_extra_params {
 } wl_iw_extra_params_t;
 
 struct cntry_locales_custom {
+#if defined(SUPPORT_MULTIPLE_REVISION)
+	uint chip_id;
+#endif
 	char iso_abbrev[WLC_CNTRY_BUF_SZ];	/* ISO 3166-1 country abbreviation */
 	char custom_locale[WLC_CNTRY_BUF_SZ];	/* Custom firmware locale */
 	int32 custom_locale_rev;		/* Custom local revisin default -1 */

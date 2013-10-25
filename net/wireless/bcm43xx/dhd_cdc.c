@@ -117,7 +117,6 @@ dhdcdc_query_ioctl(dhd_pub_t *dhd, int ifidx, uint cmd, void *buf, uint len, uin
 {
 	dhd_prot_t *prot = dhd->prot;
 	cdc_ioctl_t *msg = &prot->msg;
-	void *info;
 	int ret = 0, retries = 0;
 	uint32 id, flags = 0;
 
@@ -177,15 +176,12 @@ retry:
 		goto done;
 	}
 
-	/* Check info buffer */
-	info = (void*)&msg[1];
-
 	/* Copy info buffer */
 	if (buf)
 	{
 		if (ret < (int)len)
 			len = ret;
-		memcpy(buf, info, len);
+		memcpy(buf, (void*) prot->buf, len);
 	}
 
 	/* Check the ERROR flag */
