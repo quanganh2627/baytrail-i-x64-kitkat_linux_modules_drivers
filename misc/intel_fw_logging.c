@@ -1264,6 +1264,24 @@ static int intel_fw_logging_remove(struct platform_device *pdev)
 						&fw_logging_panic_notifier);
 }
 
+#ifdef CONFIG_PM
+static int intel_fw_logging_suspend(struct platform_device *dev,
+					pm_message_t state)
+{
+	rpmsg_send_simple_command(fw_logging_instance,
+					IPCMSG_SCULOG_CTRL,
+					IPC_CMD_SCU_LOG_SUSPEND);
+	return 0;
+}
+
+static int intel_fw_logging_resume(struct platform_device *dev)
+{
+	rpmsg_send_simple_command(fw_logging_instance,
+					IPCMSG_SCULOG_CTRL,
+					IPC_CMD_SCU_LOG_RESUME);
+}
+#endif
+
 static const struct platform_device_id intel_fw_logging_table[] = {
 	{"scuLog", 1 },
 };
@@ -1276,6 +1294,8 @@ static struct platform_driver intel_fw_logging_driver = {
 	.probe = intel_fw_logging_probe,
 	.remove = intel_fw_logging_remove,
 	.id_table = intel_fw_logging_table,
+	.suspend = intel_fw_logging_suspend,
+	.resume = intel_fw_logging_resume,
 };
 
 static int intel_fw_logging_init(void)
