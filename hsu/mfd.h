@@ -175,6 +175,7 @@ struct uart_hsu_port {
 
 	int			use_dma;	/* flag for DMA/PIO */
 	unsigned int		dma_irq;
+	unsigned int		port_dma_sts;
 
 	void			*dma_priv;
 	struct hsu_dma_ops	*dma_ops;
@@ -184,7 +185,6 @@ struct uart_hsu_port {
 
 struct hsu_port {
 	int dma_irq;
-	int int_sts;
 	int port_num;
 	int irq_port_and_dma;
 	struct hsu_port_cfg	*configs[HSU_PORT_MAX];

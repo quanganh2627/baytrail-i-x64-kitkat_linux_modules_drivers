@@ -871,6 +871,7 @@ static void check_modem_status(struct uart_hsu_port *up)
 			if (status & UART_MSR_CTS) {
 				serial_sched_cmd(up, qcmd_start_tx);
 				tty->hw_stopped = 0;
+				up->cts_status = 0;
 				uport->icount.cts++;
 				delta_msr = 1;
 				uart_write_wakeup(uport);
@@ -882,6 +883,7 @@ static void check_modem_status(struct uart_hsu_port *up)
 					up->dma_ops->stop_tx(up);
 				clear_bit(flag_tx_on, &up->flags);
 				tty->hw_stopped = 1;
+				up->cts_status = 1;
 				delta_msr = 1;
 				uport->icount.cts++;
 			}
@@ -991,15 +993,25 @@ static irqreturn_t hsu_port_irq(int irq, void *dev_id)
 
 static irqreturn_t hsu_dma_irq(int irq, void *dev_id)
 {
-	struct hsu_port *hsu = dev_id;
+	struct uart_hsu_port *up;
 	unsigned long flags;
+	unsigned int dmairq;
 	int i;
 
 	spin_lock_irqsave(&phsu->dma_lock, flags);
-	hsu->int_sts = mfd_readl(hsu, HSU_GBL_DMAISR);
-	for (i = 0; i < 3; i++) {
-		if (hsu->int_sts & (3 << (i * 2)))
-			hsu_dma_chan_handler(hsu, i);
+	dmairq = mfd_readl(phsu, HSU_GBL_DMAISR);
+	if (phsu->irq_port_and_dma) {
+		up = dev_id;
+		up->port_dma_sts = dmairq;
+		if (up->port_dma_sts & (3 << (up->index * 2)))
+			hsu_dma_chan_handler(phsu, up->index);
+	} else {
+		for (i = 0; i < 3; i++)
+			if (dmairq & (3 << (i * 2))) {
+				up = phsu->chans[i * 2].uport;
+				up->port_dma_sts = dmairq;
+				hsu_dma_chan_handler(phsu, i);
+			}
 	}
 	spin_unlock_irqrestore(&phsu->dma_lock, flags);
 
@@ -2209,13 +2221,13 @@ static void serial_hsu_command(struct uart_hsu_port *up)
 		case qcmd_dma_irq:
 			/* Only hsu_intel has this irq */
 			up->dma_irq_cmddone++;
-			if (phsu->int_sts & (1 << txc->id)) {
+			if (up->port_dma_sts & (1 << txc->id)) {
 				up->dma_tx_irq_cmddone++;
 				status = chan_readl(txc, HSU_CH_SR);
 				up->dma_ops->start_tx(up);
 			}
 
-			if (phsu->int_sts & (1 << rxc->id)) {
+			if (up->port_dma_sts & (1 << rxc->id)) {
 				status = chan_readl(rxc, HSU_CH_SR);
 				intel_dma_do_rx(up, status);
 			}
@@ -2302,7 +2314,7 @@ static int serial_port_setup(struct uart_hsu_port *up,
 	if (phsu->irq_port_and_dma) {
 		up->dma_irq = up->port.irq;
 		ret = request_irq(up->dma_irq, hsu_dma_irq, IRQF_SHARED,
-				"hsu dma", phsu);
+				"hsu dma", up);
 		if (ret) {
 			dev_err(up->dev, "can not get dma IRQ\n");
 			return ret;
