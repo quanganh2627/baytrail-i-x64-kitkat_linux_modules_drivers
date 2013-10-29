@@ -89,7 +89,7 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 
 		if (ia_data->cmd_in_progress == CMD_RESET)
 			break;
-		else if (ia_data->cmd_in_progress != CMD_NONE)
+		else if (ia_data->cmd_in_progress != CMD_INVALID)
 			schedule();
 
 		ret = i2c_transfer(psh_if_info->pshc->adapter, msg, 1);
@@ -204,7 +204,7 @@ int process_send_cmd(struct psh_ia_priv *ia_data,
 	ret = i2c_transfer(psh_if_info->pshc->adapter, &i2c_cmd, 1);
 	if (ret != 1) {
 		dev_err(&psh_if_info->pshc->dev, "sendcmd through I2C fail!\n");
-		ret = -EPERM;
+		ret = -EIO;
 	} else {
 		ret = 0;
 	}
