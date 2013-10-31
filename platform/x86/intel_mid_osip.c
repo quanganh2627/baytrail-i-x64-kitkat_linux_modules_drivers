@@ -367,6 +367,10 @@ static struct notifier_block osip_reboot_notifier = {
 /* number N of sectors (512bytes) needed for the cmdline, N+1 needed */
 #define OSIP_MAX_CMDLINE_SECTOR ((OSIP_MAX_CMDLINE_SIZE >> 9) + 1)
 
+/* Size used by signature is not the same for valleyview */
+#define OSIP_SIGNATURE_SIZE 		0x1E0
+#define OSIP_VALLEYVIEW_SIGNATURE_SIZE 	0x400
+
 struct cmdline_priv {
 	Sector sect[OSIP_MAX_CMDLINE_SECTOR];
 	struct block_device *bdev;
@@ -433,8 +437,12 @@ int open_cmdline(struct inode *i, struct file *f)
 		goto put;
 	}
 	if (!(p->attribute & 1))
-		/* even number: signed plus 480 bytes for VRL header. */
-		p->cmdline += 0x1E0;
+		/* even number: signed add size of signature header. */
+		if (!is_valleyview())
+			p->cmdline += OSIP_SIGNATURE_SIZE;
+		else
+			p->cmdline += OSIP_VALLEYVIEW_SIGNATURE_SIZE;
+
 
 	f->private_data = p;
 	return 0;
