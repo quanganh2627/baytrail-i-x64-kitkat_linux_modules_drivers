@@ -51,7 +51,7 @@
 #include <linux/workqueue.h>
 #include <linux/mfd/intel_msic.h>
 
-#ifdef CONFIG_BOARD_CTP
+#ifndef CONFIG_ACPI
 
  #define DRIVER_NAME	"msic_vdd"
  #define DEVICE_NAME	"msic_vdd"
@@ -734,7 +734,7 @@ static irqreturn_t vdd_intrpt_handler(int id, void *dev)
 	uint8_t irq_data;
 	unsigned long __flags;
 
-#ifdef CONFIG_BOARD_CTP
+#ifndef CONFIG_ACPI
 	irq_data = readb(vinfo->bcu_intr_addr);
 	spin_lock_irqsave(&vdd_interrupt_lock, __flags);
 	global_irq_data |= irq_data;
@@ -753,7 +753,7 @@ static irqreturn_t vdd_interrupt_thread_handler(int irq, void *dev_data)
 	uint8_t irq_data, event = 0, clear_irq, ret;
 	struct vdd_info *vinfo = (struct vdd_info *)dev_data;
 
-#ifndef CONFIG_BOARD_CTP
+#ifdef CONFIG_ACPI
 	ret = intel_scu_ipc_ioread8(BCUIRQ, &global_irq_data);
 	if (ret)
 		dev_warn(&vinfo->pdev->dev, "ipc read/write failed\n");
@@ -791,7 +791,7 @@ static irqreturn_t vdd_interrupt_thread_handler(int irq, void *dev_data)
 		handle_events(event, dev_data);
 	}
 
-#ifndef CONFIG_BOARD_CTP
+#ifdef CONFIG_ACPI
 	ret = intel_scu_ipc_iowrite8(BCUIRQ, clear_irq);
 	clear_irq = 0;
 	if (ret)
@@ -922,6 +922,9 @@ vdd_init_error:
 	return ret;
 }
 
+#ifdef CONFIG_ACPI
+extern void *msic_vdd_platform_data(void *);
+#endif
 static int mid_vdd_probe(struct platform_device *pdev)
 {
 	int ret;
@@ -936,20 +939,10 @@ static int mid_vdd_probe(struct platform_device *pdev)
 	vinfo->irq = platform_get_irq(pdev, 0);
 	platform_set_drvdata(pdev, vinfo);
 	pdata = pdev->dev.platform_data;
-#ifdef CONFIG_BOARD_CTP
+#ifndef CONFIG_ACPI
 	vinfo->bcu_intr_addr = ioremap(MSIC_BCU_STAT, MSIC_BCU_LEN);
 #else
-	if (pdata == NULL) {
-		pdata = devm_kzalloc(&pdev->dev,
-				sizeof(struct intel_msic_vdd_pdata),
-				GFP_KERNEL);
-		if (!pdata) {
-			dev_err(&pdev->dev, "kzalloc failed");
-			return -ENOMEM;
-		}
-		pdata->disable_unused_comparator = false;
-		pdata->is_clvp = false;
-	}
+	pdata = msic_vdd_platform_data(NULL);
 	vinfo->bcu_intr_addr = BCUIRQ;
 #endif
 	if (!vinfo->bcu_intr_addr) {
