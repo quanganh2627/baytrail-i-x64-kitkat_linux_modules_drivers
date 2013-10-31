@@ -1653,13 +1653,11 @@ static void bq24192_otg_evt_worker(struct work_struct *work)
 		dev_info(&chip->client->dev,
 			"%s:%d state=%d\n", __FILE__, __LINE__,
 				evt->is_enable);
-		mutex_lock(&chip->event_lock);
 
 		ret = bq24192_turn_otg_vbus(chip, evt->is_enable);
 		if (ret < 0)
 			dev_err(&chip->client->dev, "VBUS ON FAILED:\n");
 
-		mutex_unlock(&chip->event_lock);
 		spin_lock_irqsave(&chip->otg_queue_lock, flags);
 		kfree(evt);
 

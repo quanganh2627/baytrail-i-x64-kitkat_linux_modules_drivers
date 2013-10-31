@@ -73,7 +73,7 @@ static const unsigned long curr_thresholds[NUM_THRESHOLDS] = {
 struct ocd_info {
 	struct device *dev;
 	struct platform_device *pdev;
-	struct delayed_work vwarn1_irq_work;
+	struct delayed_work vwarn2_irq_work;
 	void *bcu_intr_addr;
 	int irq;
 };
@@ -594,20 +594,20 @@ static inline void bcbcu_remove_debugfs(struct ocd_info *info) { }
 #endif /* CONFIG_DEBUG_FS */
 
 /**
- * vwarn1_irq_enable_work: delayed work queue function, which is used to unmask
- * (enable) the VWARN1 interrupt after the specified delay time while sceduling.
+ * vwarn2_irq_enable_work: delayed work queue function, which is used to unmask
+ * (enable) the VWARN2 interrupt after the specified delay time while sceduling.
  */
-static void vwarn1_irq_enable_work(struct work_struct *work)
+static void vwarn2_irq_enable_work(struct work_struct *work)
 {
 	int ret = 0;
 	struct ocd_info *info = container_of(work,
 						struct ocd_info,
-						vwarn1_irq_work.work);
+						vwarn2_irq_work.work);
 
 	dev_dbg(info->dev, "EM_BCU: Inside %s\n", __func__);
 
-	/* Unmasking BCU MVWARN1 Interrupt, to see the interrupt occurrence */
-	ret = intel_scu_ipc_update_register(MBCUIRQ, ~MVWARN1, MVWARN1_MASK);
+	/* Unmasking BCU MVWARN2 Interrupt, to see the interrupt occurrence */
+	ret = intel_scu_ipc_update_register(MBCUIRQ, ~MVWARN2, MVWARN2_MASK);
 	if (ret) {
 		dev_err(info->dev, "EM_BCU: Error in %s updating reg 0x%x\n",
 				__func__, MBCUIRQ);
@@ -660,11 +660,26 @@ static void handle_VW1_event(void *dev_data)
 
 	dev_info(cinfo->dev, "EM_BCU: VWARN1 Event has occured\n");
 
-	/* Notify using UEvent along with env info */
-	bcu_envp[0] = get_envp(VWARN1);
+	/**
+	 * Notify using uevent along with env info. Here sending vwarn2 info
+	 * upon receiving vwarn1 interrupt since the vwarn1 & vwarn2 threshold
+	 * values is swapped.
+	 */
+	bcu_envp[0] = get_envp(VWARN2);
 	bcu_envp[1] = NULL;
 	kobject_uevent_env(&cinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
 
+	/**
+	 * Masking the BCU MVWARN1 Interrupt, since software does graceful
+	 * shutdown once VWARN1 interrupt occurs. So we never expect another
+	 * VWARN1 interrupt.
+	 */
+	ret = intel_scu_ipc_update_register(MBCUIRQ, MVWARN1, MVWARN1_MASK);
+	if (ret) {
+		dev_err(cinfo->dev, "EM_BCU: Error in %s updating reg 0x%x\n",
+				__func__, MBCUIRQ);
+		goto ipc_fail;
+	}
 
 	ret = intel_scu_ipc_ioread8(S_BCUINT, &irq_status);
 	if (ret)
@@ -674,37 +689,8 @@ static void handle_VW1_event(void *dev_data)
 	if (!(irq_status & SVWARN1)) {
 		/* Vsys is above WARN1 level */
 		dev_info(cinfo->dev, "EM_BCU: Recovered from VWARN1 Level\n");
-		ret = intel_scu_ipc_ioread8(CAMFLTORCH_BEH, &beh_data);
-		if (ret)
-			goto ipc_fail;
-		if (IS_ASSRT_ON_VW1(beh_data) && IS_STICKY(beh_data)) {
-			ret = intel_scu_ipc_update_register(S_BCUCTRL,
-				0xFF, SBCUCTRL_CAMTORCH);
-			if (ret)
-				goto ipc_fail;
-		}
-	} else {
-		/**
-		 * Masking BCU VWARN1 Interrupt, to avoid multiple VWARN1
-		 * interrupt occurrence continuously.
-		 */
-		ret = intel_scu_ipc_update_register(MBCUIRQ,
-							MVWARN1,
-							MVWARN1_MASK);
-		if (ret) {
-			dev_err(cinfo->dev,
-				"EM_BCU: Error in %s updating reg 0x%x\n",
-				__func__, MBCUIRQ);
-		}
-
-		cancel_delayed_work_sync(&cinfo->vwarn1_irq_work);
-		/**
-		 * Schedule the work to re-enable the VWARN1 interrupt after
-		 * 30sec delay
-		 */
-		schedule_delayed_work(&cinfo->vwarn1_irq_work,
-					VWARN1_INTR_EN_DELAY);
 	}
+
 	return;
 
 ipc_fail:
@@ -722,22 +708,14 @@ static void handle_VW2_event(void *dev_data)
 
 	dev_info(cinfo->dev, "EM_BCU: VWARN2 Event has occured\n");
 
-	/* Notify using UEvent along with env info */
-	bcu_envp[0] = get_envp(VWARN2);
+	/**
+	 * Notify using uevent along with env info. Here sending vwarn1 info
+	 * upon receiving vwarn2 interrupt since the vwarn1 & vwarn2 threshold
+	 * values is swapped.
+	 */
+	bcu_envp[0] = get_envp(VWARN1);
 	bcu_envp[1] = NULL;
 	kobject_uevent_env(&cinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
-
-	/**
-	 * Masking the BCU MVWARN2 Interrupt, since software does graceful
-	 * shutdown once VWARN2 interrupt occurs. So we never expect another
-	 * VWARN2 interrupt.
-	 */
-	ret = intel_scu_ipc_update_register(MBCUIRQ, MVWARN2, MVWARN2_MASK);
-	if (ret) {
-		dev_err(cinfo->dev, "EM_BCU: Error in %s updating reg 0x%x\n",
-				__func__, MBCUIRQ);
-		goto ipc_fail;
-	}
 
 	ret = intel_scu_ipc_ioread8(S_BCUINT, &irq_status);
 	if (ret)
@@ -748,26 +726,60 @@ static void handle_VW2_event(void *dev_data)
 	if (!(irq_status & SVWARN2)) {
 		/* Vsys is above WARN2 level */
 		dev_info(cinfo->dev, "EM_BCU: Recovered from VWARN2 Level\n");
+
+		/* clearing BCUDISW2 signal if asserted */
+		ret = intel_scu_ipc_ioread8(BCUDISW2_BEH, &beh_data);
+		if (ret)
+			goto ipc_fail;
+		if (IS_ASSRT_ON_VW2(beh_data) && IS_STICKY(beh_data)) {
+			ret = intel_scu_ipc_update_register(S_BCUCTRL,
+					S_BCUDISW2, S_BCUDISW2_MASK);
+			if (ret)
+				goto ipc_fail;
+		}
+
+		/* clearing CAMFLDIS# signal if asserted */
 		ret = intel_scu_ipc_ioread8(CAMFLDIS_BEH, &beh_data);
 		if (ret)
 			goto ipc_fail;
 		if (IS_ASSRT_ON_VW2(beh_data) && IS_STICKY(beh_data)) {
 			ret = intel_scu_ipc_update_register(S_BCUCTRL,
-						0xFF, SBCUCTRL_CAMFLDIS);
+					S_CAMFLDIS, S_CAMFLDIS_MASK);
 			if (ret)
 				goto ipc_fail;
 		}
 
-		ret = intel_scu_ipc_ioread8(BCUDISW2_BEH, &beh_data);
+		/* clearing CAMFLTORCH signal if asserted */
+		ret = intel_scu_ipc_ioread8(CAMFLTORCH_BEH, &beh_data);
 		if (ret)
 			goto ipc_fail;
-
 		if (IS_ASSRT_ON_VW2(beh_data) && IS_STICKY(beh_data)) {
 			ret = intel_scu_ipc_update_register(S_BCUCTRL,
-				0xFF, SBCUCTRL_BCUDISW2);
+					S_CAMFLTORCH, S_CAMFLTORCH_MASK);
 			if (ret)
 				goto ipc_fail;
 		}
+	} else {
+		/**
+		 * Masking BCU VWARN2 Interrupt, to avoid multiple VWARN2
+		 * interrupt occurrence continuously.
+		 */
+		ret = intel_scu_ipc_update_register(MBCUIRQ,
+							MVWARN2,
+							MVWARN2_MASK);
+		if (ret) {
+			dev_err(cinfo->dev,
+				"EM_BCU: Error in %s updating reg 0x%x\n",
+				__func__, MBCUIRQ);
+		}
+
+		cancel_delayed_work_sync(&cinfo->vwarn2_irq_work);
+		/**
+		 * Schedule the work to re-enable the VWARN2 interrupt after
+		 * 30sec delay
+		 */
+		schedule_delayed_work(&cinfo->vwarn2_irq_work,
+					VWARN2_INTR_EN_DELAY);
 	}
 	return;
 
@@ -785,7 +797,7 @@ static void handle_VC_event(void *dev_data)
 
 	dev_info(cinfo->dev, "EM_BCU: VCRIT Event has occured\n");
 
-	/* Notify using UEvent along with env info */
+	/* Notify using uevent along with env info */
 	bcu_envp[0] = get_envp(VCRIT);
 	bcu_envp[1] = NULL;
 	kobject_uevent_env(&cinfo->dev->kobj, KOBJ_CHANGE, bcu_envp);
@@ -989,7 +1001,7 @@ static int mrfl_ocd_probe(struct platform_device *pdev)
 	cam_flash_state = CAMFLASH_STATE_NORMAL;
 
 	/* Initializing delayed work for re-enabling vwarn1 interrupt */
-	INIT_DELAYED_WORK(&cinfo->vwarn1_irq_work, vwarn1_irq_enable_work);
+	INIT_DELAYED_WORK(&cinfo->vwarn2_irq_work, vwarn2_irq_enable_work);
 
 	/* Create debufs for the basincove bcu registers */
 	bcbcu_create_debugfs(cinfo);

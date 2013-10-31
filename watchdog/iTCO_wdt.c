@@ -607,7 +607,7 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 		TCOBASE);
 
 	/* Clear out the (probably old) status */
-	val32 = TCO_TIMEOUT_BIT & SECOND_TO_STS_BIT;
+	val32 = TCO_TIMEOUT_BIT | SECOND_TO_STS_BIT;
 	outl(val32, TCO1_STS);	/* Clear the Time Out Status bit and
 				   SECOND_TO_STS bit */
 	outl(TCO_STS_BIT, SMI_STS); /* Clear the Time Out Status bit */

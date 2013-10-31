@@ -67,6 +67,17 @@ static struct wake_src wake_srcs[] = {
 	{ WAKE_ACDC_CHRG_INSERT, "ac charger inserted" },
 };
 
+static struct target_os oses[] = {
+	{ "main", MAIN },
+	{ "charging", CHARGING  },
+	{ "recovery", RECOVERY },
+	{ "fastboot", FASTBOOT },
+	{ "bootloader", FASTBOOT },
+	{ "factory", FACTORY },
+	{ "dnx", DNX},
+	{ "ramconsole", RAMCONSOLE},
+};
+
 static int is_valleyview(void)
 {
 	u32 regs[4];

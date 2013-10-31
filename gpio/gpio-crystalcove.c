@@ -57,7 +57,8 @@
 #define CTLI_INTCNT_BE	(3 << 1)
 
 #define CTLO_DIR_OUT	(1 << 5)
-#define CTLO_DRV_CMOS	(1 << 4)
+#define CTLO_DRV_CMOS	(0 << 4)
+#define CTLO_DRV_OD	(1 << 4)
 #define CTLO_DRV_REN	(1 << 3)
 #define CTLO_RVAL_2KDW	(0)
 #define CTLO_RVAL_2KUP	(1 << 1)
