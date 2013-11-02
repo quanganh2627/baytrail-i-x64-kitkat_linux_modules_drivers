@@ -29,6 +29,7 @@
 #include <linux/acpi_gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/i2c/atmel_ts.h>
+#include <linux/early_suspend_sysfs.h>
 #ifdef CONFIG_HAS_EARLYSUSPEND
 #include <linux/earlysuspend.h>
 #endif
@@ -3198,6 +3199,51 @@ static void mxt_stop(struct mxt_data *data)
 	data->suspended = true;
 }
 
+static void mxt_suspend(struct mxt_data *data)
+{
+	struct input_dev *input_dev;
+
+	input_dev = data->input_dev;
+
+	mutex_lock(&input_dev->mutex);
+	if (input_dev->users)
+		mxt_stop(data);
+	mutex_unlock(&input_dev->mutex);
+
+	if (data->pdata->gpio_switch >= 0)
+		gpio_set_value_cansleep(data->pdata->gpio_switch, 0);
+}
+
+static void mxt_resume(struct mxt_data *data)
+{
+	struct input_dev *input_dev;
+
+	input_dev = data->input_dev;
+
+	if (data->pdata->gpio_switch >= 0)
+		gpio_set_value_cansleep(data->pdata->gpio_switch, 1);
+
+	mutex_lock(&input_dev->mutex);
+	if (input_dev->users)
+		mxt_start(data);
+	mutex_unlock(&input_dev->mutex);
+}
+
+static ssize_t early_suspend_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+
+	if (!strncmp(buf, EARLY_SUSPEND_ON, EARLY_SUSPEND_STATUS_LEN))
+		mxt_suspend(data);
+	else if (!strncmp(buf, EARLY_SUSPEND_OFF, EARLY_SUSPEND_STATUS_LEN))
+		mxt_resume(data);
+
+	return count;
+}
+
+static DEVICE_EARLY_SUSPEND_ATTR(early_suspend_store);
+
 static int mxt_initialize_t9_input_device(struct mxt_data *data)
 {
 	struct device *dev = &data->client->dev;
@@ -3378,6 +3424,8 @@ static int mxt_probe(struct i2c_client *client,
 		gpio_direction_output(data->pdata->gpio_switch, 1);
 	}
 
+	device_create_file(&client->dev, &dev_attr_early_suspend);
+
 	error = sysfs_create_group(&client->dev.kobj, &mxt_attr_group);
 	if (error) {
 		dev_err(&client->dev, "Failure %d creating sysfs group\n",
@@ -3405,6 +3453,9 @@ static int mxt_probe(struct i2c_client *client,
 	data->early_suspend.resume = mxt_late_resume;
 	register_early_suspend(&data->early_suspend);
 #endif
+
+	register_early_suspend_device(&client->dev);
+
 	mxt_start(data);
 
 	return 0;
@@ -3430,7 +3481,9 @@ static int mxt_remove(struct i2c_client *client)
 		sysfs_remove_bin_file(&client->dev.kobj,
 				      &data->mem_access_attr);
 
+	device_remove_file(&client->dev, &dev_attr_early_suspend);
 	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
+	unregister_early_suspend_device(&client->dev);
 	free_irq(data->irq, data);
 	if (data->pdata->gpio_switch >= 0)
 		gpio_free(data->pdata->gpio_switch);
@@ -3447,35 +3500,19 @@ static int mxt_remove(struct i2c_client *client)
 static void mxt_early_suspend(struct early_suspend *es)
 {
 	struct mxt_data *data;
-	struct input_dev *input_dev;
 
 	data = container_of(es, struct mxt_data, early_suspend);
-	input_dev = data->input_dev;
 
-	mutex_lock(&input_dev->mutex);
-	if (input_dev->users)
-		mxt_stop(data);
-	mutex_unlock(&input_dev->mutex);
-
-	if (data->pdata->gpio_switch >= 0)
-		gpio_set_value_cansleep(data->pdata->gpio_switch, 0);
+	mxt_suspend(data);
 }
 
 static void mxt_late_resume(struct early_suspend *es)
 {
 	struct mxt_data *data;
-	struct input_dev *input_dev;
 
 	data = container_of(es, struct mxt_data, early_suspend);
-	input_dev = data->input_dev;
 
-	if (data->pdata->gpio_switch >= 0)
-		gpio_set_value_cansleep(data->pdata->gpio_switch, 1);
-
-	mutex_lock(&input_dev->mutex);
-	if (input_dev->users)
-		mxt_start(data);
-	mutex_unlock(&input_dev->mutex);
+	mxt_resume(data);
 }
 #endif
 
