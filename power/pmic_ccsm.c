@@ -275,6 +275,13 @@ static inline int pmic_write_tt(u8 addr, u8 data)
 	ret = __pmic_write_tt(addr, data);
 	mutex_unlock(&pmic_lock);
 
+	/* If access is blocked return success to avoid additional
+	*  error handling at client side
+	*/
+	if (ret == -EACCES) {
+		dev_warn(chc.dev, "IPC write blocked due to unsigned kernel/invalid battery\n");
+		ret = 0;
+	}
 	return ret;
 }
 
@@ -741,6 +748,14 @@ int pmic_enable_vbus(bool enable)
 					0x0, CHGRCTRL1_OTGMODE_MASK);
 	}
 
+	/* If access is blocked return success to avoid additional
+	*  error handling at client side
+	*/
+	if (ret == -EACCES) {
+		dev_warn(chc.dev, "IPC blocked due to unsigned kernel/invalid battery\n");
+		ret = 0;
+	}
+
 	return ret;
 }
 
@@ -760,6 +775,14 @@ int pmic_enable_charging(bool enable)
 
 	ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
 			val, CHGRCTRL0_EXTCHRDIS_MASK);
+	/* If access is blocked return success to avoid additional
+	*  error handling at client side
+	*/
+	if (ret == -EACCES) {
+		dev_warn(chc.dev, "IPC blocked due to unsigned kernel/invalid battery\n");
+		ret = 0;
+	}
+
 	return ret;
 }
 
@@ -884,12 +907,23 @@ int pmic_set_cv(int new_cv)
 int pmic_set_ilimmA(int ilim_mA)
 {
 	u8 reg_val;
+	int ret;
 
 	lookup_regval(pmic_inlmt, ARRAY_SIZE(pmic_inlmt),
 			ilim_mA, &reg_val);
 	dev_dbg(chc.dev, "Setting inlmt %d in register %x=%x\n", ilim_mA,
 		CHGRCTRL1_ADDR, reg_val);
-	return intel_scu_ipc_iowrite8(CHGRCTRL1_ADDR, reg_val);
+	ret = intel_scu_ipc_iowrite8(CHGRCTRL1_ADDR, reg_val);
+
+	/* If access is blocked return success to avoid additional
+	*  error handling at client side
+	*/
+	if (ret == -EACCES) {
+		dev_warn(chc.dev, "IPC blocked due to unsigned kernel/invalid battery\n");
+		ret = 0;
+	}
+
+	return ret;
 }
 
 /**
@@ -1605,13 +1639,8 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 				chc.sfi_bcprof->batt_prof);
 		print_ps_pse_mod_prof(chc.actual_bcprof);
 		retval = pmic_init();
-		if (retval) {
-			dev_err(chc.dev, "Error in Initializing PMIC\n");
-			kfree(chc.sfi_bcprof);
-			kfree(chc.actual_bcprof);
-			kfree(chc.runtime_bcprof);
-			return retval;
-		}
+		if (retval)
+			dev_err(chc.dev, "Error in Initializing PMIC. Continue in h/w charging mode\n");
 
 		memcpy(chc.runtime_bcprof, chc.actual_bcprof,
 			sizeof(struct ps_pse_mod_prof));
