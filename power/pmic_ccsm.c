@@ -1310,12 +1310,6 @@ static int pmic_init(void)
 	u8 reg_val;
 	struct ps_pse_mod_prof *bcprof = chc.actual_bcprof;
 
-	ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR, SWCONTROL_ENABLE,
-			CHGRCTRL0_SWCONTROL_MASK);
-	if (ret) {
-		dev_err(chc.dev, "Error enabling sw control!!\n");
-		return ret;
-	}
 
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
 			BATT_TEMP_NR_RNG);
@@ -1645,6 +1639,12 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 		memcpy(chc.runtime_bcprof, chc.actual_bcprof,
 			sizeof(struct ps_pse_mod_prof));
 	}
+
+	retval = intel_scu_ipc_update_register(CHGRCTRL0_ADDR, SWCONTROL_ENABLE,
+			CHGRCTRL0_SWCONTROL_MASK);
+	if (retval)
+		dev_err(chc.dev, "Error enabling sw control. Charging may continue in h/w control mode\n");
+
 	chc.pmic_intr_iomap = ioremap_nocache(PMIC_SRAM_INTR_ADDR, 8);
 	if (!chc.pmic_intr_iomap) {
 		dev_err(&pdev->dev, "ioremap Failed\n");
