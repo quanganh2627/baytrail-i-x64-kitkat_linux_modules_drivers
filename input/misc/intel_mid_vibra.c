@@ -35,6 +35,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/lnw_gpio.h>
 #include <linux/input/intel_mid_vibra.h>
+#include <trace/events/power.h>
 #include "mid_vibra.h"
 
 union sst_pwmctrl_reg {
@@ -146,6 +147,7 @@ static int vibra_soc_pwm_configure(struct vibra_info *info, bool enable)
 static void vibra_drv2605_enable(struct vibra_info *info)
 {
 	pr_debug("%s: Enable", __func__);
+	trace_vibrator(1);
 	mutex_lock(&info->lock);
 	pm_runtime_get_sync(info->dev);
 
@@ -165,6 +167,7 @@ static void vibra_drv2605_enable(struct vibra_info *info)
 static void vibra_disable(struct vibra_info *info)
 {
 	pr_debug("%s: Disable", __func__);
+	trace_vibrator(0);
 	mutex_lock(&info->lock);
 	gpio_set_value_cansleep(info->gpio_en, 0);
 	info->enabled = false;
@@ -176,6 +179,7 @@ static void vibra_disable(struct vibra_info *info)
 static void vibra_drv8601_enable(struct vibra_info *info)
 {
 	pr_debug("%s: Enable", __func__);
+	trace_vibrator(1);
 	mutex_lock(&info->lock);
 	pm_runtime_get_sync(info->dev);
 	info->pwm_configure(info, true);
