@@ -577,6 +577,9 @@ static unsigned int mdm_ctrl_dev_poll(struct file *filep,
 		ret |= POLLHUP | POLLRDNORM;
 		pr_info(DRVNAME ": POLLHUP occured. Current state = 0x%x\r\n",
 			mdm_ctrl_get_state(drv));
+#ifdef CONFIG_HAS_WAKELOCK
+		wake_unlock(&drv->stay_awake);
+#endif
 	}
 
 	return ret;
@@ -645,6 +648,11 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 		ret = -EIO;
 		goto free_drv;
 	}
+
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock_init(&new_drv->stay_awake, WAKE_LOCK_SUSPEND,
+		       "mcd_wakelock");
+#endif
 
 	/* Register the device */
 	ret = alloc_chrdev_region(&new_drv->tdev, 0, 1, MDM_BOOT_DEVNAME);
@@ -746,6 +754,9 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 
  free_hu_wq:
 	destroy_workqueue(new_drv->hu_wq);
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock_destroy(&new_drv->stay_awake);
+#endif
 
  free_drv:
 	kfree(new_drv);
@@ -767,6 +778,9 @@ static int mdm_ctrl_module_remove(struct platform_device *pdev)
 
 	/* Delete the modem hangup worqueue */
 	destroy_workqueue(mdm_drv->hu_wq);
+#ifdef CONFIG_HAS_WAKELOCK
+	wake_lock_destroy(&mdm_drv->stay_awake);
+#endif
 
 	/* Unregister the device */
 	device_destroy(mdm_drv->class, mdm_drv->tdev);

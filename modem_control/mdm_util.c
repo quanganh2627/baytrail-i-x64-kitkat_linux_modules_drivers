@@ -184,7 +184,7 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 
 /**
  *  mdm_ctrl_set_state -  Effectively sets the modem state on work execution
- *  @work: Reference to the work structure
+ *  @state : New state to set
  *
  */
 inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
@@ -198,6 +198,12 @@ inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
 		/* Waking up the poll work queue */
 		wake_up(&drv->wait_wq);
 		pr_info(DRVNAME ": Waking up polling 0x%x\r\n", state);
+#ifdef CONFIG_HAS_WAKELOCK
+		/* Grab the wakelock for 10 ms to avoid
+		   the system going to sleep */
+		if (drv->opened)
+			wake_lock_timeout(&drv->stay_awake, msecs_to_jiffies(10));
+#endif
 
 	}
 }
