@@ -3507,6 +3507,7 @@ static const struct i2c_device_id mxt_id[] = {
 	{ "atmel_mxt_tp", 0 },
 	{ "atmel_mxt_mxt1664S", 0 },
 	{ "mXT224", 0 },
+	{ "ATML1000", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, mxt_id);
