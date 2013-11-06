@@ -296,9 +296,9 @@ static void psh_remove(struct pci_dev *pdev)
 
 	hwmon_device_unregister(plt_priv->hwmon_dev);
 
-	kfree(plt_priv);
-
 	__free_pages(plt_priv->pg, get_order(BUF_IA_DDR_SIZE));
+
+	kfree(plt_priv);
 
 	psh_ia_common_deinit(&pdev->dev);
 
