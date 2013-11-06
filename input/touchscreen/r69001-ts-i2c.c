@@ -381,7 +381,7 @@ static int r69001_ts_dbgfs_show(struct seq_file *seq, void *unused)
 	if (!ts)
 		return -EFAULT;
 
-	if (ts->data.mode.mode > MODE_COUNT)
+	if (ts->data.mode.mode >= MODE_COUNT)
 		return -EFAULT;
 
 	seq_printf(seq, "%s\n", r69001_ts_modes[ts->data.mode.mode]);
