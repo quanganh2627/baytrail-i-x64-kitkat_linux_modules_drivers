@@ -23,6 +23,7 @@
 #ifdef CONFIG_ACPI
 static const struct acpi_device_id hsu_acpi_ids[] = {
 	{ "80860F0A", 0 },
+	{ "8086228A", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(acpi, hsu_acpi_ids);

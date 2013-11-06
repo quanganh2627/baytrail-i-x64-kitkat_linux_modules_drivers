@@ -20,10 +20,16 @@ int acpi_create_platform_device(struct acpi_device *adev,
 ACPI_MODULE_NAME("acpi_mid_lpss");
 
 static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
-	/* MID LPSS I2C controller*/
+	/* Mid LPSS devices*/
+	/* BYT I2C */
 	{ "80860F41" },
-	/* MID LPSS HSU controller*/
+	/* BYT HSU */
 	{ "80860F0A" },
+	/* CHT I2C */
+	{ "808622C1" },
+	/* CHT HSU */
+	{ "8086228A" },
+
 	{ }
 };
 

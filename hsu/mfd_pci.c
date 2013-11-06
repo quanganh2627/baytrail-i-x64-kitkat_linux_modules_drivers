@@ -124,6 +124,9 @@ DEFINE_PCI_DEVICE_TABLE(hsuart_port_pci_ids) = {
 	/* VLV2 support */
 	{ PCI_VDEVICE(INTEL, 0x0F0A), hsu_port0 },
 	{ PCI_VDEVICE(INTEL, 0x0F0C), hsu_port1 },
+	/* CHV support */
+	{ PCI_VDEVICE(INTEL, 0x228A), hsu_port0 },
+	{ PCI_VDEVICE(INTEL, 0x228C), hsu_port1 },
 	{},
 };
 
