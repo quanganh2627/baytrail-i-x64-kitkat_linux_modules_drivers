@@ -119,6 +119,10 @@ int do_setup_ddr(struct device *dev)
 		.cmd_id = CMD_SETUP_DDR,
 		.sensor_id = 0,
 		};
+	static int fw_load_done;
+
+	if (fw_load_done)
+		return 0;
 
 #ifdef VPROG2_SENSOR
 	intel_scu_ipc_msic_vprog2(1);
@@ -146,6 +150,7 @@ int do_setup_ddr(struct device *dev)
 			ia_data->load_in_progress = 1;
 			wait_for_completion_timeout(&ia_data->cmd_load_comp,
 					3 * HZ);
+			fw_load_done = 1;
 		}
 		release_firmware(fw_entry);
 	}
