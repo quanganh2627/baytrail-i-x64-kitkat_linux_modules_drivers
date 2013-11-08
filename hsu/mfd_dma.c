@@ -503,9 +503,10 @@ struct hsu_dma_ops dw_dma_ops = {
 	.stop_rx =	dw_dma_stop_rx,
 };
 
-#else
-struct hsu_dma_ops dw_dma_ops;
+struct hsu_dma_ops *pdw_dma_ops = &dw_dma_ops;
 
+#else
+struct hsu_dma_ops *pdw_dma_ops = NULL;
 #endif
 
 /* Intel DMA ops */

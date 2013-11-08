@@ -94,11 +94,13 @@
 #define VWARNB_VOLT_THRES	VWARNB_THRES
 #define VCRIT_VOLT_THRES	VWARNCRIT_THRES
 
-#define SBCUCTRL_CLEAR_ASSERT	0x02
-#define SBCUCTRL_STICKY_WARNB	0x04
-#define SBCUCTRL_STICKY_WARNA	0x08
+#define SBCUDISCRIT_MASK	0x02
+#define SBCUDISB_MASK		0x04
+#define SBCUDISA_MASK		0x08
+#define SPROCHOT_B_MASK		0x01
 
-#define IRQLVL1MSK		0x021
+/* bcu control pin status register set */
+#define SBCUCTRL_SET		0x0F
 
 /* BCUIRQ register settings */
 #define VCRIT_IRQ		(1 << 2)
@@ -127,7 +129,6 @@
 
 /* check whether bit is sticky or not by checking 3rd bit */
 #define IS_STICKY(data)		(data & 0x04)
-#define MASK_VCRIT		0x04
 
 #define SET_ACTION_MASK(data, value, bit) (data | (value << bit))
 
@@ -144,10 +145,13 @@
 #define MAX_VOLTAGE             3300
 #define MIN_VOLTAGE             2600
 
-/* mask to clear interrupt bit*/
-#define BCUIRQ_CLEARCRIT        0X04
-#define BCUIRQ_CLEARA           0x02
-#define BCUIRQ_CLEARB           0x01
+/* mask level 2 interrupt register set */
+#define MBCUIRQ_SET		0x07
+
+/* interrupt bit masks for MBCUIRQ reg*/
+#define VCRIT_MASK		0x04
+#define VWARNA_MASK		0x02
+#define VWARNB_MASK		0x01
 
 /* default values for register configuration */
 #define INIT_VWARNA		(VWARNA_VOLT_THRES | DEBOUNCE | VCOMP_ENABLE)
@@ -527,16 +531,32 @@ static ssize_t show_camflash_ctrl(struct device *dev,
 
 static void unmask_theburst(struct work_struct *work)
 {
+	int ret;
+	uint8_t irq_data;
 	struct delayed_work *dwork = to_delayed_work(work);
 	struct vdd_info *vinfo = container_of(dwork, struct vdd_info,
 				 vdd_intr_dwork);
 	if (pdata->is_clvp) {
 		intel_scu_ipc_update_register(MBCUIRQ,
-				~MASK_VCRIT, MASK_VCRIT);
+				~MBCUIRQ_SET, VCRIT_MASK);
 		vinfo->seed_time = jiffies_64;
 	} else {
 		intel_scu_ipc_update_register(MBCUIRQ,
-				~BCUIRQ_CLEARA, BCUIRQ_CLEARA);
+				~MBCUIRQ_SET, VWARNA_MASK);
+		ret = intel_scu_ipc_ioread8(SBCUIRQ, &irq_data);
+		if (ret) {
+			dev_warn(&vinfo->pdev->dev,
+				"Read VSYS flag failed\n");
+		} else {
+			/* Clear the BCUDISA and PROCHOT_B signal
+			 * if Vsys is above VWARNA threshold.
+			 */
+			if (!(irq_data & SVWARNA))
+				intel_scu_ipc_update_register(SBCUCTRL,
+					SBCUCTRL_SET, SBCUDISA_MASK);
+				intel_scu_ipc_update_register(SBCUCTRL,
+					SBCUCTRL_SET, SPROCHOT_B_MASK);
+		}
 	}
 }
 
@@ -550,7 +570,7 @@ static void handle_events(int flag, void *dev_data)
 {
 	uint8_t irq_data, sticky_data;
 	struct vdd_info *vinfo = (struct vdd_info *)dev_data;
-	char *bcu_envp[2] = {NULL,};
+	char *bcu_envp[2] = {NULL};
 	int ret;
 
 	ret = intel_scu_ipc_ioread8(SBCUIRQ, &irq_data);
@@ -561,6 +581,16 @@ static void handle_events(int flag, void *dev_data)
 	case VCRIT_EVENT:
 		pr_info_ratelimited("%s: VCRIT_EVENT occurred\n",
 					DRIVER_NAME);
+		if (!pdata->is_clvp) {
+			bcu_envp[0] = GET_ENVP(VCRIT);
+
+			/* Masking VCRIT after one event occurs */
+			ret = intel_scu_ipc_update_register(MBCUIRQ,
+					MBCUIRQ_SET, VCRIT_MASK);
+			if (ret)
+				dev_err(&vinfo->pdev->dev,
+					"VCRIT mask failed\n");
+		}
 		if (vinfo->seed_time && time_before((unsigned long)(jiffies_64 -
 			vinfo->seed_time), (unsigned long)
 			msecs_to_jiffies(STEP_TIME))) {
@@ -570,7 +600,7 @@ static void handle_events(int flag, void *dev_data)
 		}
 		if (bcu_workqueue) {
 			ret = intel_scu_ipc_update_register(MBCUIRQ,
-				MASK_VCRIT, MASK_VCRIT);
+				MBCUIRQ_SET, VCRIT_MASK);
 			if (ret) {
 				dev_err(&vinfo->pdev->dev,
 				"VCRIT mask failed\n");
@@ -598,26 +628,29 @@ static void handle_events(int flag, void *dev_data)
 				 * automatically in case sticky bit is set.
 				 */
 				ret = intel_scu_ipc_update_register(SBCUCTRL,
-					(1 << 1), SBCUCTRL_CLEAR_ASSERT);
+						SBCUCTRL_SET, SBCUDISCRIT_MASK);
 				if (ret)
 					goto handle_ipc_fail;
-			}
-		} else {
-			bcu_envp[0] = GET_ENVP(VCRIT);
-			bcu_envp[1] = NULL;
-			/* Masking VCRIT after one event occurs */
-			if (!pdata->is_clvp) {
-				ret = intel_scu_ipc_update_register(MBCUIRQ,
-						MASK_VCRIT, MASK_VCRIT);
-				if (ret)
-					dev_err(&vinfo->pdev->dev,
-						"VCRIT mask failed\n");
 			}
 		}
 		break;
 	case VWARNB_EVENT:
 		pr_info_ratelimited("%s: VWARNB_EVENT occurred\n",
 					DRIVER_NAME);
+		if (!pdata->is_clvp) {
+			bcu_envp[0] = GET_ENVP(VWARN2);
+
+			ret = intel_scu_ipc_update_register(MBCUIRQ,
+					MBCUIRQ_SET, VWARNB_MASK);
+			if (ret)
+				dev_err(&vinfo->pdev->dev,
+					"VWARNB mask failed\n");
+
+			/* No need to process further for byt, as user-space
+			 * initiates a graceful shutdown on VWARNB
+			 */
+			break;
+		}
 		if (!(irq_data & SVWARNB)) {
 			/* Vsys is above WARNB level */
 			intel_scu_ipc_ioread8(BCUDISB_BEH, &sticky_data);
@@ -630,25 +663,32 @@ static void handle_events(int flag, void *dev_data)
 				 * in case sticky bit is set.
 				 */
 				ret = intel_scu_ipc_update_register(SBCUCTRL,
-					(1 << 2), SBCUCTRL_STICKY_WARNB);
+						SBCUCTRL_SET, SBCUDISB_MASK);
 				if (ret)
 					goto handle_ipc_fail;
-			}
-		} else {
-			bcu_envp[0] = GET_ENVP(VWARN2);
-			bcu_envp[1] = NULL;
-			if (!pdata->is_clvp) {
-				ret = intel_scu_ipc_update_register(MBCUIRQ,
-						BCUIRQ_CLEARB, BCUIRQ_CLEARB);
-				if (ret)
-					dev_err(&vinfo->pdev->dev,
-						"VWARNB mask failed\n");
 			}
 		}
 		break;
 	case VWARNA_EVENT:
 		pr_info_ratelimited("%s: VWARNA_EVENT occurred\n",
 					DRIVER_NAME);
+		if (!pdata->is_clvp && bcu_workqueue) {
+			bcu_envp[0] = GET_ENVP(VWARN1);
+
+			ret = intel_scu_ipc_update_register(MBCUIRQ,
+					MBCUIRQ_SET, VWARNA_MASK);
+			if (ret) {
+				dev_err(&vinfo->pdev->dev,
+					"VWARNA mask failed\n");
+			} else {
+				/* Schedule to unmask after
+				 * 30 seconds
+				 */
+				queue_delayed_work(bcu_workqueue,
+					&vinfo->vdd_intr_dwork,
+					VWARNA_INTR_EN_DELAY);
+			}
+		}
 		if (!(irq_data & SVWARNA)) {
 			/* Vsys is above WARNA level */
 			intel_scu_ipc_ioread8(BCUDISA_BEH, &sticky_data);
@@ -661,28 +701,9 @@ static void handle_events(int flag, void *dev_data)
 				 * in case sticky bit is set.
 				 */
 				ret = intel_scu_ipc_update_register(SBCUCTRL,
-					(1 << 3), SBCUCTRL_STICKY_WARNA);
+						SBCUCTRL_SET, SBCUDISA_MASK);
 				if (ret)
 					goto handle_ipc_fail;
-			}
-		} else {
-			bcu_envp[0] = GET_ENVP(VWARN1);
-			bcu_envp[1] = NULL;
-
-			if (!pdata->is_clvp && bcu_workqueue) {
-				ret = intel_scu_ipc_update_register(
-					MBCUIRQ, BCUIRQ_CLEARA, BCUIRQ_CLEARA);
-				if (ret) {
-					dev_err(&vinfo->pdev->dev,
-						"VWARNA mask failed\n");
-				} else {
-					/* Schedule to unmask after
-					 * 30 seconds
-					 */
-					queue_delayed_work(bcu_workqueue,
-						&vinfo->vdd_intr_dwork,
-						VWARNA_INTR_EN_DELAY);
-				}
 			}
 		}
 		break;

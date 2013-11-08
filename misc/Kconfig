@@ -40,3 +40,4 @@ config SENSORS_APDS990X_FORK
 
 source "../modules/drivers/misc/bcm-lpm/Kconfig"
 source "../modules/drivers/misc/ti-st/Kconfig"
+source "../modules/drivers/misc/tp2l/Kconfig"

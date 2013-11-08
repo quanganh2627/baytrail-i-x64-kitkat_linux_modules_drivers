@@ -16,3 +16,4 @@ obj-$(CONFIG_STAGING)		+= staging/
 obj-y               		+= hsu/
 obj-y               		+= mfd/
 obj-$(CONFIG_WATCHDOG)		+= watchdog/
+obj-$(CONFIG_ACPI)		+= acpi/

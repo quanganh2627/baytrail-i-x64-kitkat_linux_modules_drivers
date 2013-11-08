@@ -7,3 +7,4 @@ obj-y                           += ti-st/
 obj-$(CONFIG_UUID)		+= uuid.o
 obj-$(CONFIG_EMMC_IPANIC)	+= emmc_ipanic.o
 obj-$(CONFIG_SENSORS_APDS990X_FORK) += apds990x.o
+obj-y                           += tp2l/

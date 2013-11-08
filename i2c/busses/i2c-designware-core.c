@@ -25,6 +25,8 @@
  * ----------------------------------------------------------------------------
  *
  */
+#include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/clk.h>
 #include <linux/errno.h>
 #include <linux/err.h>
@@ -35,7 +37,19 @@
 #include <linux/nmi.h>
 #include <linux/delay.h>
 #include <linux/semaphore.h>
+#include <linux/slab.h>
+#include <linux/fs.h>
+#include <linux/acpi.h>
 #include "i2c-designware-core.h"
+
+int i2c_dw_init(struct dw_i2c_dev *dev);
+int i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num);
+u32 i2c_dw_func(struct i2c_adapter *adap);
+void i2c_dw_enable(struct dw_i2c_dev *dev);
+void i2c_dw_disable(struct dw_i2c_dev *dev);
+irqreturn_t i2c_dw_isr(int this_irq, void *dev_id);
+void i2c_dw_disable_int(struct dw_i2c_dev *dev);
+void i2c_dw_clear_int(struct dw_i2c_dev *dev);
 
 static char *abort_sources[] = {
 	[ABRT_7B_ADDR_NOACK] =
@@ -121,6 +135,593 @@ static void i2c_dw_dump(struct dw_i2c_dev *dev)
 	dev_err(dev->dev, "DW_IC_DATA_CMD:          0x%x\n", value);
 	dev_err(dev->dev, "===============================\n");
 }
+
+/* VLV2 PCI config space memio access to the controller is
+* enabled by
+* 1. Reset 0x804 and 0x808 offset from base address.
+* 2. Set 0x804 offset from base address to 0x3.
+*/
+static void vlv2_reset(struct dw_i2c_dev *dev)
+{
+	int i;
+
+	for (i = 0; i < 10; i++) {
+		dw_writel(dev, 0, 0x804);
+		dw_writel(dev, 0, 0x808);
+		usleep_range(10, 100);
+
+		dw_writel(dev, 3, 0x804);
+		usleep_range(10, 100);
+
+		if (dw_readl(dev, DW_IC_COMP_TYPE) != DW_IC_COMP_TYPE_VALUE)
+			continue;
+
+		return;
+	}
+
+	dev_warn(dev->dev, "vlv2 I2C reset failed\n");
+}
+
+static int mfld_i2c_scl_cfg(struct dw_i2c_dev *dev)
+{
+	dw_writel(dev, PNW_SS_SCLK_HCNT, DW_IC_SS_SCL_HCNT);
+	dw_writel(dev, PNW_SS_SCLK_LCNT, DW_IC_SS_SCL_LCNT);
+
+	dw_writel(dev, PNW_FS_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+	dw_writel(dev, PNW_FS_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+
+	return 0;
+}
+
+static int ctp_i2c_scl_cfg(struct dw_i2c_dev *dev)
+{
+	dw_writel(dev, CLV_SS_SCLK_HCNT, DW_IC_SS_SCL_HCNT);
+	dw_writel(dev, CLV_SS_SCLK_LCNT, DW_IC_SS_SCL_LCNT);
+
+	dw_writel(dev, CLV_FS_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+	dw_writel(dev, CLV_FS_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+
+	return 0;
+}
+
+static int merr_i2c_scl_cfg(struct dw_i2c_dev *dev)
+{
+	dw_writel(dev, MERR_SS_SCLK_HCNT, DW_IC_SS_SCL_HCNT);
+	dw_writel(dev, MERR_SS_SCLK_LCNT, DW_IC_SS_SCL_LCNT);
+
+	dw_writel(dev, MERR_FS_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+	dw_writel(dev, MERR_FS_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+
+	dw_writel(dev, MERR_HS_SCLK_HCNT, DW_IC_HS_SCL_HCNT);
+	dw_writel(dev, MERR_HS_SCLK_LCNT, DW_IC_HS_SCL_LCNT);
+
+	return 0;
+}
+
+static int vlv2_i2c_scl_cfg(struct dw_i2c_dev *dev)
+{
+	dw_writel(dev, VLV2_SS_SCLK_HCNT, DW_IC_SS_SCL_HCNT);
+	dw_writel(dev, VLV2_SS_SCLK_LCNT, DW_IC_SS_SCL_LCNT);
+
+	dw_writel(dev, VLV2_FS_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+	dw_writel(dev, VLV2_FS_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+
+	dw_writel(dev, VLV2_HS_SCLK_HCNT, DW_IC_HS_SCL_HCNT);
+	dw_writel(dev, VLV2_HS_SCLK_LCNT, DW_IC_HS_SCL_LCNT);
+
+	return 0;
+}
+
+static struct  dw_controller  dw_controllers[] = {
+	[moorestown_0] = {
+		.bus_num     = 0,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 32,
+		.rx_fifo_depth = 32,
+		.clk_khz      = 25000,
+	},
+	[moorestown_1] = {
+		.bus_num     = 1,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 32,
+		.rx_fifo_depth = 32,
+		.clk_khz      = 25000,
+	},
+	[moorestown_2] = {
+		.bus_num     = 2,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 32,
+		.rx_fifo_depth = 32,
+		.clk_khz      = 25000,
+	},
+	[medfield_0] = {
+		.bus_num     = 0,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = mfld_i2c_scl_cfg,
+	},
+	[medfield_1] = {
+		.bus_num     = 1,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_STD,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 20500,
+		.scl_cfg = mfld_i2c_scl_cfg,
+	},
+	[medfield_2] = {
+		.bus_num     = 2,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = mfld_i2c_scl_cfg,
+	},
+	[medfield_3] = {
+		.bus_num     = 3,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_STD,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 20500,
+		.scl_cfg = mfld_i2c_scl_cfg,
+	},
+	[medfield_4] = {
+		.bus_num     = 4,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = mfld_i2c_scl_cfg,
+	},
+	[medfield_5] = {
+		.bus_num     = 5,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = mfld_i2c_scl_cfg,
+	},
+
+	[cloverview_0] = {
+		.bus_num     = 0,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = ctp_i2c_scl_cfg,
+	},
+	[cloverview_1] = {
+		.bus_num     = 1,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = ctp_i2c_scl_cfg,
+	},
+	[cloverview_2] = {
+		.bus_num     = 2,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = ctp_i2c_scl_cfg,
+	},
+	[cloverview_3] = {
+		.bus_num     = 3,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_STD,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 20500,
+		.scl_cfg = ctp_i2c_scl_cfg,
+	},
+	[cloverview_4] = {
+		.bus_num     = 4,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = ctp_i2c_scl_cfg,
+	},
+	[cloverview_5] = {
+		.bus_num     = 5,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 256,
+		.rx_fifo_depth = 256,
+		.clk_khz      = 17000,
+		.scl_cfg = ctp_i2c_scl_cfg,
+	},
+
+	[merrifield_0] = {
+		.bus_num     = 1,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = merr_i2c_scl_cfg,
+	},
+	[merrifield_1] = {
+		.bus_num     = 2,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_STD,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = merr_i2c_scl_cfg,
+	},
+	[merrifield_2] = {
+		.bus_num     = 3,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = merr_i2c_scl_cfg,
+	},
+	[merrifield_3] = {
+		.bus_num     = 4,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = merr_i2c_scl_cfg,
+	},
+	[merrifield_4] = {
+		.bus_num     = 5,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = merr_i2c_scl_cfg,
+	},
+	[merrifield_5] = {
+		.bus_num     = 6,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = merr_i2c_scl_cfg,
+	},
+	[merrifield_6] = {
+		.bus_num     = 7,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = merr_i2c_scl_cfg,
+	},
+	[valleyview_0] = {
+		.bus_num     = 1,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = vlv2_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C1"
+	},
+	[valleyview_1] = {
+		.bus_num     = 2,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = vlv2_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C2"
+	},
+	[valleyview_2] = {
+		.bus_num     = 3,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = vlv2_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C3"
+	},
+	[valleyview_3] = {
+		.bus_num     = 4,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = vlv2_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+	},
+	[valleyview_4] = {
+		.bus_num     = 5,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = vlv2_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C5"
+	},
+	[valleyview_5] = {
+		.bus_num     = 6,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = vlv2_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C6"
+	},
+	[valleyview_6] = {
+		.bus_num     = 7,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.tx_fifo_depth = 64,
+		.rx_fifo_depth = 64,
+		.enable_stop = 1,
+		.scl_cfg = vlv2_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C7"
+	}
+};
+
+static struct i2c_algorithm i2c_dw_algo = {
+	.master_xfer	= i2c_dw_xfer,
+	.functionality	= i2c_dw_func,
+};
+
+int i2c_dw_suspend(struct dw_i2c_dev *dev, bool runtime)
+{
+	if (runtime)
+		i2c_dw_disable(dev);
+	else {
+		if (down_trylock(&dev->lock))
+			return -EBUSY;
+		i2c_dw_disable(dev);
+		dev->status &= ~STATUS_POWERON;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(i2c_dw_suspend);
+
+int i2c_dw_resume(struct dw_i2c_dev *dev, bool runtime)
+{
+	i2c_dw_init(dev);
+	if (!runtime) {
+		dev->status |= STATUS_POWERON;
+		up(&dev->lock);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(i2c_dw_resume);
+
+static u32 i2c_dw_get_clk_rate_khz(struct dw_i2c_dev *dev)
+{
+	return dev->controller->clk_khz;
+}
+
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
+static ssize_t show_bus_num(struct device *dev, struct device_attribute *attr,
+							char *buf)
+{
+	struct dw_i2c_dev *i2c = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", i2c->controller->bus_num);
+}
+
+#define MODE_NAME_SIZE	10
+
+static ssize_t store_mode(struct device *dev,
+			  struct device_attribute *attr,
+			  const char *buf, size_t size)
+{
+	struct dw_i2c_dev *i2c = dev_get_drvdata(dev);
+	int ret = 0;
+	char mode[MODE_NAME_SIZE];
+
+	if (sscanf(buf, "%9s", mode) != 1) {
+		dev_err(dev, "input I2C speed mode: std/fast\n");
+		return -EINVAL;
+	}
+
+	down(&i2c->lock);
+	pm_runtime_get_sync(i2c->dev);
+
+	if (!strncmp("std", mode, MODE_NAME_SIZE)) {
+		i2c->master_cfg &= ~DW_IC_SPEED_MASK;
+		i2c->master_cfg |= DW_IC_CON_SPEED_STD;
+	} else if (!strncmp("fast", mode, MODE_NAME_SIZE)) {
+		i2c->master_cfg &= ~DW_IC_SPEED_MASK;
+		i2c->master_cfg |= DW_IC_CON_SPEED_FAST;
+	} else if (!strncmp("high", mode, MODE_NAME_SIZE)) {
+		i2c->master_cfg &= ~DW_IC_SPEED_MASK;
+		i2c->master_cfg |= DW_IC_CON_SPEED_HIGH;
+	} else {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	/* init to configure the i2c master */
+	i2c_dw_init(i2c);
+
+	dev_info(dev, "I2C speed mode changed to %s\n", mode);
+
+out:
+	pm_runtime_mark_last_busy(i2c->dev);
+	pm_runtime_put_autosuspend(i2c->dev);
+	up(&i2c->lock);
+
+	return (ret < 0) ? ret : size;
+}
+
+static ssize_t show_mode(struct device *dev,
+			 struct device_attribute *attr,
+			 char *buf)
+{
+	struct dw_i2c_dev *i2c = dev_get_drvdata(dev);
+	int ret;
+
+	switch (i2c->master_cfg & DW_IC_SPEED_MASK) {
+	case DW_IC_CON_SPEED_STD:
+		ret = snprintf(buf, PAGE_SIZE, "%s\n", "std");
+		break;
+	case DW_IC_CON_SPEED_FAST:
+		ret = snprintf(buf, PAGE_SIZE, "%s\n", "fast");
+		break;
+	case DW_IC_CON_SPEED_HIGH:
+		ret = snprintf(buf, PAGE_SIZE, "%s\n", "high");
+		break;
+	default:
+		ret = snprintf(buf, PAGE_SIZE, "%s\n", "Not Supported\n");
+		break;
+	}
+
+	return ret;
+}
+
+static DEVICE_ATTR(bus_num, S_IRUGO, show_bus_num, NULL);
+static DEVICE_ATTR(mode, S_IRUGO | S_IWUSR, show_mode, store_mode);
+
+static struct attribute *i2c_dw_attrs[] = {
+	&dev_attr_bus_num.attr,
+	&dev_attr_mode.attr,
+	NULL,
+};
+
+static struct attribute_group i2c_dw_attr_group = {
+	.name = "i2c_dw_sysnode",
+	.attrs = i2c_dw_attrs,
+};
+#endif
+
+struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
+	unsigned long start, unsigned long len, int irq)
+{
+	struct dw_i2c_dev *dev;
+	struct i2c_adapter *adap;
+	void __iomem *base;
+	struct  dw_controller *controller;
+	int r;
+
+	if (bus_idx >= ARRAY_SIZE(dw_controllers)) {
+		dev_err(pdev, "invalid bus index %d\n",
+			bus_idx);
+		r = -EINVAL;
+		goto exit;
+	}
+
+	controller = &dw_controllers[bus_idx];
+
+	base = ioremap_nocache(start, len);
+	if (!base) {
+		dev_err(pdev, "I/O memory remapping failed\n");
+		r = -ENOMEM;
+		goto exit;
+	}
+
+	dev = kzalloc(sizeof(struct dw_i2c_dev), GFP_KERNEL);
+	if (!dev) {
+		r = -ENOMEM;
+		goto err_iounmap;
+	}
+
+	init_completion(&dev->cmd_complete);
+	sema_init(&dev->lock, 1);
+	dev->status = STATUS_IDLE;
+	dev->clk = NULL;
+	dev->controller = controller;
+	dev->get_clk_rate_khz = i2c_dw_get_clk_rate_khz;
+	dev->base = base;
+	dev->dev = get_device(pdev);
+	dev->functionality =
+		I2C_FUNC_I2C |
+		I2C_FUNC_SMBUS_BYTE |
+		I2C_FUNC_SMBUS_BYTE_DATA |
+		I2C_FUNC_SMBUS_WORD_DATA |
+		I2C_FUNC_SMBUS_I2C_BLOCK;
+	dev->master_cfg =  controller->bus_cfg;
+	dev->get_scl_cfg = controller->scl_cfg;
+	dev->enable_stop = controller->enable_stop;
+	dev->clk_khz = controller->clk_khz;
+	dev->speed_cfg = dev->master_cfg & DW_IC_SPEED_MASK;
+	dev->use_dyn_clk = 0;
+	dev->reset = controller->reset;
+	dev->irq = irq;
+	dev->share_irq = controller->share_irq;
+	dev->abort = intel_mid_dw_i2c_abort;
+	dev->tx_fifo_depth = controller->tx_fifo_depth;
+	dev->rx_fifo_depth = controller->rx_fifo_depth;
+
+	r = i2c_dw_init(dev);
+	if (r)
+		goto err_kfree;
+
+	adap = &dev->adapter;
+	i2c_set_adapdata(adap, dev);
+	adap->owner = THIS_MODULE;
+	adap->class = 0;
+	adap->algo = &i2c_dw_algo;
+	adap->dev.parent = pdev;
+	adap->nr = controller->bus_num;
+	snprintf(adap->name, sizeof(adap->name), "i2c-designware-%d",
+		adap->nr);
+
+	r = request_irq(irq, i2c_dw_isr, IRQF_SHARED, adap->name, dev);
+	if (r) {
+		dev_err(pdev, "failure requesting irq %i\n", irq);
+		goto err_kfree;
+	}
+
+	i2c_dw_disable_int(dev);
+	i2c_dw_clear_int(dev);
+	r = i2c_add_numbered_adapter(adap);
+	if (r) {
+		dev_err(pdev, "failure adding adapter\n");
+		goto err_free_irq;
+	}
+
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
+	r = sysfs_create_group(&pdev->kobj, &i2c_dw_attr_group);
+	if (r) {
+		dev_err(pdev,
+			"Unable to export sysfs interface, error: %d\n", r);
+		goto err_del_adap;
+	}
+#endif
+
+	return dev;
+
+err_del_adap:
+	i2c_del_adapter(&dev->adapter);
+err_free_irq:
+	free_irq(irq, dev);
+err_kfree:
+	put_device(pdev);
+	kfree(dev);
+err_iounmap:
+	iounmap(base);
+exit:
+	return ERR_PTR(r);
+}
+EXPORT_SYMBOL(i2c_dw_setup);
+
+void i2c_dw_free(struct device *pdev, struct dw_i2c_dev *dev)
+{
+	i2c_dw_disable(dev);
+
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
+	sysfs_remove_group(&pdev->kobj, &i2c_dw_attr_group);
+#endif
+
+	i2c_del_adapter(&dev->adapter);
+	put_device(pdev);
+	free_irq(dev->irq, dev);
+	kfree(dev);
+}
+EXPORT_SYMBOL(i2c_dw_free);
 
 static u32
 i2c_dw_scl_hcnt(u32 ic_clk, u32 tSYMBOL, u32 tf, int cond, int offset)
@@ -256,6 +857,7 @@ int i2c_dw_init(struct dw_i2c_dev *dev)
 
 	return 0;
 }
+EXPORT_SYMBOL(i2c_dw_init);
 
 /*
  * Waiting for bus not busy
@@ -315,7 +917,6 @@ i2c_dw_xfer_msg(struct dw_i2c_dev *dev)
 	u32 intr_mask;
 	int tx_limit, rx_limit;
 	int cmd;
-	int rx_tl;
 	u32 addr = msgs[dev->msg_write_idx].addr;
 	u32 buf_len = dev->tx_buf_len;
 	u8 *buf = dev->tx_buf;

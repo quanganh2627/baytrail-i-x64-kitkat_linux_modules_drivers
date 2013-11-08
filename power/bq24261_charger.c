@@ -1791,6 +1791,8 @@ static int bq24261_suspend(struct device *dev)
 {
 	struct bq24261_charger *chip = dev_get_drvdata(dev);
 
+	if (chip->boost_mode)
+		cancel_delayed_work_sync(&chip->wdt_work);
 	dev_dbg(&chip->client->dev, "bq24261 suspend\n");
 	return 0;
 }
@@ -1798,6 +1800,9 @@ static int bq24261_suspend(struct device *dev)
 static int bq24261_resume(struct device *dev)
 {
 	struct bq24261_charger *chip = dev_get_drvdata(dev);
+
+	if (chip->boost_mode)
+		bq24261_enable_boost_mode(chip, 1);
 
 	dev_dbg(&chip->client->dev, "bq24261 resume\n");
 	return 0;
