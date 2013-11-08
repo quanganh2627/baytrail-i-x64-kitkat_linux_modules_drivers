@@ -73,9 +73,9 @@
  #define BCUIRQ		0x007
  #define MBCUIRQ	0x014
 
- #define VWARNA_THRES	0x03 /*3.3v*/
- #define VWARNB_THRES	0x03 /*3.0v*/
- #define VWARNCRIT_THRES	0x05 /*2.8v*/
+ #define VWARNA_THRES		0x07 /*2.9V*/
+ #define VWARNB_THRES		0x06 /*2.7V*/
+ #define VWARNCRIT_THRES	0x07 /*2.6V*/
 
 #endif
 
@@ -771,21 +771,25 @@ static irqreturn_t vdd_interrupt_thread_handler(int irq, void *dev_data)
 	mutex_lock(&vdd_update_lock);
 	if (irq_data & VCRIT_IRQ) {
 		/* BCU VCRIT Interrupt */
-		event |= VCRIT_EVENT;
+		event = VCRIT_EVENT;
 		vinfo->intr_count_lvl3 += 1;
+
+		handle_events(event, dev_data);
 	}
 	if (irq_data & VWARNA_IRQ) {
 		/* BCU WARNA Interrupt */
-		event |= VWARNA_EVENT;
+		event = VWARNA_EVENT;
 		vinfo->intr_count_lvl1 += 1;
+
+		handle_events(event, dev_data);
 	}
 	if (irq_data & VWARNB_IRQ) {
 		/* BCU WARNB Interrupt */
-		event |= VWARNB_EVENT;
+		event = VWARNB_EVENT;
 		vinfo->intr_count_lvl2 += 1;
-	}
 
-	handle_events(event, dev_data);
+		handle_events(event, dev_data);
+	}
 
 #ifndef CONFIG_BOARD_CTP
 	ret = intel_scu_ipc_iowrite8(BCUIRQ, clear_irq);
