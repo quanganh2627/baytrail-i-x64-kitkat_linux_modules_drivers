@@ -252,8 +252,8 @@ static int psh_byt_suspend(struct device *dev)
 	ret = psh_ia_comm_suspend(dev);
 	if (ret)
 		return ret;
-	psh_byt_toggle_ctl_pin(dev, 0);
 	disable_irq(client->irq);
+	psh_byt_toggle_ctl_pin(dev, 0);
 	enable_irq_wake(client->irq);
 	return 0;
 }
