@@ -1811,13 +1811,13 @@ static void hsu_flush_rxfifo(struct uart_hsu_port *up)
 	if (up->hw_type == hsu_intel) {
 		cnt = serial_in(up, UART_FOR) & 0x7F;
 		if (cnt)
-			dev_info(up->dev,
+			dev_dbg(up->dev,
 				"Warning: %d bytes are received"
 				" in RX fifo after RTS active for %d us\n",
 				cnt, up->byte_delay);
 		lsr = serial_in(up, UART_LSR);
 		if (lsr & UART_LSR_DR && cnt)
-			dev_info(up->dev,
+			dev_dbg(up->dev,
 				"flush abnormal data in rx fifo\n");
 			while (cnt) {
 				serial_in(up, UART_RX);
