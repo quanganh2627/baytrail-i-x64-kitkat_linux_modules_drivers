@@ -141,6 +141,7 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 	case CPU_TANGIER:
 	case CPU_VVIEW2:
 	case CPU_ANNIEDALE:
+	case CPU_CHERRYVIEW:
 		drv->pdata->cpu.init = cpu_init_gpio;
 		drv->pdata->cpu.cleanup = cpu_cleanup_gpio;
 		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state;
@@ -160,6 +161,7 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 	case PMIC_MRFL:
 	case PMIC_BYT:
 	case PMIC_MOOR:
+	case PMIC_CHT:
 		drv->pdata->pmic.init = pmic_io_init;
 		drv->pdata->pmic.power_on_mdm = pmic_io_power_on_mdm;
 		drv->pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
