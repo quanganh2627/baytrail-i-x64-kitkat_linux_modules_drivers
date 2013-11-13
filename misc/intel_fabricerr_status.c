@@ -1045,26 +1045,24 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 	return NULL;
 }
 
-enum ErrorType {
-	FABRIC_ERR = 0,
-	MEMORY_ERR,
-	INSTRUCT_ERR,
-	ECC_ERR,
-	SCU_WDOG_FIRED,
-	PLL_LOCKSLIP,
-	KERN_WDOG_FIRED,
-	UNKNOWN_ERRTYPE
-};
-
 static char *Scu_ErrorTypes[] = {
-	"Fabric Error",
-	"Memory Error",
-	"Instruction Error",
-	"Shared SRAM ECC Error",
-	"SCU Watchdog expired",
-	"PLL Lockslip",
-	"Kernel Watchdog expired",
-	"Unknown"
+	"Unknown",
+	"Memory error",
+	"Instruction error",
+	"Fabric error",
+	"Shared SRAM ECC error",
+	"Unknown",
+	"North FEP failure",
+	"SCU DLT expired",
+	"PLL Lock Slip",
+	"Failed to receive MBB completion",
+	"Kernel DLT expired",
+	"Security WDT expired",
+	"undefinedLevel1Interrupt reset",
+	"Punit Interrupt MBB Timeout_reset",
+	"FabricError xml request reset",
+	"Volt attack violation reset",
+	"Volt attack/SAI violation reset",
 };
 
 #define BEGIN_MAIN_FABRIC_REGID		16
@@ -1079,7 +1077,7 @@ static char *Scu_ErrorTypes[] = {
 #define END_AUDIO_FABRIC_REGID		35
 #define BEGIN_SEC_FABRIC_REGID		36
 #define END_SEC_FABRIC_REGID		45
-#define END_FABRIC_REGID		46
+#define END_FABRIC_REGID		49
 
 
 static char *FabricFlagStatusErrLogDetail_tng[] = {
@@ -1099,36 +1097,39 @@ static char *FabricFlagStatusErrLogDetail_tng[] = {
 	"",
 	"",
 	"",
-	"TA ERROR LOG register for initiator iosf2ocp_i0 in Main Fabric @200MHz{mnf}",
-	"IA ERROR LOG Register for initiator psh_i0 in SC Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator arc_i0 in SC Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator usb3_i0 in Main Fabric @200MHz{mnf}",
-	"IA ERROR LOG Register for initiator usb3_i1 in Main Fabric @200MHz{mnf}",
-	"IA ERROR LOG Register for initiator mfth_i0 in Main Fabric @200MHz{mnf}",
-	"IA ERROR LOG Register for initiator cha_i0 in Main Fabric @200MHz{mnf}",
-	"IA ERROR LOG Register for initiator otg_i0 in Main Fabric @200MHz{mnf}",
-	"IA ERROR LOG Register for initiator sdf2scf_i0 in SC Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator ilb_i0 in SC Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator scdma_i0 in SC Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator scdma_i1 in SC Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator uart_i0 in SC Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator gpdma_i0 in GP Fabric @100MHz{gpf}",
-	"IA ERROR LOG Register for initiator gpdma_i1 in GP Fabric @100MHz{gpf}",
-	"IA ERROR LOG Register for initiator pifocp_i0 in Audio Fabric @50MHz{adf}",
-	"IA ERROR LOG Register for initiator adma0_i0 in Audio Fabric @50MHz{adf}",
-	"IA ERROR LOG Register for initiator adma0_i1 in Audio Fabric @50MHz{adf}",
-	"IA ERROR LOG Register for initiator adma1_i0 in Audio Fabric @50MHz{adf}",
-	"IA ERROR LOG Register for initiator adma1_i1 in Audio Fabric @50MHz{adf}",
-	"IA ERROR LOG Register for initiator sdio0_i0 in Secondary Fabric @100MHz{sdf}",
-	"IA ERROR LOG Register for initiator emmc01_i0 in Secondary Fabric @100MHz{sdf}",
-	"IA ERROR LOG Register for initiator sdio1_i0 in Secondary Fabric @100MHz{sdf}",
-	"IA ERROR LOG Register for initiator hsi_i0 in Secondary Fabric @100MHz{sdf}",
-	"IA ERROR LOG Register for initiator mph_i0 in Secondary Fabric @100MHz{sdf}",
-	"IA ERROR LOG Register for initiator sfth_i0 in Secondary Fabric @100MHz{sdf}",
-	"IA ERROR LOG Register for initiator mnf2sdf_i0 in Secondary Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator gpf2sdf_i0 in Secondary Fabric @100MHz{gpf}",
-	"IA ERROR LOG Register for initiator scf2sdf_i0 in Secondary Fabric @100MHz{scf}",
-	"IA ERROR LOG Register for initiator adf2sdf_i0 in Secondary Fabric @100MHz{adf}",
+	"IA ERROR LOG Register for the initiator iosf2ocp_i0 in Main Fabric @200MHz{mnf}",
+	"IA ERROR LOG Register for the initiator arc_i0 in SC Fabric @100MHz{scf}",
+	"IA ERROR LOG Register for the initiator psh_i0 in SC Fabric @100MHz{scf}",
+	"IA ERROR LOG Register for the initiator usb3_i0 in Main Fabric @200MHz{mnf}",
+	"IA ERROR LOG Register for the initiator usb3_i1 in Main Fabric @200MHz{mnf}",
+	"IA ERROR LOG Register for the initiator mfth_i0 in Main Fabric @200MHz{mnf}",
+	"IA ERROR LOG Register for the initiator cha_i0 in Main Fabric @200MHz{mnf}",
+	"IA ERROR LOG Register for the initiator otg_i0 in Main Fabric @200MHz{mnf}",
+	"IA ERROR LOG Register for the initiator sdf2mnf_i0 in Main Fabric @200MHz{mnf}",
+	"IA ERROR LOG Register for the initiator sdf2scf_i0 in SC Fabric @100MHz{scf}",
+	"IA ERROR LOG Register for the initiator ilb_i0 in SC Fabric @100MHz{scf}",
+	"IA ERROR LOG Register for the initiator scdma_i0 in SC Fabric @100MHz{scf}",
+	"IA ERROR LOG Register for the initiator scdma_i1 in SC Fabric @100MHz{scf}",
+	"IA ERROR LOG Register for the initiator uart_i0 in SC Fabric @100MHz{scf}",
+	"IA ERROR LOG Register for the initiator gpdma_i0 in GP Fabric @100MHz{gpf}",
+	"IA ERROR LOG Register for the initiator gpdma_i1 in GP Fabric @100MHz{gpf}",
+	"IA ERROR LOG Register for the initiator sdf2gpf_i1 in GP Fabric @100MHz{gpf}",
+	"IA ERROR LOG Register for the initiator pifocp_i0 in Audio Fabric @50MHz{adf}",
+	"IA ERROR LOG Register for the initiator adma0_i0 in Audio Fabric @50MHz{adf}",
+	"IA ERROR LOG Register for the initiator adma0_i1 in Audio Fabric @50MHz{adf}",
+	"IA ERROR LOG Register for the initiator adma1_i0 in Audio Fabric @50MHz{adf}",
+	"IA ERROR LOG Register for the initiator adma1_i1 in Audio Fabric @50MHz{adf}",
+	"IA ERROR LOG Register for the initiator sdf2adf_i0 in Audio Fabric @50MHz{adf}",
+	"IA ERROR LOG Register for the initiator sdio0_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator emmc01_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator sdio1_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator hsi_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator mph_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator sfth_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator mnf2sdf_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator gpf2sdf_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator scf2sdf_i0 in Secondary Fabric @100MHz{sdf}",
+	"IA ERROR LOG Register for the initiator adf2sdf_i0 in Secondary Fabric @100MHz{sdf}",
 	""
 };
 
@@ -1417,24 +1418,12 @@ char *get_element_errorlog_detail(u8 id, u32 *fabric_type)
 
 char *get_errortype_str(u16 error_type)
 {
-	switch (error_type) {
-	case 0xE103:
-		return Scu_ErrorTypes[FABRIC_ERR];
-	case 0xE101:
-		return Scu_ErrorTypes[MEMORY_ERR];
-	case 0xE102:
-		return Scu_ErrorTypes[INSTRUCT_ERR];
-	case 0xE104:
-		return Scu_ErrorTypes[ECC_ERR];
-	case 0xE107:
-		return Scu_ErrorTypes[SCU_WDOG_FIRED];
-	case 0xE108:
-		return Scu_ErrorTypes[PLL_LOCKSLIP];
-	case 0xE10A:
-		return Scu_ErrorTypes[KERN_WDOG_FIRED];
-	default:
-		return Scu_ErrorTypes[UNKNOWN_ERRTYPE];
-	}
+	u16 error = error_type & 0xFF;
+
+	if (error < ARRAY_SIZE(Scu_ErrorTypes))
+		return Scu_ErrorTypes[error];
+
+	return "Unknown";
 }
 
 char *get_initiator_id_str(int init_id, u32 fabric_id)
