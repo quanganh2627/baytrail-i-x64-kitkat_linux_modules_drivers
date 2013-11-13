@@ -103,7 +103,7 @@
 
 /* Safety limits for SCU extra trace dump */
 #define LOWEST_PHYS_SRAM_ADDRESS        0xFFFC0000
-#define MAX_SCU_EXTRA_DUMP_SIZE         1024
+#define MAX_SCU_EXTRA_DUMP_SIZE         4096
 
 /* Special indexes in error data */
 #define FABRIC_ERR_STS_IDX		0
