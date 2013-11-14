@@ -449,6 +449,7 @@ static void psh_shutdown(struct i2c_client *client)
 
 static const struct i2c_device_id psh_byt_id[] = {
 	{ "SMO91D0:00", GPIO_PSH_INT },
+	{ "SMO91D0", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, psh_byt_id);
