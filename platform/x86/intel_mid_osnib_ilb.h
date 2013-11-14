@@ -34,7 +34,7 @@
 #define OSNIB_SIZE 64
 #define OSNIB_OEM_RSVD_SIZE	32
 #define OSNIB_INTEL_SIZE (OSNIB_SIZE - OSNIB_OEM_RSVD_SIZE)
-#define OSNIB_DEBUG_SIZE 15
+#define OSNIB_DEBUG_SIZE 14
 #define OSNIB_FW_RSVD_SIZE 3
 #define OSNIB_CMOS_BASE_ADDR 0x0E
 #define OSNIB_FW_UPDATE_BIT 2
@@ -127,6 +127,7 @@ struct cmos_osnib {
 		} __packed bf;
 		u8 wake_src;
 		u8 debug[OSNIB_DEBUG_SIZE];
+		u8 fw_update_status;
 	} __packed fw_to_os;
 
 	u8 firmware_reserved[OSNIB_FW_RSVD_SIZE];

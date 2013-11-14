@@ -129,6 +129,28 @@ static ssize_t fw_update_store(struct kobject *kobj,
 	return count;
 }
 
+static ssize_t fw_update_status_show(struct kobject *kobj, struct kobj_attribute *attr,
+				     char *buf)
+{
+	u8 fw_update_status;
+
+	fw_update_status = intel_mid_ilb_read_osnib_field(&osnib_buffer,
+			offsetof(struct cmos_osnib, fw_to_os.fw_update_status));
+	return sprintf(buf, "%d\n", fw_update_status);
+}
+
+static ssize_t fw_update_status_clear(struct kobject *kobj,
+				      struct kobj_attribute *attr,
+				      const char *buf, size_t count)
+{
+	intel_mid_ilb_write_osnib_field(&osnib_buffer,
+			offsetof(struct cmos_osnib, fw_to_os.fw_update_status),
+			0);
+	intel_mid_ilb_write_osnib_checksum(&osnib_buffer);
+
+	return count;
+}
+
 static ssize_t clean_osnib_store(struct kobject *kobj,
 		struct kobj_attribute *attr,
 		const char *buf, size_t count)
@@ -144,11 +166,15 @@ static ssize_t clean_osnib_store(struct kobject *kobj,
 static struct kobj_attribute fw_update_attribute =
 		__ATTR(fw_update, (S_IWUSR|S_IRUGO), fw_update_show, fw_update_store);
 
+static struct kobj_attribute fw_update_status_attribute =
+		__ATTR(fw_update_status, (S_IWUSR|S_IRUGO), fw_update_status_show, fw_update_status_clear);
+
 static struct kobj_attribute clean_osnib_attribute =
 		__ATTR(clean_osnib, S_IWUSR, NULL, clean_osnib_store);
 
 static struct attribute *attrs[] = {
 	&fw_update_attribute.attr,
+	&fw_update_status_attribute.attr,
 	&clean_osnib_attribute.attr,
 	NULL,
 };
