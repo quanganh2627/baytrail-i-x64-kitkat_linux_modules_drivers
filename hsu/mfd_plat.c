@@ -173,7 +173,8 @@ static int serial_hsu_plat_port_remove(struct platform_device *pdev)
 	serial_hsu_port_free(up);
 	platform_set_drvdata(pdev, NULL);
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	release_mem_region(mem->start, resource_size(mem));
+	if (mem)
+		release_mem_region(mem->start, resource_size(mem));
 
 	return 0;
 }

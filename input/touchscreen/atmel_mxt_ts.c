@@ -3340,7 +3340,7 @@ err_free_mem:
 static int mxt_probe(struct i2c_client *client,
 			       const struct i2c_device_id *id)
 {
-	int error;
+	int error = 0;
 	struct mxt_data *data;
 	struct mxt_platform_data *pdata;
 	struct acpi_gpio_info gpio_info;

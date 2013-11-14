@@ -815,6 +815,9 @@ static inline int update_zone_temp(int zone, u16 adc_val)
 			offset_zone += 1;
 
 		addr_tzone = THRMZN4H_ADDR_SC - (2 * offset_zone);
+	} else {
+		dev_err(chc.dev, "%s: invalid vendor id %X\n", __func__, vendor_id);
+		return -EINVAL;
 	}
 
 	ret = intel_scu_ipc_iowrite8(addr_tzone, (u8)(adc_val >> 8));

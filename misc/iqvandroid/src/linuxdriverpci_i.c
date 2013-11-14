@@ -337,7 +337,7 @@ _NalEnablePciDevice(
     struct pci_dev* LinuxPciDevice = NULL;
     struct pci_bus* LinuxPciBus = NULL;
     unsigned int DeviceFunction = 0;
-    int Result = 0;
+    int Result = -1;
     NAL_STATUS Status = NAL_SUCCESS;
 
     DeviceFunction = PCI_DEVFN(DeviceLocation.Pci.Device, DeviceLocation.Pci.Function);
@@ -349,7 +349,8 @@ _NalEnablePciDevice(
 
         LinuxPciDevice = pci_get_slot(LinuxPciBus, DeviceFunction);
 
-        Result = pci_enable_device(LinuxPciDevice);
+	if (LinuxPciDevice)
+		Result = pci_enable_device(LinuxPciDevice);
 
         if(Result != 0)
         {
