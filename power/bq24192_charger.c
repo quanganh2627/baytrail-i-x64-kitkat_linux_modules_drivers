@@ -1138,9 +1138,15 @@ static inline int bq24192_enable_charging(
 
 	/*
 	 * check if we have the battery emulator connected. We do not start
-	 * charging if the emulator is connected
+	 * charging if the emulator is connected. Disable the charging
+	 * explicitly.
 	 */
 	if (!chip->pdata->sfi_tabl_present) {
+		ret = bq24192_reg_multi_bitset(chip->client,
+						BQ24192_POWER_ON_CFG_REG,
+						POWER_ON_CFG_CHRG_CFG_DIS,
+						CHR_CFG_BIT_POS,
+						CHR_CFG_BIT_LEN);
 		/* Schedule the charger task worker now */
 		schedule_delayed_work(&chip->chrg_task_wrkr,
 						0);

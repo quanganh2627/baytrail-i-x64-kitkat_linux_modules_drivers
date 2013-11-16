@@ -339,7 +339,7 @@ struct mxt_panel_info supported_panels[] = {
 		.build = 0xAB,
 		.info_crc = 0x969531,
 		.config_crc = 0x96CB66,
-		.gpio_switch = -1,
+		.gpio_switch = 211,
 	},
 	/* 1664S 10 inch panel */
 	{
@@ -3507,6 +3507,7 @@ static const struct i2c_device_id mxt_id[] = {
 	{ "atmel_mxt_tp", 0 },
 	{ "atmel_mxt_mxt1664S", 0 },
 	{ "mXT224", 0 },
+	{ "ATML1000", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, mxt_id);

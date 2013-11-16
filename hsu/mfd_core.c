@@ -1,5 +1,5 @@
 /*
- * mfd.c: driver for High Speed UART device of Intel Medfield platform
+ * mfd_core.c: driver core for High Speed UART device of Intel Medfield platform
  *
  * Refer pxa.c, 8250.c and some other drivers in drivers/serial/
  *
@@ -26,30 +26,21 @@
 #include <linux/console.h>
 #include <linux/sysrq.h>
 #include <linux/slab.h>
-#include <linux/serial_reg.h>
 #include <linux/circ_buf.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
-#include <linux/serial_core.h>
-#include <linux/serial_mfd.h>
 #include <linux/dma-mapping.h>
-#include <linux/pci.h>
 #include <linux/io.h>
 #include <linux/debugfs.h>
 #include <linux/pm_runtime.h>
-#include <linux/intel_mid_pm.h>
-#include <linux/intel_mid_dma.h>
 #include <linux/irq.h>
-#include <asm/intel_mid_hsu.h>
 #include <linux/intel_mid_pm.h>
 #include <linux/pm_qos.h>
 
-#include "mfd.h"
-
 #define CREATE_TRACE_POINTS
-#include "mfd_trace.h"
+#include "mfd.h"
 
 static int hsu_dma_enable = 0xff;
 module_param(hsu_dma_enable, int, 0);
@@ -232,7 +223,6 @@ static void serial_set_alt(int index)
 	struct hsu_dma_chan *txc = up->txc;
 	struct hsu_dma_chan *rxc = up->rxc;
 	struct hsu_port_cfg *cfg = phsu->configs[index];
-	struct pci_dev *pdev = container_of(up->dev, struct pci_dev, dev);
 
 	if (test_bit(flag_set_alt, &up->flags))
 		return;
@@ -246,7 +236,7 @@ static void serial_set_alt(int index)
 		txc->uport = up;
 		rxc->uport = up;
 	}
-	pci_set_drvdata(pdev, up);
+	dev_set_drvdata(up->dev, up);
 	if (cfg->hw_set_alt)
 		cfg->hw_set_alt(index);
 	if (cfg->hw_set_rts)
@@ -601,59 +591,6 @@ static void serial_hsu_enable_ms(struct uart_port *port)
 	up->ier |= UART_IER_MSI;
 	serial_sched_cmd(up, qcmd_set_ier);
 	trace_hsu_func_end(up->index, __func__, "");
-}
-
-void hsu_dma_tx(struct uart_hsu_port *up)
-{
-	struct circ_buf *xmit = &up->port.state->xmit;
-	struct hsu_dma_buffer *dbuf = &up->txbuf;
-	int count;
-
-	chan_writel(up->txc, HSU_CH_CR, 0x0);
-	while (chan_readl(up->txc, HSU_CH_CR))
-		cpu_relax();
-	clear_bit(flag_tx_on, &up->flags);
-	if (dbuf->ofs) {
-		u32 real = chan_readl(up->txc, HSU_CH_D0SAR) - up->tx_addr;
-
-		/* we found in flow control case, TX irq came without sending
-		 * all TX buffer
-		 */
-		if (real < dbuf->ofs)
-			dbuf->ofs = real; /* adjust to real chars sent */
-
-		/* Update the circ buf info */
-		xmit->tail += dbuf->ofs;
-		xmit->tail &= UART_XMIT_SIZE - 1;
-
-		up->port.icount.tx += dbuf->ofs;
-		dbuf->ofs = 0;
-	}
-
-	if (!uart_circ_empty(xmit) && !uart_tx_stopped(&up->port)) {
-		set_bit(flag_tx_on, &up->flags);
-		dma_sync_single_for_device(up->port.dev,
-					   dbuf->dma_addr,
-					   dbuf->dma_size,
-					   DMA_TO_DEVICE);
-
-		count = CIRC_CNT_TO_END(xmit->head, xmit->tail, UART_XMIT_SIZE);
-		dbuf->ofs = count;
-
-		/* Reprogram the channel */
-		up->tx_addr = dbuf->dma_addr + xmit->tail;
-		chan_writel(up->txc, HSU_CH_D0SAR, up->tx_addr);
-		chan_writel(up->txc, HSU_CH_D0TSR, count);
-
-		/* Reenable the channel */
-		chan_writel(up->txc, HSU_CH_DCR, 0x1
-						 | (0x1 << 8)
-						 | (0x1 << 16));
-		chan_writel(up->txc, HSU_CH_CR, 0x1);
-	}
-
-	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
-		uart_write_wakeup(&up->port);
 }
 
 /* Protected by spin_lock_irqsave(port->lock) */
@@ -1853,8 +1790,7 @@ static struct uart_driver serial_hsu_reg = {
 
 static irqreturn_t wakeup_irq(int irq, void *dev)
 {
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
+	struct uart_hsu_port *up = dev_get_drvdata(dev);
 	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 
 	trace_hsu_func_start(up->index, __func__);
@@ -1933,9 +1869,8 @@ static void hsu_regs_context(struct uart_hsu_port *up, int op)
 		up->dma_ops->context_op(up, op);
 }
 
-static int serial_hsu_do_suspend(struct pci_dev *pdev)
+int serial_hsu_do_suspend(struct uart_hsu_port *up)
 {
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
 	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 	struct uart_port *uport = &up->port;
 	struct tty_port *tport = &uport->state->port;
@@ -2028,7 +1963,7 @@ static int serial_hsu_do_suspend(struct pci_dev *pdev)
 	}
 
 	if (cfg->hw_suspend)
-		cfg->hw_suspend(up->index, &pdev->dev, wakeup_irq);
+		cfg->hw_suspend(up->index, up->dev, wakeup_irq);
 	if (cfg->hw_context_save)
 		hsu_regs_context(up, context_save);
 	if (cfg->preamble && cfg->hw_suspend_post)
@@ -2063,10 +1998,10 @@ busy:
 	trace_hsu_func_end(up->index, __func__, "busy");
 	return -EBUSY;
 }
+EXPORT_SYMBOL(serial_hsu_do_suspend);
 
-static int serial_hsu_do_resume(struct pci_dev *pdev)
+int serial_hsu_do_resume(struct uart_hsu_port *up)
 {
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
 	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 	unsigned long flags;
 
@@ -2080,7 +2015,7 @@ static int serial_hsu_do_resume(struct pci_dev *pdev)
 	if (cfg->hw_context_save)
 		hsu_regs_context(up, context_load);
 	if (cfg->hw_resume)
-		cfg->hw_resume(up->index, &pdev->dev);
+		cfg->hw_resume(up->index, up->dev);
 	if (test_bit(flag_startup, &up->flags))
 		hsu_flush_rxfifo(up);
 	if (cfg->hw_set_rts)
@@ -2097,48 +2032,12 @@ static int serial_hsu_do_resume(struct pci_dev *pdev)
 	trace_hsu_func_end(up->index, __func__, "");
 	return 0;
 }
-#endif
-
-#ifdef CONFIG_PM
-static int serial_hsu_suspend(struct device *dev)
-{
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
-	int ret = 0;
-
-	if (up) {
-		trace_hsu_func_start(up->index, __func__);
-		ret = serial_hsu_do_suspend(pdev);
-		trace_hsu_func_end(up->index, __func__, "");
-	}
-
-	return ret;
-}
-
-static int serial_hsu_resume(struct device *dev)
-{
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
-	int ret = 0;
-
-	if (up) {
-		trace_hsu_func_start(up->index, __func__);
-		ret = serial_hsu_do_resume(pdev);
-		trace_hsu_func_end(up->index, __func__, "");
-	}
-
-	return ret;
-}
-#else
-#define serial_hsu_suspend	NULL
-#define serial_hsu_resume	NULL
+EXPORT_SYMBOL(serial_hsu_do_resume);
 #endif
 
 #ifdef CONFIG_PM_RUNTIME
-static int serial_hsu_runtime_idle(struct device *dev)
+int serial_hsu_do_runtime_idle(struct uart_hsu_port *up)
 {
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
 	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 
 	trace_hsu_func_start(up->index, __func__);
@@ -2150,42 +2049,15 @@ static int serial_hsu_runtime_idle(struct device *dev)
 		 * postpone the suspend retry 30 seconds, then system should
 		 * have finished booting
 		 */
-		pm_schedule_suspend(dev, 30000);
+		pm_schedule_suspend(up->dev, 30000);
 	else if (!test_and_clear_bit(flag_active, &up->flags))
-		pm_schedule_suspend(dev, 20);
+		pm_schedule_suspend(up->dev, 20);
 	else
-		pm_schedule_suspend(dev, cfg->idle);
+		pm_schedule_suspend(up->dev, cfg->idle);
 	trace_hsu_func_end(up->index, __func__, "");
 	return -EBUSY;
 }
-
-static int serial_hsu_runtime_suspend(struct device *dev)
-{
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
-	int ret = 0;
-
-	trace_hsu_func_start(up->index, __func__);
-	ret = serial_hsu_do_suspend(pdev);
-	trace_hsu_func_end(up->index, __func__, "");
-	return ret;
-}
-
-static int serial_hsu_runtime_resume(struct device *dev)
-{
-	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
-	int ret = 0;
-
-	trace_hsu_func_start(up->index, __func__);
-	ret = serial_hsu_do_resume(pdev);
-	trace_hsu_func_end(up->index, __func__, "");
-	return ret;
-}
-#else
-#define serial_hsu_runtime_idle		NULL
-#define serial_hsu_runtime_suspend	NULL
-#define serial_hsu_runtime_resume	NULL
+EXPORT_SYMBOL(serial_hsu_do_runtime_idle);
 #endif
 
 static void serial_hsu_command(struct uart_hsu_port *up)
@@ -2383,15 +2255,6 @@ static void serial_hsu_work(struct work_struct *work)
 	uport->in_workq = 0;
 }
 
-static const struct dev_pm_ops serial_hsu_pm_ops = {
-
-	SET_SYSTEM_SLEEP_PM_OPS(serial_hsu_suspend,
-				serial_hsu_resume)
-	SET_RUNTIME_PM_OPS(serial_hsu_runtime_suspend,
-				serial_hsu_runtime_resume,
-				serial_hsu_runtime_idle)
-};
-
 static int serial_port_setup(struct uart_hsu_port *up,
 		struct hsu_port_cfg *cfg)
 {
@@ -2455,73 +2318,28 @@ static int serial_port_setup(struct uart_hsu_port *up,
 	return 0;
 }
 
-DEFINE_PCI_DEVICE_TABLE(hsuart_port_pci_ids) = {
-	{ PCI_VDEVICE(INTEL, 0x081B), hsu_port0 },
-	{ PCI_VDEVICE(INTEL, 0x081C), hsu_port1 },
-	{ PCI_VDEVICE(INTEL, 0x081D), hsu_port2 },
-	/* Cloverview support */
-	{ PCI_VDEVICE(INTEL, 0x08FC), hsu_port0 },
-	{ PCI_VDEVICE(INTEL, 0x08FD), hsu_port1 },
-	{ PCI_VDEVICE(INTEL, 0x08FE), hsu_port2 },
-	/* Tangier support */
-	{ PCI_VDEVICE(INTEL, 0x1191), hsu_port0 },
-	/* VLV2 support */
-	{ PCI_VDEVICE(INTEL, 0x0F0A), hsu_port0 },
-	{ PCI_VDEVICE(INTEL, 0x0F0C), hsu_port1 },
-	{},
-};
-
-DEFINE_PCI_DEVICE_TABLE(hsuart_dma_pci_ids) = {
-	{ PCI_VDEVICE(INTEL, 0x081E), hsu_dma },
-	/* Cloverview support */
-	{ PCI_VDEVICE(INTEL, 0x08FF), hsu_dma },
-	/* Tangier support */
-	{ PCI_VDEVICE(INTEL, 0x1192), hsu_dma },
-	{},
-};
-
-static int serial_hsu_port_probe(struct pci_dev *pdev,
-				const struct pci_device_id *ent)
+struct uart_hsu_port *serial_hsu_port_setup(struct device *pdev, int port,
+	resource_size_t start, resource_size_t len, int irq)
 {
 	struct uart_hsu_port *up;
-	int index, ret, port;
+	int index;
 	unsigned int uclk, clock;
 	struct hsu_port_cfg *cfg;
 
-	dev_info(&pdev->dev,
-		"FUNC: %d driver: %ld addr:%lx len:%lx\n",
-		PCI_FUNC(pdev->devfn), ent->driver_data,
-		(unsigned long) pci_resource_start(pdev, 0),
-		(unsigned long) pci_resource_len(pdev, 0));
-
-	port = intel_mid_hsu_func_to_port(PCI_FUNC(pdev->devfn));
-	if (port == -1)
-		return 0;
-
 	cfg = hsu_port_func_cfg + port;
 	if (!cfg)
-		return -1;
-
-	ret = pci_enable_device(pdev);
-	if (ret)
-		return ret;
-
-	ret = pci_request_region(pdev, 0, cfg->name);
-	if (ret)
-		goto err;
-
-	index = cfg->index;
-	up = phsu->port + index;
-	pci_set_drvdata(pdev, up);
+		return ERR_PTR(-EINVAL);
 
 	pr_info("Found a %s HSU\n", cfg->hw_ip ? "Designware" : "Intel");
 
-	up->dev = &pdev->dev;
+	index = cfg->index;
+	up = phsu->port + index;
+
+	up->dev = pdev;
 	up->port.type = PORT_MFD;
 	up->port.iotype = UPIO_MEM;
-	up->port.mapbase = pci_resource_start(pdev, 0);
-	up->port.membase = ioremap_nocache(up->port.mapbase,
-			pci_resource_len(pdev, 0));
+	up->port.mapbase = start;
+	up->port.membase = ioremap_nocache(up->port.mapbase, len);
 	up->port.fifosize = 64;
 	up->port.ops = &serial_hsu_pops;
 	up->port.flags = UPF_IOREMAP;
@@ -2546,8 +2364,8 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	else
 		up->port.uartclk = 115200 * 32 * 16;
 
-	up->port.irq = pdev->irq;
-	up->port.dev = &pdev->dev;
+	up->port.irq = irq;
+	up->port.dev = pdev;
 
 	if (up->hw_type == hsu_intel) {
 		up->txc = &phsu->chans[index * 2];
@@ -2571,80 +2389,39 @@ static int serial_hsu_port_probe(struct pci_dev *pdev,
 	serial_port_setup(up, cfg);
 	phsu->port_num++;
 
-	pm_runtime_put_noidle(&pdev->dev);
-	pm_runtime_allow(&pdev->dev);
-	return 0;
-
-err:
-	pci_disable_device(pdev);
-	return ret;
+	return up;
 }
+EXPORT_SYMBOL(serial_hsu_port_setup);
 
-static void serial_hsu_port_remove(struct pci_dev *pdev)
+void serial_hsu_port_free(struct uart_hsu_port *up)
 {
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
 	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 
-	pm_runtime_forbid(&pdev->dev);
-	pm_runtime_get_noresume(&pdev->dev);
 	uart_remove_one_port(&serial_hsu_reg, &up->port);
-	free_irq(pdev->irq, up);
+	free_irq(up->port.irq, up);
 	if (cfg->has_alt) {
 		struct hsu_port_cfg *alt_cfg = phsu->configs[cfg->alt];
 		struct uart_hsu_port *alt_up =
 			phsu->port + alt_cfg->index;
 		uart_remove_one_port(&serial_hsu_reg, &alt_up->port);
-		free_irq(pdev->irq, alt_up);
+		free_irq(up->port.irq, alt_up);
 	}
-	pci_set_drvdata(pdev, NULL);
-	pci_disable_device(pdev);
 }
+EXPORT_SYMBOL(serial_hsu_port_free);
 
-static void serial_hsu_port_shutdown(struct pci_dev *pdev)
+void serial_hsu_port_shutdown(struct uart_hsu_port *up)
 {
-	struct uart_hsu_port *up = pci_get_drvdata(pdev);
-
-	if (!up)
-		return;
-
 	uart_suspend_port(&serial_hsu_reg, &up->port);
 }
+EXPORT_SYMBOL(serial_hsu_port_shutdown);
 
-static struct pci_driver hsu_port_pci_driver = {
-	.name =		"HSU serial",
-	.id_table =	hsuart_port_pci_ids,
-	.probe =	serial_hsu_port_probe,
-	.remove =	serial_hsu_port_remove,
-	.shutdown =	serial_hsu_port_shutdown,
-/* Disable PM only when kgdb(poll mode uart) is enabled */
-#if defined(CONFIG_PM) && !defined(CONFIG_CONSOLE_POLL)
-	.driver = {
-		.pm = &serial_hsu_pm_ops,
-	},
-#endif
-};
-
-static int serial_hsu_dma_probe(struct pci_dev *pdev,
-				const struct pci_device_id *ent)
+int serial_hsu_dma_setup(struct device *pdev,
+	resource_size_t start, resource_size_t len, int irq)
 {
 	struct hsu_dma_chan *dchan;
 	int i, ret;
 
-	dev_info(&pdev->dev,
-		"FUNC: %d driver: %ld addr:%lx len:%lx\n",
-		PCI_FUNC(pdev->devfn), ent->driver_data,
-		(unsigned long) pci_resource_start(pdev, 0),
-		(unsigned long) pci_resource_len(pdev, 0));
-
-	ret = pci_enable_device(pdev);
-	if (ret)
-		return ret;
-
-	ret = pci_request_region(pdev, 0, "hsu dma");
-	if (ret)
-		goto err;
-	phsu->reg = ioremap_nocache(pci_resource_start(pdev, 0),
-			pci_resource_len(pdev, 0));
+	phsu->reg = ioremap_nocache(start, len);
 	dchan = phsu->chans;
 	for (i = 0; i < 6; i++) {
 		dchan->id = i;
@@ -2657,42 +2434,34 @@ static int serial_hsu_dma_probe(struct pci_dev *pdev,
 		dchan++;
 	}
 
-	/* ANN all and TNG chip from B0 stepping */
-	if ((intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER &&
-		pdev->revision >= 0x1) ||
-		intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE) {
+	/* will share irq with port if irq < 0 */
+	if (irq < 0)
 		phsu->irq_port_and_dma = 1;
-	} else {
-		phsu->dma_irq = pdev->irq;
-		ret = request_irq(pdev->irq, hsu_dma_irq, 0, "hsu dma", phsu);
+	else {
+		phsu->dma_irq = irq;
+		ret = request_irq(irq, hsu_dma_irq, 0, "hsu dma", phsu);
 		if (ret) {
-			dev_err(&pdev->dev, "can not get dma IRQ\n");
+			dev_err(pdev, "can not get dma IRQ\n");
 			goto err;
 		}
 	}
-	pci_set_drvdata(pdev, phsu);
-	return 0;
 
+	dev_set_drvdata(pdev, phsu);
+
+	return 0;
 err:
-	pci_disable_device(pdev);
+	iounmap(phsu->reg);
 	return ret;
 }
+EXPORT_SYMBOL(serial_hsu_dma_setup);
 
-static void serial_hsu_dma_remove(struct pci_dev *pdev)
+void serial_hsu_dma_free(void)
 {
-	free_irq(pdev->irq, phsu);
-	pci_disable_device(pdev);
-	pci_unregister_driver(&hsu_port_pci_driver);
+	free_irq(phsu->dma_irq, phsu);
 }
+EXPORT_SYMBOL(serial_hsu_dma_free);
 
-static struct pci_driver hsu_dma_pci_driver = {
-	.name =		"HSU DMA",
-	.id_table =	hsuart_dma_pci_ids,
-	.probe =	serial_hsu_dma_probe,
-	.remove =	serial_hsu_dma_remove,
-};
-
-static int __init hsu_pci_init(void)
+static int __init hsu_init(void)
 {
 	int ret;
 
@@ -2701,30 +2470,17 @@ static int __init hsu_pci_init(void)
 		return ret;
 
 	spin_lock_init(&phsu->dma_lock);
-	hsu_debugfs_init(phsu);
-	ret = pci_register_driver(&hsu_dma_pci_driver);
-	if (!ret) {
-		ret = pci_register_driver(&hsu_port_pci_driver);
-		if (ret)
-			pci_unregister_driver(&hsu_dma_pci_driver);
-	}
-	if (ret) {
-		uart_unregister_driver(&serial_hsu_reg);
-		hsu_debugfs_remove(phsu);
-	}
-	return ret;
+	return hsu_debugfs_init(phsu);
 }
 
-static void __exit hsu_pci_exit(void)
+static void __exit hsu_exit(void)
 {
-	pci_unregister_driver(&hsu_port_pci_driver);
-	pci_unregister_driver(&hsu_dma_pci_driver);
 	uart_unregister_driver(&serial_hsu_reg);
 	hsu_debugfs_remove(phsu);
 }
 
-module_init(hsu_pci_init);
-module_exit(hsu_pci_exit);
+module_init(hsu_init);
+module_exit(hsu_exit);
 
 MODULE_AUTHOR("Yang Bin <bin.yang@intel.com>");
 MODULE_LICENSE("GPL v2");

@@ -1,6 +1,14 @@
 #ifndef _MFD_H
 #define _MFD_H
 
+#include <linux/serial_core.h>
+#include <linux/serial_reg.h>
+#include <linux/serial_mfd.h>
+#include <linux/intel_mid_dma.h>
+#include <linux/intel_mid_pm.h>
+#include <linux/dma-direction.h>
+#include <asm/intel_mid_hsu.h>
+
 #define HSU_PORT_MAX		8
 #define HSU_DMA_BUF_SIZE	2048
 #define HSU_Q_MAX		4096
@@ -228,4 +236,16 @@ void serial_sched_cmd(struct uart_hsu_port *up, char cmd);
 extern struct hsu_dma_ops *pdw_dma_ops;
 extern struct hsu_dma_ops intel_dma_ops;
 
+struct uart_hsu_port *serial_hsu_port_setup(struct device *pdev, int port,
+	resource_size_t start, resource_size_t len, int irq);
+void serial_hsu_port_free(struct uart_hsu_port *up);
+void serial_hsu_port_shutdown(struct uart_hsu_port *up);
+int serial_hsu_dma_setup(struct device *pdev,
+	resource_size_t start, resource_size_t len, int irq);
+void serial_hsu_dma_free(void);
+int serial_hsu_do_suspend(struct uart_hsu_port *up);
+int serial_hsu_do_resume(struct uart_hsu_port *up);
+int serial_hsu_do_runtime_idle(struct uart_hsu_port *up);
+
+#include "mfd_trace.h"
 #endif

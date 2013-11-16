@@ -12,9 +12,11 @@
  * for more details.
  */
 
+#include <linux/version.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
+#include <linux/input/mt.h>
 #include <linux/input-polldev.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
@@ -118,6 +120,7 @@ struct r69001_ts_data {
 	struct r69001_io_data data;
 	struct r69001_ts_before_regs regs;
 	struct r69001_platform_data *pdata;
+	unsigned int finger_mask;
 	u8 mode;
 	u8 t_num;
 };
@@ -194,22 +197,35 @@ static void r69001_ts_report_coordinates_data(struct r69001_ts_data *ts)
 {
 	struct r69001_ts_finger *finger = ts->finger;
 	struct input_dev *input_dev = ts->input_dev;
+	unsigned int mask = 0;
 	u8 i;
 
 	for (i = 0; i < ts->t_num; i++) {
+		input_mt_slot(input_dev, finger[i].t);
+		input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, true);
 		input_report_abs(input_dev, ABS_MT_POSITION_X, finger[i].x);
 		input_report_abs(input_dev, ABS_MT_POSITION_Y, finger[i].y);
 		input_report_abs(input_dev, ABS_MT_PRESSURE, finger[i].z);
-		input_mt_sync(input_dev);
+		mask |= (1 << finger[i].t);
 	}
 
-	/* SYN_MT_REPORT only if no contact */
-	if (!ts->t_num)
-		input_mt_sync(input_dev);
+	/* Get the removed fingers */
+	ts->finger_mask &= ~mask;
+
+	/* Release the removed fingers */
+	for (i = 0; ts->finger_mask != 0; i++) {
+		if (ts->finger_mask & 0x01) {
+			input_mt_slot(input_dev, i);
+			input_mt_report_slot_state(input_dev,
+					MT_TOOL_FINGER, false);
+		}
+		ts->finger_mask >>= 1;
+	}
 
 	/* SYN_REPORT */
 	input_sync(input_dev);
 
+	ts->finger_mask = mask;
 	ts->t_num = 0;
 }
 
@@ -365,7 +381,7 @@ static int r69001_ts_dbgfs_show(struct seq_file *seq, void *unused)
 	if (!ts)
 		return -EFAULT;
 
-	if (ts->data.mode.mode > MODE_COUNT)
+	if (ts->data.mode.mode >= MODE_COUNT)
 		return -EFAULT;
 
 	seq_printf(seq, "%s\n", r69001_ts_modes[ts->data.mode.mode]);
@@ -503,6 +519,11 @@ r69001_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	__set_bit(EV_SYN, input_dev->evbit);
 	__set_bit(EV_ABS, input_dev->evbit);
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(3,6,0))
+	input_mt_init_slots(input_dev, MAX_FINGERS, 0);
+#else
+	input_mt_init_slots(input_dev, MAX_FINGERS);
+#endif
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, MIN_X, MAX_X, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, MIN_Y, MAX_Y, 0, 0);
 	input_set_abs_params(input_dev, ABS_MT_PRESSURE, MIN_Z, MAX_Z, 0, 0);

@@ -340,6 +340,14 @@ DEFINE_PCI_DEVICE_TABLE(i2c_designware_pci_ids) = {
 	{ PCI_VDEVICE(INTEL, 0x0F45), valleyview_0 },
 	{ PCI_VDEVICE(INTEL, 0x0F46), valleyview_0 },
 	{ PCI_VDEVICE(INTEL, 0x0F47), valleyview_0 },
+	/* Cherryview */
+	{ PCI_VDEVICE(INTEL, 0x22C1), cherryview_0 },
+	{ PCI_VDEVICE(INTEL, 0x22C2), cherryview_0 },
+	{ PCI_VDEVICE(INTEL, 0x22C3), cherryview_0 },
+	{ PCI_VDEVICE(INTEL, 0x22C4), cherryview_0 },
+	{ PCI_VDEVICE(INTEL, 0x22C5), cherryview_0 },
+	{ PCI_VDEVICE(INTEL, 0x22C6), cherryview_0 },
+	{ PCI_VDEVICE(INTEL, 0x22C7), cherryview_0 },
 	{ 0,}
 };
 MODULE_DEVICE_TABLE(pci, i2c_designware_pci_ids);

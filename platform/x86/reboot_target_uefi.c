@@ -24,7 +24,28 @@
 
 #include "reboot_target.h"
 
-static const char TARGET_VARNAME[] = "BootNext";
+static const char TARGET_VARNAME[]     = "BootNext";
+static const char LOAD_OPTION_FORMAT[] = "Boot%04X";
+
+static bool uefi_load_option_is_present(const u16 id)
+{
+	char varname8[sizeof(LOAD_OPTION_FORMAT)];
+	wchar_t varname16[sizeof(LOAD_OPTION_FORMAT)];
+	bool found = false;
+
+	sprintf(varname8, LOAD_OPTION_FORMAT, id);
+	utf8s_to_utf16s(varname8, sizeof(varname8),
+			UTF16_LITTLE_ENDIAN, varname16, sizeof(varname16));
+	varname16[sizeof(LOAD_OPTION_FORMAT) - 1] = 0;
+
+	efivar_entry_iter_begin();
+	if (efivar_entry_find(varname16, EFI_GLOBAL_VARIABLE_GUID,
+			      &efivar_sysfs_list, false))
+		found = true;
+	efivar_entry_iter_end();
+
+	return found;
+}
 
 static int uefi_set_reboot_target(const char *name, const int id)
 {
@@ -32,20 +53,19 @@ static int uefi_set_reboot_target(const char *name, const int id)
 	u32 attributes = EFI_VARIABLE_NON_VOLATILE
 		| EFI_VARIABLE_BOOTSERVICE_ACCESS
 		| EFI_VARIABLE_RUNTIME_ACCESS;
-	int ret = 0;
 	u16 target_id = (0x1 << 8) | (id & 0xFF);
+
+	if (!uefi_load_option_is_present(target_id)) {
+		pr_err("%s: Load option %04X not found", __func__, target_id);
+		return EINVAL;
+	}
 
 	utf8s_to_utf16s(TARGET_VARNAME, sizeof(TARGET_VARNAME),
 			UTF16_LITTLE_ENDIAN, varname, sizeof(varname));
 	varname[sizeof(TARGET_VARNAME) - 1] = 0;
 
-	ret = efivar_entry_set_safe(varname, EFI_GLOBAL_VARIABLE_GUID,
-				    attributes, true, sizeof(u16), &target_id);
-
-	if (ret)
-		pr_err("%s: Failed to set reboot_target, return=%d", __func__, ret);
-
-	return ret;
+	return efivar_entry_set_safe(varname, EFI_GLOBAL_VARIABLE_GUID,
+				     attributes, true, sizeof(u16), &target_id);
 }
 
 struct reboot_target reboot_target_uefi = {

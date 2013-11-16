@@ -30,6 +30,7 @@
 #include <linux/poll.h>
 #include <linux/sched.h>
 #include <linux/hsi/hsi.h>
+#include <linux/hsi/hsi_info_board.h>
 #include <linux/uaccess.h>
 
 #include "dlp_main.h"
@@ -286,30 +287,40 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 		ret = -EBUSY;
 		goto out;
 	}
-	/* Set the open flag */
-	trace_ctx->opened = 1;
 	/* reset hangup flag */
-	trace_ctx->hangup = 0 ;
+	trace_ctx->hangup = 0;
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 
 	/* Save private data for futur use */
 	filp->private_data = ch_ctx;
 
-
 	/* Disable the flow control */
 	ch_ctx->use_flow_ctrl = 1;
+
+	/* Configure the DLP channel */
 
 	/* Reply to any waiting OPEN_CONN command */
 	ret = dlp_ctrl_send_ack_nack(ch_ctx);
 	if (ret) {
 		pr_err(DRVNAME ": ch%d open failed !\n", ch_ctx->ch_id);
 		ret = -EIO;
-		goto out;
 	}
 
-	/* device opened => Set the channel state flag */
-	dlp_ctrl_set_channel_state(ch_ctx->hsi_channel,
-				DLP_CH_STATE_OPENED);
+	if (dlp_drv.sys_info->mdm_ver == MODEM_7160) {
+		ret = dlp_ctrl_open_channel(ch_ctx);
+		if (ret) {
+			pr_err(DRVNAME ": open channel(ch%d) failed :%d)\n",
+				   ch_ctx->hsi_channel, ret);
+			goto out;
+		}
+	} else {
+		/* device opened => Set the channel state flag */
+		dlp_ctrl_set_channel_state(ch_ctx->hsi_channel,
+		DLP_CH_STATE_OPENED);
+	}
+	/* Set the open flag */
+	trace_ctx->opened = 1;
+
 
 	/* Push RX PDUs */
 	count = DLP_HSI_RX_WAIT_FIFO + HSI_TRACE_TEMP_BUFFERS;
@@ -518,7 +529,7 @@ static void dlp_trace_dev_tx_timeout_cb(struct dlp_channel *ch_ctx)
 
 	spin_lock_irqsave(&ch_ctx->lock, flags);
 	/* Set hangup flag */
-	trace_ctx->hangup = 1 ;
+	trace_ctx->hangup = 1;
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 	wake_up_interruptible(&trace_ctx->read_wq);
 

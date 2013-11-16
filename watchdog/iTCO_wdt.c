@@ -257,9 +257,6 @@ static int iTCO_wdt_stop(void)
 	outw(val, TCO1_CNT);
 	val = inw(TCO1_CNT);
 
-	/* Set the NO_REBOOT bit to prevent later reboots, just for sure */
-	iTCO_wdt_set_NO_REBOOT_bit();
-
 	spin_unlock(&iTCO_wdt_private.io_lock);
 
 	if ((val & 0x0800) == 0)

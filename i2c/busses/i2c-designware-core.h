@@ -297,6 +297,14 @@ enum dw_ctl_id_t {
 	valleyview_4,
 	valleyview_5,
 	valleyview_6,
+
+	cherryview_0 = valleyview_0,
+	cherryview_1 = valleyview_1,
+	cherryview_2 = valleyview_2,
+	cherryview_3 = valleyview_3,
+	cherryview_4 = valleyview_4,
+	cherryview_5 = valleyview_5,
+	cherryview_6 = valleyview_6,
 };
 
 extern int intel_mid_dw_i2c_abort(int busnum);

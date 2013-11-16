@@ -81,7 +81,7 @@
 #define DLP_FLASH_RX_PDU_SIZE	4	/* 4 Bytes */
 
 /* PDU size for Trace channel */
-#define DLP_TRACE_TX_PDU_SIZE	8192	/* 8 KBytes */
+#define DLP_TRACE_TX_PDU_SIZE	1024	/* 1 KBytes */
 #define DLP_TRACE_RX_PDU_SIZE	8192	/* 8 KBytes */
 
 /* Alignment params */
@@ -364,6 +364,8 @@ struct dlp_driver {
 	unsigned int is_dma_capable;
 	struct hsi_client *client;
 	struct device *controller;
+	struct hsi_client_base_info *sys_info;
+	bool is_dlp_disabled;
 
 	/* Hangup (TX timemout/ TTY close) */
 	spinlock_t lock;

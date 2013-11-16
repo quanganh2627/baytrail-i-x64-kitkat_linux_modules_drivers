@@ -82,6 +82,7 @@ static int reboot_target_notify(struct notifier_block *notifier,
 				unsigned long what, void *data)
 {
 	const char *target = (const char *)data;
+	int ret;
 
 	if (what != SYS_RESTART)
 		goto out;
@@ -89,7 +90,10 @@ static int reboot_target_notify(struct notifier_block *notifier,
 	if (!target || target[0] == '\0')
 		target = NAME2ID[DEFAULT_TARGET_INDEX].name;
 
-	set_reboot_target(target);
+	ret = set_reboot_target(target);
+	if (ret)
+		pr_err("%s: Failed to set the reboot target, return=%d",
+		       __func__, ret);
 
 out:
 	return NOTIFY_DONE;
