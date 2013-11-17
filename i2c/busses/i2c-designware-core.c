@@ -597,6 +597,37 @@ static struct attribute_group i2c_dw_attr_group = {
 };
 #endif
 
+static ssize_t store_lock_xfer(struct device *dev,
+			  struct device_attribute *attr,
+			  const char *buf, size_t size)
+{
+	struct dw_i2c_dev *i2c = dev_get_drvdata(dev->parent);
+	ssize_t	status = -EINVAL;
+	long lock;
+
+
+	status = kstrtol(buf, 0, &lock);
+	if (status == 0) {
+		if (lock && !i2c->lock_flag) {
+			down(&i2c->lock);
+			pm_runtime_get_sync(i2c->dev);
+			i2c->lock_flag = 1;
+			dev_info(dev, "lock i2c xfer\n");
+		} else if (!lock && i2c->lock_flag) {
+			pm_runtime_mark_last_busy(i2c->dev);
+			pm_runtime_put_autosuspend(i2c->dev);
+			i2c->lock_flag = 0;
+			up(&i2c->lock);
+			dev_info(dev, "unlock i2c xfer\n");
+		} else
+			return -EINVAL;
+	}
+
+	return status ? : size;
+}
+
+static DEVICE_ATTR(lock_xfer, S_IWUSR, NULL, store_lock_xfer);
+
 struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 	unsigned long start, unsigned long len, int irq)
 {
@@ -691,6 +722,10 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 		goto err_del_adap;
 	}
 #endif
+	r = device_create_file(&adap->dev, &dev_attr_lock_xfer);
+	if (r < 0)
+		dev_err(&adap->dev,
+			"Failed to add lock_xfer sysfs files: %d\n", r);
 
 	return dev;
 
@@ -710,8 +745,11 @@ EXPORT_SYMBOL(i2c_dw_setup);
 
 void i2c_dw_free(struct device *pdev, struct dw_i2c_dev *dev)
 {
+	struct i2c_adapter *adap = &dev->adapter;
+
 	i2c_dw_disable(dev);
 
+	device_remove_file(&adap->dev, &dev_attr_lock_xfer);
 #ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
 	sysfs_remove_group(&pdev->kobj, &i2c_dw_attr_group);
 #endif
