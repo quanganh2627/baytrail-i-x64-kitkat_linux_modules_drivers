@@ -1243,7 +1243,7 @@ irqreturn_t i2c_dw_isr(int this_irq, void *dev_id)
 
 	pm_runtime_get(dev->dev);
 #ifdef CONFIG_PM_RUNTIME
-	if (dev->dev->power.runtime_status != RPM_ACTIVE) {
+	if (!pm_runtime_active(dev->dev)) {
 		pm_runtime_put_autosuspend(dev->dev);
 		if (dev->share_irq)
 			return IRQ_NONE;
