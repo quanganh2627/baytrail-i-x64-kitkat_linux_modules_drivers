@@ -256,7 +256,7 @@ static int set_disable_scu_tracing(const char *val,
 	saved_value = kp->arg;
 
 	err = param_set_bool(val, kp);
-	if (err || kp->arg == saved_value)
+	if (err || ((bool)kp->arg == saved_value))
 		return err;
 
 	if (disable_scu_tracing)
@@ -1021,7 +1021,7 @@ struct proc_dir_entry *ipanic_faberr;
 struct proc_dir_entry *offline_scu_log;
 struct proc_dir_entry *ipanic_faberr_recoverable;
 
-static int intel_fw_logging_recoverable_proc_read(struct file *file,
+static ssize_t intel_fw_logging_recoverable_proc_read(struct file *file,
 						  char __user *buffer,
 						  size_t count, loff_t *ppos)
 {
