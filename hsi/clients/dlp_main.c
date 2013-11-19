@@ -41,12 +41,7 @@
 
 /* Forward declarations */
 static void dlp_pdu_destructor(struct hsi_msg *pdu);
-
 static inline void dlp_ctx_update_state_rx(struct dlp_xfer_ctx *xfer_ctx);
-static inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx);
-
-static inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
-					  struct hsi_msg *pdu);
 
 /*
  * Static protocol driver global variables
@@ -858,7 +853,7 @@ static inline void dlp_ctx_update_state_rx(struct dlp_xfer_ctx *xfer_ctx)
  * dlp_ctx_update_state_tx - update the TX state and timers
  * @xfer_ctx: a reference to the xfer TX context to consider
  */
-static inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx)
+inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx)
 {
 	if (xfer_ctx->ctrl_len <= 0) {
 		del_timer_sync(&dlp_drv.timer[xfer_ctx->channel->ch_id]);
@@ -883,7 +878,7 @@ static inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx)
  *			 if the FIFO is empty
  * @fifo: a reference of the FIFO to consider
  */
-static inline struct hsi_msg *dlp_fifo_head(struct list_head *fifo)
+inline struct hsi_msg *dlp_fifo_head(struct list_head *fifo)
 {
 	struct hsi_msg *pdu = NULL;
 
@@ -990,6 +985,13 @@ inline void dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
 	unsigned long flags;
 
 	write_lock_irqsave(&xfer_ctx->lock, flags);
+	_dlp_fifo_wait_push(xfer_ctx, pdu);
+	write_unlock_irqrestore(&xfer_ctx->lock, flags);
+}
+
+inline void _dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
+			       struct hsi_msg *pdu)
+{
 	if (pdu->ttype == HSI_MSG_WRITE)
 		pdu->status = HSI_STATUS_PENDING;
 
@@ -998,7 +1000,6 @@ inline void dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
 
 	/* at the end of the list */
 	list_add_tail(&pdu->link, &xfer_ctx->wait_pdus);
-	write_unlock_irqrestore(&xfer_ctx->lock, flags);
 }
 
 /**
@@ -1070,7 +1071,7 @@ static int _dlp_from_wait_to_ctrl(struct dlp_xfer_ctx *xfer_ctx)
 		dlp_ctx_set_state(xfer_ctx, READY);
 	} else {
 		read_lock_irqsave(&xfer_ctx->lock, flags);
-		ret = (xfer_ctx->ctrl_len > 0);
+		ret = (xfer_ctx->ctrl_len + xfer_ctx->wait_len > 0);
 		read_unlock_irqrestore(&xfer_ctx->lock, flags);
 		if (ret) {
 			struct dlp_channel *ch_ctx  = xfer_ctx->channel;
@@ -1126,7 +1127,7 @@ void dlp_pop_wait_push_ctrl(struct dlp_xfer_ctx *xfer_ctx)
  *
  ***************************************************************************/
 
-static inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
+inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
 					  struct hsi_msg *pdu)
 {
 	/* at the end of the list */
@@ -1143,10 +1144,20 @@ static inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
 struct hsi_msg *dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx)
 {
 	struct hsi_msg *pdu = NULL;
-	struct list_head *first;
 	unsigned long flags;
 
 	write_lock_irqsave(&xfer_ctx->lock, flags);
+	pdu = _dlp_fifo_recycled_pop(xfer_ctx);
+	write_unlock_irqrestore(&xfer_ctx->lock, flags);
+
+	return pdu;
+}
+
+struct hsi_msg *_dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx)
+{
+	struct hsi_msg *pdu = NULL;
+	struct list_head *first;
+
 	first = &xfer_ctx->recycled_pdus;
 
 	/* Empty ? */
@@ -1157,8 +1168,6 @@ struct hsi_msg *dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx)
 		/* Remove the pdu from the list */
 		list_del_init(&pdu->link);
 	}
-
-	write_unlock_irqrestore(&xfer_ctx->lock, flags);
 	return pdu;
 }
 
@@ -1324,7 +1333,8 @@ out:
  */
 inline void dlp_hsi_controller_pop(struct dlp_xfer_ctx *xfer_ctx)
 {
-	xfer_ctx->ctrl_len--;
+	if (xfer_ctx->ctrl_len > 0)
+		xfer_ctx->ctrl_len--;
 }
 
 /**
@@ -1747,25 +1757,6 @@ static void dlp_driver_delete(void)
 			delete_funcs[i] (dlp_drv.channels[i]);
 			dlp_drv.channels[i] = NULL;
 		}
-	}
-}
-
-/*
- * @brief Clean the stored open_conn command from channel context
- *
- * @param none
- *
- * @return none
- */
-void dlp_reset_channels_params(void)
-{
-	int i;
-	struct dlp_hsi_channel *hsi_ch;
-
-	/* Clear any postponed OPEN_CONN command */
-	for (i = 0; i < DLP_CHANNEL_COUNT; i++) {
-		hsi_ch = &dlp_drv.channels_hsi[i];
-		hsi_ch->open_conn = 0;
 	}
 }
 
