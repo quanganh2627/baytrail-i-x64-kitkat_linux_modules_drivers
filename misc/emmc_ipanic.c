@@ -126,7 +126,7 @@ static void emmc_panic_erase(unsigned char *buffer, Sector *sect)
 		    read_dev_sector(emmc->bdev, emmc->start_block, sect);
 		if (!read_buf_ptr) {
 			printk(KERN_ERR "%s: read sector error(%llu)!\n",
-			       __func__, emmc->start_block);
+			       __func__, (unsigned long long) emmc->start_block);
 			goto out;
 		}
 	}
@@ -255,7 +255,7 @@ static ssize_t emmc_ipanic_gbuffer_proc_read(struct file *file, char __user *buf
 			  buffer, log_off + *ppos, count);
 	if (rc <= 0) {
 		mutex_unlock(&drv_mutex);
-		pr_err("%s: emmc_read: invalid args: offset:0x%08lx, count:%d",
+		pr_err("%s: emmc_read: invalid args: offset:0x%08llx, count:%zd",
 		       __func__, log_off + *ppos, count);
 		return rc;
 	}
@@ -355,7 +355,7 @@ static void emmc_ipanic_remove_proc_work(struct work_struct *work)
 	mutex_unlock(&drv_mutex);
 }
 
-static ssize_t emmc_ipanic_proc_write(struct file *file, char __user *buffer,
+static ssize_t emmc_ipanic_proc_write(struct file *file, const char __user *buffer,
 			     size_t count, loff_t *ppos)
 {
 	schedule_work(&proc_removal_work);
@@ -418,7 +418,7 @@ static void emmc_panic_notify_add(void)
 	read_buf_ptr = read_dev_sector(emmc->bdev, emmc->start_block, &sect);
 	if (!read_buf_ptr) {
 		printk(KERN_ERR "%s: read sector error(%llu)!\n", __func__,
-		       emmc->start_block);
+		       (unsigned long long) emmc->start_block);
 		return;
 	}
 
@@ -831,8 +831,8 @@ static void emmc_ipanic_write_gbuffer(struct mmc_emergency_info *emmc,
 void panic_set_gbuffer(struct g_buffer_header *buf)
 {
 	if (gbuffer.base) {
-		pr_err("%s: gbuffer already set to 0x%08x, can not set again",
-		       __func__, (unsigned int)gbuffer.base);
+		pr_err("%s: gbuffer already set to %p, can not set again",
+		       __func__, gbuffer.base);
 		return;
 	}
 
