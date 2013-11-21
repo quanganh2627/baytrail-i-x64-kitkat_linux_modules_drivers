@@ -755,9 +755,7 @@ int dlp_ctx_have_credits(struct dlp_xfer_ctx *xfer_ctx,
 			 struct dlp_channel *ch_ctx)
 {
 	int have_credits = 0;
-	unsigned long flags;
 
-	spin_lock_irqsave(&ch_ctx->lock, flags);
 	/* No credits available if TX timeout/TTY closed */
 	if (!dlp_tty_is_link_valid())
 		goto out;
@@ -769,12 +767,10 @@ int dlp_ctx_have_credits(struct dlp_xfer_ctx *xfer_ctx,
 			((ttype == HSI_MSG_WRITE) && (ch_ctx->credits))) {
 			have_credits = 1;
 		}
-	} else {
+	} else
 		have_credits = 1;
-	}
 
 out:
-	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 	return have_credits;
 }
 
@@ -1259,7 +1255,9 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 	int err = 0;
 
 	/* Check credits */
+	spin_lock_irqsave(&ch_ctx->lock, flags);
 	if (!dlp_ctx_have_credits(xfer_ctx, ch_ctx)) {
+		spin_unlock_irqrestore(&ch_ctx->lock, flags);
 		pr_warn(DRVNAME ": CH%d (HSI CH%d) out of credits (%d)",
 				ch_ctx->ch_id,
 				ch_ctx->hsi_channel, ch_ctx->tx.seq_num);
@@ -1269,13 +1267,15 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 	}
 
 	/* Decrease counters values */
-	write_lock_irqsave(&xfer_ctx->lock, flags);
-	xfer_ctx->room -= lost_room;
-	xfer_ctx->ctrl_len++;
 	if (pdu->ttype == HSI_MSG_WRITE) {
 		xfer_ctx->channel->credits--;
 		xfer_ctx->seq_num++;
 	}
+	spin_unlock_irqrestore(&ch_ctx->lock, flags);
+
+	write_lock_irqsave(&xfer_ctx->lock, flags);
+	xfer_ctx->room -= lost_room;
+	xfer_ctx->ctrl_len++;
 	write_unlock_irqrestore(&xfer_ctx->lock, flags);
 
 	/* Set the DLP signature + seq_num */
@@ -1287,7 +1287,11 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 		if (state != DLP_CH_STATE_OPENED) {
 			pr_err(DRVNAME ": Can't push PDU for CH%d => invalid state: %d\n",
 					ch_ctx->ch_id, state);
-
+			/* Don't set back credit value as modem could have
+			 * updated credit in the meantime. It's better getting
+			 * one credit less than risking a protocol violation.
+			 * Correct credit value will be updated later by modem.
+			 */
 			err = -EACCES;
 			goto out;
 		}
@@ -1303,17 +1307,16 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 		unsigned int ctrl_len;
 		pr_err(DRVNAME ": hsi_async(ctrl_push) failed (%d)", err);
 
-		/* Failed to send pdu, set back counters values */
+		/* Failed to send pdu, set back counters values;
+		 * excepted credit value as modem could have updated
+		 * credit value in the meantime.
+		 */
 		write_lock_irqsave(&xfer_ctx->lock, flags);
 		xfer_ctx->room += lost_room;
 		xfer_ctx->ctrl_len--;
-
-		if (pdu->ttype == HSI_MSG_WRITE) {
-			xfer_ctx->channel->credits++;
-			xfer_ctx->seq_num--;
-		}
-
 		ctrl_len = xfer_ctx->ctrl_len;
+		if (pdu->ttype == HSI_MSG_WRITE)
+			xfer_ctx->seq_num--;
 		write_unlock_irqrestore(&xfer_ctx->lock, flags);
 
 		if (!ctrl_len)

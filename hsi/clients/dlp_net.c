@@ -914,8 +914,11 @@ static int dlp_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct dlp_net_pdu *pdu_data;
 	unsigned long *data_ptr;
 	unsigned int offset;
+	unsigned long flags;
 
+	spin_lock_irqsave(&ch_ctx->lock, flags);
 	if (!dlp_ctx_have_credits(xfer_ctx, ch_ctx)) {
+		spin_unlock_irqrestore(&ch_ctx->lock, flags);
 		/* Stop the NET if */
 		netif_stop_queue(net_ctx->ndev);
 
@@ -926,6 +929,7 @@ static int dlp_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			dlp_drv.tty_closed, dlp_drv.tx_timeout);
 		return NETDEV_TX_BUSY;
 	}
+	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 
 	pdu = dlp_net_get_xmit_pdu(ch_ctx, xfer_ctx, skb->len,
 					&data_ptr, &offset);
