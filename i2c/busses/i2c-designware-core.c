@@ -430,6 +430,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.scl_cfg = vlv2_i2c_scl_cfg,
 		.reset = vlv2_reset,
 		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C4"
 	},
 	[valleyview_4] = {
 		.bus_num     = 5,
