@@ -1255,7 +1255,7 @@ static char *FabricFlagStatusErrLogDetail_pnw_clv[] = {
 };
 
 #define MAX_FULLCHIP_INITID_VAL		16
-#define MAX_SECONDARY_INITID_VAL	19
+#define MAX_SECONDARY_INITID_VAL	18
 #define MAX_AUDIO_INITID_VAL		5
 #define MAX_SC_INITID_VAL			9
 #define MAX_GP_INITID_VAL			2
@@ -1287,7 +1287,6 @@ static char *init_id_str_secondary_tng[] = {
 	"gpf2sdf_i0 (thread 0)",
 	"gpf2sdf_i0 (thread 1)",
 	"emmc01_i0",
-	"emmc01_i1",
 	"scf2sdf_i0 (thread 0)",
 	"scf2sdf_i0 (thread 1)",
 	"scf2sdf_i0 (thread 2)",
