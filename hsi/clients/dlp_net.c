@@ -351,10 +351,13 @@ static int dlp_net_push_rx_pdus(struct dlp_channel *ch_ctx)
 static void dlp_net_credits_available_cb(struct dlp_channel *ch_ctx)
 {
 	struct dlp_net_context *net_ctx = ch_ctx->ch_data;
+	unsigned long flags;
 
 	/* Restart the NET stack if it was stopped */
+	spin_lock_irqsave(&ch_ctx->lock, flags);
 	if (netif_queue_stopped(net_ctx->ndev))
 		netif_wake_queue(net_ctx->ndev);
+	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 }
 
 /**
@@ -918,9 +921,9 @@ static int dlp_net_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	spin_lock_irqsave(&ch_ctx->lock, flags);
 	if (!dlp_ctx_have_credits(xfer_ctx, ch_ctx)) {
-		spin_unlock_irqrestore(&ch_ctx->lock, flags);
 		/* Stop the NET if */
 		netif_stop_queue(net_ctx->ndev);
+		spin_unlock_irqrestore(&ch_ctx->lock, flags);
 
 		pr_warn(DRVNAME ": CH%d TX ignored (credits:%d, seq_num:%d, closed:%d, timeout:%d)",
 			xfer_ctx->channel->ch_id,
