@@ -248,6 +248,7 @@ struct dw_i2c_dev {
 	int			use_dyn_clk;	/* use dynamic clk setting */
 	u32			clk_khz;	/* input clock */
 	u32			speed_cfg;
+	u32			lock_flag;
 };
 
 struct dw_controller {

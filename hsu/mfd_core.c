@@ -1271,7 +1271,7 @@ static void serial_hsu_shutdown(struct uart_port *port)
 		}
 	}
 
-	pm_runtime_put(up->dev);
+	pm_runtime_put_sync(up->dev);
 	mutex_unlock(&lock);
 	trace_hsu_func_end(up->index, __func__, "");
 }
@@ -1811,13 +1811,13 @@ static void hsu_flush_rxfifo(struct uart_hsu_port *up)
 	if (up->hw_type == hsu_intel) {
 		cnt = serial_in(up, UART_FOR) & 0x7F;
 		if (cnt)
-			dev_info(up->dev,
+			dev_dbg(up->dev,
 				"Warning: %d bytes are received"
 				" in RX fifo after RTS active for %d us\n",
 				cnt, up->byte_delay);
 		lsr = serial_in(up, UART_LSR);
 		if (lsr & UART_LSR_DR && cnt)
-			dev_info(up->dev,
+			dev_dbg(up->dev,
 				"flush abnormal data in rx fifo\n");
 			while (cnt) {
 				serial_in(up, UART_RX);
@@ -1874,19 +1874,12 @@ int serial_hsu_do_suspend(struct uart_hsu_port *up)
 	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 	struct uart_port *uport = &up->port;
 	struct tty_port *tport = &uport->state->port;
-	struct tty_struct *tty = NULL;
+	struct tty_struct *tty = tport->tty;
 	struct circ_buf *xmit = &up->port.state->xmit;
 	char cmd;
 	unsigned long flags;
 
 	trace_hsu_func_start(up->index, __func__);
-	mutex_lock(&tport->mutex);
-
-	/*
-	 * The tty may be NULL or not, depends on whether the tty
-	 * port is opened when this suspend hook get called
-	 */
-	tty = tty_port_tty_get(tport);
 
 	if (test_bit(flag_startup, &up->flags)) {
 		if (up->hw_type == hsu_intel &&
@@ -1931,23 +1924,16 @@ int serial_hsu_do_suspend(struct uart_hsu_port *up)
 		goto err;
 	}
 
-	/*
-	 * In some case, the HSU itself or the DMA HW may stalls during the
-	 * xfer, and this suspend hook may get called after the tty port has
-	 * been closed by user space app. So we need to check if the tty
-	 * exist before accessing that tty structure's data.
-	 */
-	if (tty) {
-		if (!uart_circ_empty(xmit) && !uart_tx_stopped(&up->port)) {
-			dev_info(up->dev, "ignore suspend for xmit\n");
-			dev_info(up->dev,
-				"xmit pending:%d, stopped:%d, hw_stopped:%d, MSR:%x\n",
-				(int)uart_circ_chars_pending(xmit),
-				tty->stopped,
-				tty->hw_stopped,
-				serial_in(up, UART_MSR));
-			goto err;
-		}
+	if (test_bit(flag_startup, &up->flags) && !uart_circ_empty(xmit) &&
+		!uart_tx_stopped(&up->port)) {
+		dev_info(up->dev, "ignore suspend for xmit\n");
+		dev_info(up->dev,
+			"xmit pending:%d, stopped:%d, hw_stopped:%d, MSR:%x\n",
+			(int)uart_circ_chars_pending(xmit),
+			tty->stopped,
+			tty->hw_stopped,
+			serial_in(up, UART_MSR));
+		goto err;
 	}
 
 	if (up->use_dma) {
@@ -1972,9 +1958,6 @@ int serial_hsu_do_suspend(struct uart_hsu_port *up)
 	if (up->hw_type == hsu_dw)
 		enable_irq(up->port.irq);
 
-	if (tty)
-		tty_kref_put(tty);
-	mutex_unlock(&tport->mutex);
 	trace_hsu_func_end(up->index, __func__, "");
 	return 0;
 err:
@@ -1992,9 +1975,6 @@ err:
 	serial_sched_sync(up);
 busy:
 	pm_schedule_suspend(up->dev, cfg->idle);
-	if (tty)
-		tty_kref_put(tty);
-	mutex_unlock(&tport->mutex);
 	trace_hsu_func_end(up->index, __func__, "busy");
 	return -EBUSY;
 }

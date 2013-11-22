@@ -1472,12 +1472,14 @@ inline void dlp_hsi_port_unclaim(void)
 /**
  * dlp_hsi_ehandler - HSI client events callback
  * @cl: a reference to HSI client to consider
- * @event: HSI event (START/STOP RX)
+ * @event: HSI event (START/STOP RX/ctrl suspend/ctrl resume)
  */
 static void dlp_hsi_ehandler(struct hsi_client *cl, unsigned long event)
 {
-	struct dlp_channel *ch_ctx = hsi_client_drvdata(cl);
-	struct dlp_xfer_ctx *xfer_ctx = &ch_ctx->rx;
+	struct dlp_channel **ch_ctx = hsi_client_drvdata(cl);
+	struct dlp_channel *ch_ctx_tty = ch_ctx[DLP_CHANNEL_TTY];
+	struct dlp_xfer_ctx *xfer_ctx = &ch_ctx_tty->rx;
+	int i;
 
 	switch (event) {
 	case HSI_EVENT_START_RX:
@@ -1485,7 +1487,19 @@ static void dlp_hsi_ehandler(struct hsi_client *cl, unsigned long event)
 		break;
 
 	case HSI_EVENT_STOP_RX:
-		dlp_stop_rx(xfer_ctx, ch_ctx);
+		dlp_stop_rx(xfer_ctx, ch_ctx_tty);
+		break;
+
+	case HSI_EVENT_RESUME:
+		for (i = 0; i < DLP_CHANNEL_COUNT; i++)
+			if (ch_ctx[i]->resume_cb)
+				ch_ctx[i]->resume_cb(ch_ctx[i]);
+		break;
+
+	case HSI_EVENT_SUSPEND:
+		for (i = 0; i < DLP_CHANNEL_COUNT; i++)
+			if (ch_ctx[i]->suspend_cb)
+				ch_ctx[i]->suspend_cb(ch_ctx[i]);
 		break;
 	}
 }
@@ -1846,10 +1860,10 @@ static int dlp_driver_probe(struct device *dev)
 	}
 
 	/* HSI client events callback  */
-	client->ehandler = dlp_hsi_ehandler;
+	dlp_drv.ehandler = dlp_hsi_ehandler;
 
 	/* FIXME : other channels ? */
-	hsi_client_set_drvdata(client, dlp_drv.channels[DLP_CHANNEL_TTY]);
+	hsi_client_set_drvdata(client, dlp_drv.channels);
 
 	/* Create debugfs entries */
 	dlp_create_debug_fs();

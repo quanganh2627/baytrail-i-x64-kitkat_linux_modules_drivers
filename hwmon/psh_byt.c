@@ -46,6 +46,7 @@
 #include <asm/intel_vlv2.h>
 
 #include "psh_ia_common.h"
+#define GPIO_PSH_INT ((int)133)
 
 
 /* need a global lock to check the psh driver access */
@@ -55,6 +56,7 @@ struct psh_ext_if {
 	char psh_frame[LBUF_MAX_CELL_SIZE];
 
 	int gpio_psh_ctl, gpio_psh_rst;
+	int gpio_psh_int;
 
 	int irq_disabled;
 };
@@ -78,12 +80,13 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 		.buf = (void *)&psh_if_info->psh_frame
 		}
 	};
+	int sequent_dummy = 0;
 
 	/* We may need to zero all the buffer */
 
 	pm_runtime_get_sync(&psh_if_info->pshc->dev);
-	/* Loop read till error or no more valid data */
-	while (1) {
+	/* Loop read till error or no more data */
+	while (!gpio_get_value(psh_if_info->gpio_psh_int)) {
 		char *ptr;
 		int len;
 
@@ -91,6 +94,13 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 			break;
 		else if (ia_data->cmd_in_progress != CMD_INVALID)
 			schedule();
+
+		if (sequent_dummy >= 2) {
+			/* something wrong, check FW */
+			dev_dbg(&psh_if_info->pshc->dev,
+				"2 sequent dummy frame header read!");
+			break;
+		}
 
 		ret = i2c_transfer(psh_if_info->pshc->adapter, msg, 1);
 		if (ret != 1) {
@@ -105,13 +115,16 @@ int read_psh_data(struct psh_ia_priv *ia_data)
 				ret = -EPERM;
 				break;
 			}
+			sequent_dummy = 0;
 		} else {
 			if (fh.sign || fh.length) {
 				dev_err(&psh_if_info->pshc->dev, "wrong fh (0x%x, 0x%x)\n",
 						fh.sign, fh.length);
 				ret = -EPERM;
+				break;
 			}
-			break;
+			sequent_dummy++;
+			continue;
 		}
 
 		len = frame_size(fh.length) - sizeof(fh);
@@ -300,6 +313,7 @@ static int psh_probe(struct i2c_client *client,
 	int ret = -EPERM;
 	struct psh_ia_priv *ia_data;
 	struct psh_ext_if *psh_if_info;
+	int rc;
 
 	psh_if_info = kzalloc(sizeof(*psh_if_info), GFP_KERNEL);
 	if (!psh_if_info) {
@@ -328,7 +342,7 @@ static int psh_probe(struct i2c_client *client,
 	if (psh_if_info->gpio_psh_ctl < 0) {
 		dev_warn(&client->dev, "fail to get psh_ctl pin by ACPI\n");
 	} else {
-		int rc = gpio_request(psh_if_info->gpio_psh_ctl, "psh_ctl");
+		rc = gpio_request(psh_if_info->gpio_psh_ctl, "psh_ctl");
 		if (rc) {
 			dev_warn(&client->dev, "fail to request psh_ctl pin\n");
 			psh_if_info->gpio_psh_ctl = -1;
@@ -344,7 +358,7 @@ static int psh_probe(struct i2c_client *client,
 	if (psh_if_info->gpio_psh_rst < 0) {
 		dev_warn(&client->dev, "failed to get psh_rst pin by ACPI\n");
 	} else {
-		int rc = gpio_request(psh_if_info->gpio_psh_rst, "psh_rst");
+		rc = gpio_request(psh_if_info->gpio_psh_rst, "psh_rst");
 		if (rc) {
 			dev_warn(&client->dev, "fail to request psh_rst pin\n");
 			psh_if_info->gpio_psh_rst = -1;
@@ -353,6 +367,15 @@ static int psh_probe(struct i2c_client *client,
 			gpio_direction_output(psh_if_info->gpio_psh_rst, 1);
 			gpio_set_value(psh_if_info->gpio_psh_rst, 1);
 		}
+	}
+
+	psh_if_info->gpio_psh_int = (int)id->driver_data;
+	rc = gpio_request(psh_if_info->gpio_psh_int, "psh_int");
+	if (rc) {
+		dev_warn(&client->dev, "fail to request psh_int pin\n");
+		psh_if_info->gpio_psh_int = -1;
+	} else {
+		gpio_export(psh_if_info->gpio_psh_int, 1);
 	}
 
 	/* set the flag to to enable irq when need */
@@ -420,7 +443,7 @@ static void psh_shutdown(struct i2c_client *client)
 }
 
 static const struct i2c_device_id psh_byt_id[] = {
-	{ "SMO91D0:00", 0 },
+	{ "SMO91D0:00", GPIO_PSH_INT },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, psh_byt_id);

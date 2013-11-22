@@ -154,6 +154,37 @@ void ia_circ_put_data(struct circ_buf *circ, const char *buf, u32 size)
 	circ->head &= (CIRC_SIZE - 1);
 }
 
+void ia_circ_dbg_put_data(struct psh_ia_priv *psh_ia_data,
+					 const char *buf, u32 size)
+{
+	int temp_count;
+	struct circ_buf *circ;
+
+	if (size > CIRC_SIZE -1)
+		return;
+
+	temp_count = 0;
+	circ = &psh_ia_data->circ_dbg;
+
+	if (CIRC_SPACE(circ->head, circ->tail, CIRC_SIZE) < size) {
+
+		mutex_lock(&psh_ia_data->circ_dbg_mutex);
+
+		circ->tail = circ->head + size + 1;
+		circ->tail &= (CIRC_SIZE - 1);
+		while (circ->buf[circ->tail++] != '\n') {
+			circ->tail &= (CIRC_SIZE - 1);
+			temp_count++;
+			if (temp_count > (CIRC_SIZE -1))
+				break;
+		}
+
+		mutex_unlock(&psh_ia_data->circ_dbg_mutex);
+	}
+
+	ia_circ_put_data(circ, buf, size);
+}
+
 int ia_circ_get_data(struct circ_buf *circ, char *buf, u32 size)
 {
 	int avail, avail_tail, cnt;
@@ -180,6 +211,18 @@ int ia_circ_get_data(struct circ_buf *circ, char *buf, u32 size)
 	circ->tail += cnt;
 	circ->tail &= (CIRC_SIZE - 1);
 	return avail_tail + cnt;
+}
+
+int ia_circ_dbg_get_data(struct psh_ia_priv *psh_ia_data, char *buf, u32 size)
+{
+	int cnt;
+	struct circ_buf *circ = &psh_ia_data->circ_dbg;
+
+	mutex_lock(&psh_ia_data->circ_dbg_mutex);
+	cnt = ia_circ_get_data(circ, buf, size);
+	mutex_unlock(&psh_ia_data->circ_dbg_mutex);
+
+	return cnt;
 }
 
 int ia_send_cmd(struct psh_ia_priv *psh_ia_data,
@@ -302,7 +345,7 @@ ssize_t ia_read_debug_data(struct file *file, struct kobject *kobj,
 	struct psh_ia_priv *psh_ia_data =
 			(struct psh_ia_priv *)dev_get_drvdata(dev);
 
-	return ia_circ_get_data(&psh_ia_data->circ_dbg, buf, count);
+	return ia_circ_dbg_get_data(psh_ia_data, buf, count);
 }
 
 ssize_t ia_set_dbg_mask(struct device *dev,
@@ -393,7 +436,7 @@ static void ia_handle_snr_info(struct psh_ia_priv *psh_ia_data,
 		snr_info_start++;
 		str_size = snprintf(buf, STR_BUFF_SIZE,
 				"******** Start Sensor Status ********\n");
-		ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
+		ia_circ_dbg_put_data(psh_ia_data, buf, str_size);
 	}
 
 	if (!sinfo) {
@@ -402,7 +445,7 @@ static void ia_handle_snr_info(struct psh_ia_priv *psh_ia_data,
 			sensor_map_setup = 1;
 			str_size = snprintf(buf, STR_BUFF_SIZE,
 					"******** End Sensor Status ********\n");
-			ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
+			ia_circ_dbg_put_data(psh_ia_data, buf, str_size);
 		}
 		return;
 	}
@@ -429,7 +472,7 @@ static void ia_handle_snr_info(struct psh_ia_priv *psh_ia_data,
 	str_size = snprintf(buf, STR_BUFF_SIZE,
 			"***** Sensor %5s(%d) Status *****\n",
 			sinfo->name, sinfo->id);
-	ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
+	ia_circ_dbg_put_data(psh_ia_data, buf, str_size);
 
 	str_size = snprintf(buf, STR_BUFF_SIZE,
 			"  freq=%d, freq_max=%d\n"
@@ -440,7 +483,7 @@ static void ia_handle_snr_info(struct psh_ia_priv *psh_ia_data,
 			sinfo->status, sinfo->bit_cfg,
 			sinfo->data_cnt, sinfo->priv,
 			sinfo->attri, sinfo->health);
-	ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
+	ia_circ_dbg_put_data(psh_ia_data, buf, str_size);
 
 	for (i = 0; i < sinfo->link_num; i++) {
 		const struct link_info *linfo = &sinfo->linfo[i];
@@ -453,12 +496,12 @@ static void ia_handle_snr_info(struct psh_ia_priv *psh_ia_data,
 			linfo->sid,
 			linfo->rpt_freq);
 
-		ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
+		ia_circ_dbg_put_data(psh_ia_data, buf, str_size);
 	}
 
 	str_size = snprintf(buf, STR_BUFF_SIZE,
 			"*****************************\n");
-	ia_circ_put_data(&psh_ia_data->circ_dbg, buf, str_size);
+	ia_circ_dbg_put_data(psh_ia_data, buf, str_size);
 }
 
 ssize_t ia_set_status_mask(struct device *dev,
@@ -717,7 +760,7 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 	case RESP_BIST_RESULT:
 		break;
 	case RESP_DEBUG_MSG:
-		ia_circ_put_data(&psh_ia_data->circ_dbg,
+		ia_circ_dbg_put_data(psh_ia_data,
 				resp->buf, resp->data_len);
 		return 0;
 	case RESP_GET_STATUS:
@@ -767,7 +810,7 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 						curtime, sensor_name,
 						event_name, context_name);
 
-			ia_circ_put_data(&psh_ia_data->circ_dbg,
+			ia_circ_dbg_put_data(psh_ia_data,
 					msg_str, len);
 			out_data++;
 		}
@@ -796,6 +839,7 @@ int psh_ia_common_init(struct device *dev, struct psh_ia_priv **data)
 
 	mutex_init(&psh_ia_data->cmd_mutex);
 	psh_ia_data->cmd_in_progress = CMD_INVALID;
+	mutex_init(&psh_ia_data->circ_dbg_mutex);
 	init_completion(&psh_ia_data->cmd_load_comp);
 	init_completion(&psh_ia_data->cmd_comp);
 	INIT_LIST_HEAD(&psh_ia_data->sensor_list);

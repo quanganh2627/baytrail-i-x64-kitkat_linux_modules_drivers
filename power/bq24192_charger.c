@@ -1126,8 +1126,8 @@ static inline int bq24192_enable_charging(
 	 */
 	regval = chrg_ilim_to_reg(chip->inlmt);
 
-	ret = bq24192_write_reg(chip->client, BQ24192_INPUT_SRC_CNTL_REG,
-				regval);
+	ret = bq24192_reg_read_modify(chip->client, BQ24192_INPUT_SRC_CNTL_REG,
+				regval, true);
 	if (ret < 0) {
 		dev_err(&chip->client->dev,
 				"inlmt programming failed: %d\n", ret);
@@ -1197,6 +1197,18 @@ static inline int bq24192_enable_charging(
 static inline int bq24192_enable_charger(
 			struct bq24192_chip *chip, int val)
 {
+	int ret;
+
+	/*stop charger for throttle state 3, by putting it in HiZ mode*/
+	if (chip->cntl_state == 0x3) {
+		ret = bq24192_reg_read_modify(chip->client,
+			BQ24192_INPUT_SRC_CNTL_REG,
+				INPUT_SRC_CNTL_EN_HIZ, true);
+
+		if (ret < 0)
+			dev_warn(&chip->client->dev,
+				"Input src cntl write failed\n");
+	}
 
 	dev_warn(&chip->client->dev, "%s:%d %d\n", __func__, __LINE__, val);
 
@@ -1572,10 +1584,12 @@ static void bq24192_task_worker(struct work_struct *work)
 		goto sched_task_work;
 	}
 
-	/* Clear the charger from Hi-Z */
-	ret = bq24192_clear_hiz(chip);
-	if (ret < 0)
-		dev_warn(&chip->client->dev, "HiZ clear failed:\n");
+	if (!(chip->cntl_state == 0x3)) {
+		/* Clear the charger from Hi-Z */
+		ret = bq24192_clear_hiz(chip);
+		if (ret < 0)
+			dev_warn(&chip->client->dev, "HiZ clear failed:\n");
+	}
 
 	/* Modify the VINDPM */
 

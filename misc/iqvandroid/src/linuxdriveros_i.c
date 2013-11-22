@@ -500,16 +500,17 @@ NalUtoKMemcpy(
     UINTN BytesLeft = 0;
     NAL_PHYSICAL_ADDRESS NalPhysical = 0;
 
-    if(_NalIsBytMfgModeDoneSet() == TRUE && Dest != NULL) {
-        NalPhysical = __pa(Dest);
-        if(NalPhysical >= (Global_SpiBaseRegPhysicalAddress + SPI_FDATA0_OFFSET)
-           && NalPhysical <= (Global_SpiBaseRegPhysicalAddress + SPI_FDATA15_OFFSET)) {
-            printk(KERN_DEBUG "MFG mode is set cannot write to SPI after MFG mode is set\n");
-	    return NULL;
+    if(Dest != NULL) {
+        if(_NalIsBytMfgModeDoneSet() == TRUE) {
+            NalPhysical = __pa(Dest);
+            if(NalPhysical >= (Global_SpiBaseRegPhysicalAddress + SPI_FDATA0_OFFSET)
+               && NalPhysical <= (Global_SpiBaseRegPhysicalAddress + SPI_FDATA15_OFFSET)) {
+                printk(KERN_DEBUG "MFG mode is set cannot write to SPI after MFG mode is set\n");
+	        return NULL;
+            }
         }
+        BytesLeft = copy_from_user(Dest, Source, Size);
     }
-
-    BytesLeft = copy_from_user(Dest, Source, Size);
     return Dest;
 }
 

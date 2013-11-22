@@ -707,6 +707,9 @@ static int dlp_tty_open(struct tty_struct *tty, struct file *filp)
 		/* Claim & Setup the HSI port */
 		dlp_hsi_port_claim();
 
+		/* Register the event callback */
+		hsi_register_port_event(dlp_drv.client, dlp_drv.ehandler);
+
 		/* Push RX pdus for ALL channels */
 		dlp_push_rx_pdus();
 	}

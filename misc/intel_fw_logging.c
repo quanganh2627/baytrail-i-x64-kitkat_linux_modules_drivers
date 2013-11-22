@@ -1279,6 +1279,7 @@ static int intel_fw_logging_resume(struct platform_device *dev)
 	rpmsg_send_simple_command(fw_logging_instance,
 					IPCMSG_SCULOG_CTRL,
 					IPC_CMD_SCU_LOG_RESUME);
+	return 0;
 }
 #endif
 

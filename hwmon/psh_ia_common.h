@@ -235,6 +235,7 @@ struct psh_ia_priv {
 	struct resp_cmd_ack *cmd_ack;
 	char *version_str;
 	struct mutex cmd_mutex;
+	struct mutex circ_dbg_mutex;
 	struct completion cmd_load_comp;
 	struct completion cmd_comp;
 	struct list_head sensor_list;

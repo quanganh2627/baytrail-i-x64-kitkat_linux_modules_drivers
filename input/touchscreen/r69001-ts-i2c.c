@@ -27,6 +27,7 @@
 #include <linux/jiffies.h>
 #include <linux/miscdevice.h>
 #include <linux/suspend.h>
+#include <linux/earlysuspend.h>
 #include <linux/io.h>
 #include <linux/gpio.h>
 #include <linux/uaccess.h>
@@ -123,6 +124,9 @@ struct r69001_ts_data {
 	unsigned int finger_mask;
 	u8 mode;
 	u8 t_num;
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	struct early_suspend es;
+#endif
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -372,6 +376,58 @@ static void r69001_set_mode(struct r69001_ts_data *ts, u8 mode, u16 poll_time)
 	}
 }
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+/*invalid touch point*/
+#define INVALID_TOUCH_X -1
+#define INVALID_TOUCH_Y -1
+#define INVALID_TOUCH_Z 2
+void r69001_early_suspend(struct early_suspend *h)
+{
+	struct r69001_ts_data *ts = container_of(h, struct r69001_ts_data, es);
+	struct input_dev *input_dev = ts->input_dev;
+	unsigned int finger_mask;
+	int i;
+
+	disable_irq(ts->client->irq);
+
+	r69001_ts_write_data(ts, REG_CONTROL, REG_SCAN_MODE, SCAN_MODE_STOP);
+
+	/*emulate an invalid touch for all active fingers */
+	finger_mask = ts->finger_mask;
+	for (i = 0; finger_mask != 0; i++) {
+		if (finger_mask & 0x01) {
+			input_mt_slot(input_dev, i);
+			input_mt_report_slot_state(input_dev,
+						MT_TOOL_FINGER, true);
+			input_report_abs(input_dev, ABS_MT_POSITION_X,
+						INVALID_TOUCH_X);
+			input_report_abs(input_dev, ABS_MT_POSITION_Y,
+						INVALID_TOUCH_Y);
+			input_report_abs(input_dev, ABS_MT_PRESSURE,
+						INVALID_TOUCH_Z);
+		}
+		finger_mask >>= 1;
+	}
+
+	if (ts->finger_mask)
+		input_sync(input_dev);
+}
+
+void r69001_late_resume(struct early_suspend *h)
+{
+	struct r69001_ts_data *ts = container_of(h, struct r69001_ts_data, es);
+	u8 mode = 0;
+
+	r69001_ts_read_data(ts, REG_CONTROL, REG_SCAN_MODE, 1, &mode);
+	if (mode == SCAN_MODE_STOP) {
+		ts->data.mode.mode = UNKNOW_MODE;
+		r69001_ts_write_data(ts, REG_CONTROL, REG_SCAN_CYCLE, SCAN_TIME);
+		r69001_set_mode(ts, ts->mode, POLL_INTERVAL);
+	}
+	enable_irq(ts->client->irq);
+}
+#endif
+
 #ifdef CONFIG_DEBUG_FS
 static int r69001_ts_dbgfs_show(struct seq_file *seq, void *unused)
 {
@@ -550,6 +606,13 @@ r69001_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	error = r69001_ts_create_dbgfs(ts);
 	if (error)
 		dev_warn(&client->dev, "Failed to create debugfs\n");
+#endif
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+	ts->es.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN + 1;
+	ts->es.suspend = r69001_early_suspend;
+	ts->es.resume = r69001_late_resume;
+	register_early_suspend(&ts->es);
 #endif
 
 	return 0;
