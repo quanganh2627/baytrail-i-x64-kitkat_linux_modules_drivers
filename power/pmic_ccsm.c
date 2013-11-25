@@ -83,6 +83,9 @@
 
 #define USB_WAKE_LOCK_TIMEOUT	(5 * HZ)
 
+/* 100mA value definition for setting the inlimit in bq24261 */
+#define USBINPUTICC100VAL	100
+
 /* Type definitions */
 static void pmic_bat_zone_changed(void);
 static void pmic_battery_overheat_handler(bool);
@@ -1327,6 +1330,7 @@ static int pmic_init(void)
 				i);
 			return ret;
 		}
+
 		if (chc.pdata->cc_to_reg)
 			chc.pdata->cc_to_reg(bcprof->temp_mon_range[i].
 					full_chrg_cur, &reg_val);
@@ -1374,6 +1378,16 @@ static int pmic_init(void)
 	ret = pmic_update_tt(TT_CUSTOMFIELDEN_ADDR,
 				TT_HOT_COLD_LC_MASK,
 				TT_HOT_COLD_LC_DIS);
+
+	if (unlikely(ret)) {
+		dev_err(chc.dev, "Error updating TT_CUSTOMFIELD_EN reg\n");
+		return ret;
+	}
+
+	if (chc.pdata->inlmt_to_reg)
+		chc.pdata->inlmt_to_reg(USBINPUTICC100VAL, &reg_val);
+
+	ret = pmic_write_tt(TT_USBINPUTICC100VAL_ADDR, reg_val);
 	return ret;
 }
 
