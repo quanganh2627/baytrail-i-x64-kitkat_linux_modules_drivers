@@ -187,6 +187,11 @@ int process_send_cmd(struct psh_ia_priv *ia_data,
 			psh_if_info->irq_disabled = 1;
 		}
 
+		/* first send soft reset to disable sensors running,
+			or sensor I2C bus may hang */
+		ret = i2c_transfer(psh_if_info->pshc->adapter, &i2c_cmd, 1);
+		msleep(200);
+
 		gpio_set_value(psh_if_info->gpio_psh_rst, 0);
 		usleep_range(10000, 10000);
 		gpio_set_value(psh_if_info->gpio_psh_rst, 1);
@@ -252,7 +257,7 @@ static void psh_byt_toggle_ctl_pin(struct device *dev,
 	if (psh_if_info->gpio_psh_ctl > 0) {
 		gpio_set_value(psh_if_info->gpio_psh_ctl, value);
 		if (value)
-			usleep_range(1800, 1800);
+			usleep_range(2000, 2000);
 	}
 }
 

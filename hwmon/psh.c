@@ -72,6 +72,11 @@ int process_send_cmd(struct psh_ia_priv *psh_ia_data,
 	u8 *pcmd = (u8 *)cmd;
 	struct psh_msg in;
 
+	if (ch == PSH2IA_CHANNEL0 && cmd->cmd_id == CMD_RESET) {
+		intel_psh_ipc_disable_irq();
+		ia_lbuf_read_reset(psh_ia_data->lbuf);
+	}
+
 	/* map from virtual channel to real channel */
 	ch = ch - PSH2IA_CHANNEL0 + PSH_SEND_CH0;
 
@@ -98,11 +103,15 @@ int process_send_cmd(struct psh_ia_priv *psh_ia_data,
 		if (ret) {
 			psh_err("sendcmd %d by IPC %d failed!, ret=%d\n",
 					cmd->cmd_id, ch, ret);
-			return -EIO;
+			ret = -EIO;
+			goto f_out;
 		}
 	}
 
-	return 0;
+f_out:
+	if (ch == PSH2IA_CHANNEL0 && cmd->cmd_id == CMD_RESET)
+		intel_psh_ipc_enable_irq();
+	return ret;
 }
 
 
@@ -154,6 +163,7 @@ int do_setup_ddr(struct device *dev)
 		}
 		release_firmware(fw_entry);
 	}
+	ia_lbuf_read_reset(ia_data->lbuf);
 	*(unsigned long *)(&cmd_user.param) = ddr_phy;
 	return ia_send_cmd(ia_data, &cmd_user, 7);
 }

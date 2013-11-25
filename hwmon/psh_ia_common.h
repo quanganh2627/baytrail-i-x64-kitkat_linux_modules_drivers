@@ -249,6 +249,7 @@ struct psh_ia_priv {
 /* exports */
 void ia_lbuf_read_init(struct loop_buffer *lbuf,
 		u8 *buf, u16 size, update_finished_f uf);
+void ia_lbuf_read_reset(struct loop_buffer *lbuf);
 int ia_lbuf_read_next(struct psh_ia_priv *psh_ia_data,
 			struct loop_buffer *lbuf,
 			u8 **buf, u16 *size);
