@@ -1998,11 +1998,11 @@ int serial_hsu_do_resume(struct uart_hsu_port *up)
 		cfg->hw_resume(up->index, up->dev);
 	if (test_bit(flag_startup, &up->flags))
 		hsu_flush_rxfifo(up);
+	if (up->use_dma)
+		up->dma_ops->resume(up);
 	if (cfg->hw_set_rts)
 		cfg->hw_set_rts(up->index, 0);
 	enable_irq(up->port.irq);
-	if (up->use_dma)
-		up->dma_ops->resume(up);
 
 	serial_sched_start(up);
 	spin_lock_irqsave(&up->port.lock, flags);

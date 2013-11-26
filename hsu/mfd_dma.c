@@ -208,8 +208,8 @@ static int dw_dma_resume(struct uart_hsu_port *up)
 	txchan = dw_dma->txchan;
 	rxchan = dw_dma->rxchan;
 
-	txchan->device->device_control(txchan, DMA_RESUME, 0);
 	rxchan->device->device_control(rxchan, DMA_RESUME, 0);
+	txchan->device->device_control(txchan, DMA_RESUME, 0);
 	pm_qos_update_request(&up->qos, CSTATE_EXIT_LATENCY_C2);
 	return 0;
 }
