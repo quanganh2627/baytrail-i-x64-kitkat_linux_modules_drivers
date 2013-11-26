@@ -93,16 +93,16 @@
 #define BQ24261_HZ_ENABLE		(0x01)
 
 #define BQ24261_ICHRG_MASK		(0x1F << 3)
-#define BQ24261_ICHRG_100mA		(0x01 << 3)
-#define BQ24261_ICHRG_200mA		(0x01 << 4)
-#define BQ24261_ICHRG_400mA		(0x01 << 5)
-#define BQ24261_ICHRG_800mA		(0x01 << 6)
-#define BQ24261_ICHRG_1600mA		(0x01 << 7)
+#define BQ24261_ICHRG_100ma		(0x01 << 3)
+#define BQ24261_ICHRG_200ma		(0x01 << 4)
+#define BQ24261_ICHRG_400ma		(0x01 << 5)
+#define BQ24261_ICHRG_800ma		(0x01 << 6)
+#define BQ24261_ICHRG_1600ma		(0x01 << 7)
 
 #define BQ24261_ITERM_MASK		(0x03)
-#define BQ24261_ITERM_50mA		(0x01 << 0)
-#define BQ24261_ITERM_100mA		(0x01 << 1)
-#define BQ24261_ITERM_200mA		(0x01 << 2)
+#define BQ24261_ITERM_50ma		(0x01 << 0)
+#define BQ24261_ITERM_100ma		(0x01 << 1)
+#define BQ24261_ITERM_200ma		(0x01 << 2)
 
 #define BQ24261_VBREG_MASK		(0x3F << 2)
 
@@ -128,7 +128,7 @@
 #define BQ24261_TS_MASK			(0x01 << 3)
 #define BQ24261_TS_ENABLED		(0x01 << 3)
 #define BQ24261_BOOST_ILIM_MASK		(0x01 << 4)
-#define BQ24261_BOOST_ILIM_500mA	(0x0)
+#define BQ24261_BOOST_ILIM_500ma	(0x0)
 #define BQ24261_BOOST_ILIM_1A		(0x01 << 4)
 
 #define BQ24261_SAFETY_TIMER_MASK	(0x03 << 5)
@@ -190,19 +190,19 @@ u16 bq24261_inlmt[][2] = {
 u16 bq24261_iterm[][2] = {
 	{0, 0x00}
 	,
-	{50, BQ24261_ITERM_50mA}
+	{50, BQ24261_ITERM_50ma}
 	,
-	{100, BQ24261_ITERM_100mA}
+	{100, BQ24261_ITERM_100ma}
 	,
-	{150, BQ24261_ITERM_100mA | BQ24261_ITERM_50mA}
+	{150, BQ24261_ITERM_100ma | BQ24261_ITERM_50ma}
 	,
-	{200, BQ24261_ITERM_200mA}
+	{200, BQ24261_ITERM_200ma}
 	,
-	{250, BQ24261_ITERM_200mA | BQ24261_ITERM_50mA}
+	{250, BQ24261_ITERM_200ma | BQ24261_ITERM_50ma}
 	,
-	{300, BQ24261_ITERM_200mA | BQ24261_ITERM_100mA}
+	{300, BQ24261_ITERM_200ma | BQ24261_ITERM_100ma}
 	,
-	{350, BQ24261_ITERM_200mA | BQ24261_ITERM_100mA | BQ24261_ITERM_50mA}
+	{350, BQ24261_ITERM_200ma | BQ24261_ITERM_100ma | BQ24261_ITERM_50ma}
 	,
 };
 
@@ -210,25 +210,25 @@ u16 bq24261_cc[][2] = {
 
 	{500, 0x00}
 	,
-	{600, BQ24261_ICHRG_100mA}
+	{600, BQ24261_ICHRG_100ma}
 	,
-	{700, BQ24261_ICHRG_200mA}
+	{700, BQ24261_ICHRG_200ma}
 	,
-	{800, BQ24261_ICHRG_100mA | BQ24261_ICHRG_200mA}
+	{800, BQ24261_ICHRG_100ma | BQ24261_ICHRG_200ma}
 	,
-	{900, BQ24261_ICHRG_400mA}
+	{900, BQ24261_ICHRG_400ma}
 	,
-	{1000, BQ24261_ICHRG_400mA | BQ24261_ICHRG_100mA}
+	{1000, BQ24261_ICHRG_400ma | BQ24261_ICHRG_100ma}
 	,
-	{1100, BQ24261_ICHRG_400mA | BQ24261_ICHRG_200mA}
+	{1100, BQ24261_ICHRG_400ma | BQ24261_ICHRG_200ma}
 	,
-	{1200, BQ24261_ICHRG_400mA | BQ24261_ICHRG_200mA | BQ24261_ICHRG_100mA}
+	{1200, BQ24261_ICHRG_400ma | BQ24261_ICHRG_200ma | BQ24261_ICHRG_100ma}
 	,
-	{1300, BQ24261_ICHRG_800mA}
+	{1300, BQ24261_ICHRG_800ma}
 	,
-	{1400, BQ24261_ICHRG_800mA | BQ24261_ICHRG_100mA}
+	{1400, BQ24261_ICHRG_800ma | BQ24261_ICHRG_100ma}
 	,
-	{1500, BQ24261_ICHRG_800mA | BQ24261_ICHRG_200mA}
+	{1500, BQ24261_ICHRG_800ma | BQ24261_ICHRG_200ma}
 	,
 };
 
@@ -436,7 +436,7 @@ static inline void bq24261_dump_regs(bool dump_master)
 		dev_err(&bq24261_client->dev,
 			"%s: Error in getting battery current", __func__);
 	else
-		dev_info(&bq24261_client->dev, "Battery Current=%dmA\n",
+		dev_info(&bq24261_client->dev, "Battery Current=%dma\n",
 				(bat_cur/1000));
 
 	ret = get_battery_voltage(&bat_volt);
@@ -590,7 +590,7 @@ static inline int bq24261_tmr_ntc_init(struct bq24261_charger *chip)
 		reg_val |= BQ24261_TS_ENABLED;
 
 	/* Check if boost mode current configuration is above 1A*/
-	if (chip->pdata->boost_mode_mA >= 1000)
+	if (chip->pdata->boost_mode_ma >= 1000)
 		reg_val |= BQ24261_BOOST_ILIM_1A;
 
 	ret = bq24261_read_modify_reg(chip->client, BQ24261_ST_NTC_MON_ADDR,
