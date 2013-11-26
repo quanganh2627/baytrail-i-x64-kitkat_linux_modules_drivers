@@ -186,6 +186,10 @@
 #define VLV2_HS_SCLK_HCNT 0x6
 #define VLV2_HS_SCLK_LCNT 0x16
 
+#define DW_STD_SPEED	100000
+#define DW_FAST_SPEED	400000
+#define DW_HIGH_SPEED	3400000
+
 struct dw_controller;
 /**
  * struct dw_i2c_dev - private i2c-designware data
@@ -249,6 +253,7 @@ struct dw_i2c_dev {
 	u32			clk_khz;	/* input clock */
 	u32			speed_cfg;
 	u32			lock_flag;
+	u32			freq;
 };
 
 struct dw_controller {
@@ -315,4 +320,4 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 void i2c_dw_free(struct device *pdev, struct dw_i2c_dev *dev);
 int i2c_dw_suspend(struct dw_i2c_dev *dev, bool runtime);
 int i2c_dw_resume(struct dw_i2c_dev *dev, bool runtime);
-
+void i2c_acpi_devices_setup(struct device *pdev, struct dw_i2c_dev *dev);
