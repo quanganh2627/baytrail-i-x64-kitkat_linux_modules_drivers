@@ -42,6 +42,7 @@
 #include <linux/workqueue.h>
 #include <linux/preempt.h>
 #include <linux/pci.h>
+#include <linux/nmi.h>
 #include <linux/blkdev.h>
 #include <linux/genhd.h>
 #include <linux/panic_gbuffer.h>
@@ -891,7 +892,7 @@ static int emmc_ipanic(struct notifier_block *this, unsigned long event,
 	/* Ensure that cond_resched() won't try to preempt anybody */
 	add_preempt_count(PREEMPT_ACTIVE);
 #endif
-	touch_softlockup_watchdog();
+	touch_nmi_watchdog();
 
 	if (!ctx)
 		goto out;
