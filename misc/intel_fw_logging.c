@@ -335,7 +335,7 @@ static void read_scu_trace_hdr(struct scu_trace_hdr_t *hdr)
 	count = sizeof(struct scu_trace_hdr_t) / sizeof(u32);
 
 	if (!fabric_err_buf1) {
-		pr_err("Invalid Fabric Error buf1 offset");
+		pr_err("Invalid Fabric Error buf1 offset\n");
 		return;
 	}
 	for (i = 0; i < count; i++)
@@ -558,7 +558,7 @@ static void read_fwerr_log(u32 *buf, void __iomem *oshob_ptr)
 		intel_scu_ipc_get_fabricerror_buf1_offset();
 
 	if (fabric_err_dump_offset == oshob_ptr) {
-		pr_err("Invalid Fabric error buf1 offset");
+		pr_err("Invalid Fabric error buf1 offset\n");
 		return;
 	}
 	if (!USE_LEGACY()) {
@@ -576,7 +576,7 @@ static void read_fwerr_log(u32 *buf, void __iomem *oshob_ptr)
 
 		if (fabric_err_dump_offset == oshob_ptr) {
 			/* Fabric error buf2 not available on all platforms. */
-			pr_warn("No Fabric Error buf2 offset available");
+			pr_warn("No Fabric Error buf2 offset available\n");
 			return;
 		}
 
@@ -811,7 +811,7 @@ static char *error_type_str[] = {
 				(sz) += ALLOC_UNIT_SIZE;		\
 			else {						\
 				(sz) = 0;				\
-				pr_err("krealloc failed");		\
+				pr_err("krealloc failed\n");		\
 			}						\
 		}							\
 		if ((str) != NULL) {					\
@@ -1230,7 +1230,7 @@ static int intel_fw_logging_panic_handler(struct notifier_block *this,
 		goto out;
 	}
 
-	pr_info("SCU trace on Kernel panic:");
+	pr_info("SCU trace on Kernel panic:\n");
 
 	count = scu_trace_buffer_size / sizeof(u32);
 	for (i = 0; i < count; i += DWORDS_PER_LINE) {
@@ -1257,7 +1257,7 @@ static int intel_fw_logging_panic_handler(struct notifier_block *this,
 		}
 		ascii_line[ascii_offset++] = '\0';
 
-		pr_info("%s %s", dword_line, ascii_line);
+		pr_info("%s %s\n", dword_line, ascii_line);
 	}
 
 out:
@@ -1280,20 +1280,27 @@ static void intel_fw_logging_report_nc_pwr(u32 value, int reg_type)
 		ia_trace->ospm_pm_ssc[0] = value;
 		break;
 	default:
-		pr_err("Invalid reg type!");
+		pr_err("Invalid reg type!\n");
 		break;
 	}
 }
 
 static int intel_fw_logging_start_nc_pwr_reporting(void)
 {
+	u32 buffer;
+
 	if (scu_trace_buffer_size <  sizeof(struct ia_trace_t)) {
-		pr_warn("Sram_buf_sz is smaller than expected");
+		pr_warn("Sram_buf_sz is smaller than expected\n");
 		return 0;
 	}
 
-	ia_trace_buf = scu_trace_buffer +
-		(scu_trace_buffer_size - sizeof(struct ia_trace_t));
+	buffer = intel_scu_ipc_get_scu_trace_buffer();
+	buffer += scu_trace_buffer_size - sizeof(struct ia_trace_t);
+	ia_trace_buf = ioremap_nocache(buffer, sizeof(struct ia_trace_t));
+	if (!ia_trace_buf) {
+		pr_err("Failed to map ia trace buffer\n");
+		return -ENOMEM;
+	}
 
 	nc_report_power_state =  intel_fw_logging_report_nc_pwr;
 
@@ -1345,7 +1352,7 @@ static int intel_fw_logging_probe(struct platform_device *pdev)
 
 	err = intel_fw_logging_start_nc_pwr_reporting();
 	if (err) {
-		pr_err("Failed to start nc power reporting!");
+		pr_err("Failed to start nc power reporting!\n");
 		goto err2;
 	}
 
@@ -1474,7 +1481,7 @@ static int intel_fw_logging_init(void)
 		intel_scu_ipc_get_fabricerror_buf1_offset();
 
 	if (fabric_err_buf1 == oshob_base) {
-		pr_err("OSHOB Fabric error buf1 offset NULL");
+		pr_err("OSHOB Fabric error buf1 offset NULL\n");
 		goto err3;
 	}
 
@@ -1483,7 +1490,7 @@ static int intel_fw_logging_init(void)
 
 	if (fabric_err_buf2 == oshob_base) {
 		/* Fabric buffer buf2 not available on all plaforms. */
-		pr_warn("OSHOB Fabric error buf2 not present (not available on all platforms)");
+		pr_warn("OSHOB Fabric error buf2 not present (not available on all platforms)\n");
 	}
 
 	/* Check and report existing error logs */
