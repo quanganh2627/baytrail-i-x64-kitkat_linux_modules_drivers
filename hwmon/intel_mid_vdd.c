@@ -153,9 +153,6 @@
 #define VWARNA_MASK		0x02
 #define VWARNB_MASK		0x01
 
-/* Vsys status bit mask for SBCUIRQ register */
-#define SBCUIRQ_MASK		(VCRIT_MASK | VWARNA_MASK | VWARNB_MASK)
-
 /* default values for register configuration */
 #define INIT_VWARNA		(VWARNA_VOLT_THRES | DEBOUNCE | VCOMP_ENABLE)
 #define INIT_VWARNB		(VWARNB_VOLT_THRES | DEBOUNCE | VCOMP_ENABLE)
@@ -871,7 +868,6 @@ static void restore_default_value(struct vdd_smip_data *vdata)
 static int program_bcu(struct platform_device *pdev, struct vdd_info *vinfo)
 {
 	int ret;
-	uint8_t irq_data;
 	struct vdd_smip_data vdata = {0};
 
 	/* will be useful in case of clvp only
@@ -883,21 +879,6 @@ static int program_bcu(struct platform_device *pdev, struct vdd_info *vinfo)
 		dev_err(&pdev->dev, "scu ipc read failed\n");
 		restore_default_value(&vdata);
 		goto configure_register;
-	}
-
-	/* clear all bcu actions that are already set if
-	 * system voltage is above thresholds
-	 */
-	ret = intel_scu_ipc_ioread8(SBCUIRQ, &irq_data);
-	if (ret) {
-		dev_warn(&pdev->dev, "Read VSYS flag failed\n");
-		goto vdd_init_error;
-	} else if (!(irq_data & SBCUIRQ_MASK)) {
-		ret = intel_scu_ipc_iowrite8(SBCUCTRL, SBCUCTRL_SET);
-		if (ret) {
-			dev_warn(&pdev->dev, "scu ipc write failed\n");
-			goto vdd_init_error;
-		}
 	}
 
 	/*
