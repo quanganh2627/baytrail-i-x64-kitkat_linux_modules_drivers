@@ -46,6 +46,8 @@
 #include <linux/usb/otg.h>
 #include <linux/platform_data/intel_mid_remoteproc.h>
 #include <linux/rpmsg.h>
+#include <linux/acpi.h>
+#include <linux/acpi_gpio.h>
 
 #include <asm/intel_mid_gpadc.h>
 #include <asm/intel_scu_ipc.h>
@@ -94,11 +96,16 @@
 #define BQ24192_POWER_ON_CFG_REG		0x1
 #define POWER_ON_CFG_RESET			(1 << 7)
 #define POWER_ON_CFG_I2C_WDTTMR_RESET		(1 << 6)
+/* BQ2419X series charger and OTG enable bits */
 #define CHR_CFG_BIT_POS				4
 #define CHR_CFG_BIT_LEN				2
+#define CHR_CFG_CHRG_MASK			3
 #define POWER_ON_CFG_CHRG_CFG_DIS		(0 << 4)
 #define POWER_ON_CFG_CHRG_CFG_EN		(1 << 4)
 #define POWER_ON_CFG_CHRG_CFG_OTG		(3 << 4)
+/* BQ2429X series charger and OTG enable bits */
+#define POWER_ON_CFG_BQ29X_OTG_EN		(1 << 5)
+#define POWER_ON_CFG_BQ29X_CHRG_EN		(1 << 4)
 #define POWER_ON_CFG_BOOST_LIM			(1 << 0)
 
 /*
@@ -192,6 +199,8 @@
 #define BQ24191_IC_VERSION			0x1
 #define BQ24192_IC_VERSION			0x2
 #define BQ24192I_IC_VERSION			0x3
+#define BQ24296_IC_VERSION			0x4
+#define BQ24297_IC_VERSION			0xC
 
 #define BQ24192_MAX_MEM		12
 #define NR_RETRY_CNT		3
@@ -226,9 +235,15 @@ enum bq24192_chrgr_stat {
 	BQ24192_CHRGR_STAT_LOW_SUPPLY_FAULT
 };
 
+enum bq24192_chip_type {
+	BQ24190, BQ24191, BQ24192,
+	BQ24192I, BQ24296, BQ24297
+};
+
 struct bq24192_chip {
 	struct i2c_client *client;
 	struct bq24192_platform_data *pdata;
+	enum bq24192_chip_type chip_type;
 	struct power_supply usb;
 	struct delayed_work chrg_task_wrkr;
 	struct delayed_work chrg_full_wrkr;
@@ -928,7 +943,13 @@ static int bq24192_turn_otg_vbus(struct bq24192_chip *chip, bool votg_on)
 				goto i2c_write_fail;
 			}
 			/* Configure the charger in OTG mode */
-			ret = bq24192_reg_read_modify(chip->client,
+			if ((chip->chip_type == BQ24296) ||
+				(chip->chip_type == BQ24297))
+				ret = bq24192_reg_read_modify(chip->client,
+					BQ24192_POWER_ON_CFG_REG,
+					POWER_ON_CFG_BQ29X_OTG_EN, true);
+			else
+				ret = bq24192_reg_read_modify(chip->client,
 					BQ24192_POWER_ON_CFG_REG,
 					POWER_ON_CFG_CHRG_CFG_OTG, true);
 			if (ret < 0) {
@@ -955,7 +976,13 @@ static int bq24192_turn_otg_vbus(struct bq24192_chip *chip, bool votg_on)
 						0);
 	} else {
 			/* Clear the charger from the OTG mode */
-			ret = bq24192_reg_read_modify(chip->client,
+			if ((chip->chip_type == BQ24296) ||
+				(chip->chip_type == BQ24297))
+				ret = bq24192_reg_read_modify(chip->client,
+					BQ24192_POWER_ON_CFG_REG,
+					POWER_ON_CFG_BQ29X_OTG_EN, false);
+			else
+				ret = bq24192_reg_read_modify(chip->client,
 					BQ24192_POWER_ON_CFG_REG,
 					POWER_ON_CFG_CHRG_CFG_OTG, false);
 			if (ret < 0) {
@@ -1180,15 +1207,33 @@ static inline int bq24192_enable_charging(
 		}
 	}
 
-	ret = val ? POWER_ON_CFG_CHRG_CFG_EN : POWER_ON_CFG_CHRG_CFG_DIS;
-
-	if (!val && chip->sfttmr_expired)
+	if (chip->sfttmr_expired)
 		return ret;
 
-	ret = bq24192_reg_multi_bitset(chip->client,
-					BQ24192_POWER_ON_CFG_REG,
-					ret, CHR_CFG_BIT_POS,
-					CHR_CFG_BIT_LEN);
+	ret = bq24192_read_reg(chip->client, BQ24192_POWER_ON_CFG_REG);
+	if (ret < 0) {
+		dev_err(&chip->client->dev,
+				"pwr cfg read failed: %d\n", ret);
+		return ret;
+	}
+
+	if ((chip->chip_type == BQ24296) || (chip->chip_type == BQ24297)) {
+		if (val)
+			regval = ret | POWER_ON_CFG_BQ29X_CHRG_EN;
+		else
+			regval = ret & ~POWER_ON_CFG_BQ29X_CHRG_EN;
+	} else {
+		/* clear the charge enbale bit mask first */
+		ret &= ~(CHR_CFG_CHRG_MASK << CHR_CFG_BIT_POS);
+		if (val)
+			regval = ret | POWER_ON_CFG_CHRG_CFG_EN;
+		else
+			regval = ret | POWER_ON_CFG_CHRG_CFG_DIS;
+	}
+
+	ret = bq24192_write_reg(chip->client, BQ24192_POWER_ON_CFG_REG, regval);
+	if (ret < 0)
+		dev_warn(&chip->client->dev, "charger enable/disable failed\n");
 
 	return ret;
 }
@@ -1697,7 +1742,8 @@ static int otg_handle_notification(struct notifier_block *nb,
 
 	dev_info(&chip->client->dev, "OTG notification: %lu\n", event);
 
-	if (!param || event != USB_EVENT_DRIVE_VBUS)
+	if (!param || (event != USB_EVENT_DRIVE_VBUS) &&
+					(event != USB_EVENT_ID))
 		return NOTIFY_DONE;
 
 	evt = kzalloc(sizeof(*evt), GFP_ATOMIC);
@@ -1707,7 +1753,11 @@ static int otg_handle_notification(struct notifier_block *nb,
 		return NOTIFY_DONE;
 	}
 
-	evt->is_enable = *(bool *)param;
+	if (event == USB_EVENT_DRIVE_VBUS)
+		evt->is_enable = *(bool *)param;
+	else	/* treat id short as drive vbus evt */
+		evt->is_enable = !(*(bool *)param);
+
 	dev_info(&chip->client->dev, "evt->is_enable is %d\n", evt->is_enable);
 	INIT_LIST_HEAD(&evt->node);
 
@@ -1786,18 +1836,57 @@ int bq24192_slave_mode_disable_charging(void)
 	mutex_unlock(&chip->event_lock);
 	return ret;
 }
+static int bq24192_get_chip_version(struct bq24192_chip *chip)
+{
+	int ret;
+
+	/* check chip model number */
+	ret = bq24192_read_reg(chip->client, BQ24192_VENDER_REV_REG);
+	if (ret < 0) {
+		dev_err(&chip->client->dev, "i2c read err:%d\n", ret);
+		return -EIO;
+	}
+	dev_info(&chip->client->dev, "version reg:%x\n", ret);
+
+	ret = ret >> 3;
+	switch (ret) {
+	case BQ24190_IC_VERSION:
+		chip->chip_type = BQ24190;
+		break;
+	case BQ24191_IC_VERSION:
+		chip->chip_type = BQ24191;
+		break;
+	case BQ24192_IC_VERSION:
+		chip->chip_type = BQ24192;
+		break;
+	case BQ24192I_IC_VERSION:
+		chip->chip_type = BQ24192I;
+		break;
+	case BQ24296_IC_VERSION:
+		chip->chip_type = BQ24296;
+		break;
+	case BQ24297_IC_VERSION:
+		chip->chip_type = BQ24297;
+		break;
+	default:
+		dev_err(&chip->client->dev,
+			"device version mismatch: %x\n", ret);
+		return -EIO;
+	}
+
+	dev_info(&chip->client->dev, "chip type:%x\n", chip->chip_type);
+	return 0;
+}
+
+extern void *bq24192_platform_data(void *info);
 
 static int bq24192_probe(struct i2c_client *client,
 			const struct i2c_device_id *id)
 {
 	struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
 	struct bq24192_chip *chip;
-	int ret;
-
-	if (!client->dev.platform_data) {
-		dev_err(&client->dev, "platform Data is NULL");
-		return -EFAULT;
-	}
+	struct acpi_gpio_info gpio_info;
+	int ret, gpio;
 
 	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA)) {
 		dev_err(&client->dev,
@@ -1812,27 +1901,28 @@ static int bq24192_probe(struct i2c_client *client,
 	}
 
 	chip->client = client;
+#ifdef CONFIG_ACPI
+	chip->pdata = bq24192_platform_data(NULL);
+#else
 	chip->pdata = client->dev.platform_data;
+#endif
+	if (!chip->pdata) {
+		dev_err(&client->dev, "pdata NULL!!\n");
+		kfree(chip);
+		return -EINVAL;
+	}
+	chip->irq = -1;
+
 	/*assigning default value for min and max temp*/
-	chip->min_temp = BATT_TEMP_MIN_DEF;
-	chip->max_temp = BATT_TEMP_MAX_DEF;
+	chip->min_temp = chip->pdata->max_temp;
+	chip->max_temp = chip->pdata->min_temp;
 	i2c_set_clientdata(client, chip);
 	bq24192_client = client;
-	ret = bq24192_read_reg(client, BQ24192_VENDER_REV_REG);
+
+	/* check chip model number */
+	ret = bq24192_get_chip_version(chip);
 	if (ret < 0) {
 		dev_err(&client->dev, "i2c read err:%d\n", ret);
-		i2c_set_clientdata(client, NULL);
-		kfree(chip);
-		return -EIO;
-	}
-
-	/* D3, D4, D5 indicates the chip model number */
-	ret = (ret >> 3) & 0x07;
-	if ((ret != BQ24192I_IC_VERSION) &&
-		(ret != BQ24192_IC_VERSION) &&
-		(ret != BQ24191_IC_VERSION) &&
-		(ret != BQ24190_IC_VERSION)) {
-		dev_err(&client->dev, "device version mismatch: %x\n", ret);
 		i2c_set_clientdata(client, NULL);
 		kfree(chip);
 		return -EIO;
@@ -1858,24 +1948,40 @@ static int bq24192_probe(struct i2c_client *client,
 	 * register for an interrupt handler for servicing charger
 	 * interrupts
 	 */
-	if (chip->pdata->get_irq_number) {
+#ifdef CONFIG_ACPI
+	gpio = acpi_get_gpio_by_index(&client->dev, 0, &gpio_info);
+	if (gpio < 0) {
+		/*
+		 * WA: only untill ACPI issue(BZ: 153221)
+		 * gets fixed in kernel.
+		 */
+		gpio = acpi_get_gpio("\\SB.GPO2", 0x2);
+		if (gpio < 0)
+			dev_warn(&client->dev, "gpio request failed\n");
+	}
+	ret = gpio_request_one(gpio, GPIOF_IN, chip->client->name);
+	if (ret < 0)
+		dev_warn(&client->dev, "gpio dir set failed\n");
+	chip->irq = gpio_to_irq(gpio);
+#else
+	if (chip->pdata->get_irq_number)
 		chip->irq = chip->pdata->get_irq_number();
-		if (chip->irq < 0) {
-			dev_err(&chip->client->dev,
-				"chgr_int_n GPIO is not available\n");
+#endif
+	if (chip->irq < 0) {
+		dev_err(&chip->client->dev,
+			"chgr_int_n GPIO is not available\n");
+	} else {
+		ret = request_threaded_irq(chip->irq,
+				bq24192_irq_isr, bq24192_irq_thread,
+				IRQF_TRIGGER_FALLING, "BQ24192", chip);
+		if (ret) {
+			dev_warn(&bq24192_client->dev,
+				"failed to register irq for pin %d\n",
+				chip->irq);
 		} else {
-			ret = request_threaded_irq(chip->irq,
-					bq24192_irq_isr, bq24192_irq_thread,
-					IRQF_TRIGGER_FALLING, "BQ24192", chip);
-			if (ret) {
-				dev_warn(&bq24192_client->dev,
-					"failed to register irq for pin %d\n",
-					chip->irq);
-			} else {
-				dev_warn(&bq24192_client->dev,
-					"registered charger irq for pin %d\n",
-					chip->irq);
-			}
+			dev_warn(&bq24192_client->dev,
+				"registered charger irq for pin %d\n",
+				chip->irq);
 		}
 	}
 
@@ -1897,8 +2003,8 @@ static int bq24192_probe(struct i2c_client *client,
 		chip->usb.num_throttle_states =
 					chip->pdata->num_throttle_states;
 		chip->usb.supported_cables = chip->pdata->supported_cables;
-		chip->max_cc = 1216;
-		chip->max_cv = 4200;
+		chip->max_cc = chip->pdata->max_cc;
+		chip->max_cv = chip->pdata->max_cv;
 		chip->bat_health = POWER_SUPPLY_HEALTH_GOOD;
 		chip->chgr_stat = BQ24192_CHRGR_STAT_UNKNOWN;
 		chip->usb.properties = bq24192_usb_props;
@@ -1936,6 +2042,7 @@ static int bq24192_probe(struct i2c_client *client,
 					"REGISTER OTG NOTIFICATION FAILED\n");
 	}
 
+#ifndef CONFIG_ACPI
 	/* Program the safety charge temperature threshold with default value*/
 	ret =  intel_scu_ipc_iowrite8(MSIC_CHRTMPCTRL,
 				(CHRTMPCTRL_TMPH_45 | CHRTMPCTRL_TMPL_00));
@@ -1943,6 +2050,8 @@ static int bq24192_probe(struct i2c_client *client,
 		dev_err(&chip->client->dev,
 				"IPC Failed with %d error\n", ret);
 	}
+#endif
+
 	return 0;
 }
 
@@ -2043,10 +2152,19 @@ static int bq24192_runtime_idle(struct device *dev)
 #endif
 
 static const struct i2c_device_id bq24192_id[] = {
-	{ DEV_NAME, 0 },
+	{ "bq24192", },
+	{ "TBQ24296", },
 	{ },
 };
 MODULE_DEVICE_TABLE(i2c, bq24192_id);
+
+#ifdef CONFIG_ACPI
+static struct acpi_device_id bq24192_acpi_match[] = {
+	{"TBQ24296", },
+	{}
+};
+MODULE_DEVICE_TABLE(acpi, bq24192_acpi_match);
+#endif
 
 static const struct dev_pm_ops bq24192_pm_ops = {
 	.suspend		= bq24192_suspend,
@@ -2061,12 +2179,16 @@ static struct i2c_driver bq24192_i2c_driver = {
 		.name	= DEV_NAME,
 		.owner	= THIS_MODULE,
 		.pm	= &bq24192_pm_ops,
+#ifdef CONFIG_ACPI
+		.acpi_match_table = ACPI_PTR(bq24192_acpi_match),
+#endif
 	},
 	.probe		= bq24192_probe,
 	.remove		= bq24192_remove,
 	.id_table	= bq24192_id,
 };
 
+#ifndef CONFIG_ACPI
 static int bq24192_init(void)
 {
 	return i2c_add_driver(&bq24192_i2c_driver);
@@ -2135,6 +2257,19 @@ static void __exit bq24192_rpmsg_exit(void)
 {
 	return unregister_rpmsg_driver(&bq24192_rpmsg);
 }
+#else
+static int __init bq24192_init(void)
+{
+	return i2c_add_driver(&bq24192_i2c_driver);
+}
+module_init(bq24192_init);
+
+static void __exit bq24192_exit(void)
+{
+	i2c_del_driver(&bq24192_i2c_driver);
+}
+module_exit(bq24192_exit);
+#endif
 
 MODULE_AUTHOR("Ramakrishna Pallala <ramakrishna.pallala@intel.com>");
 MODULE_AUTHOR("Raj Pandey <raj.pandey@intel.com>");
