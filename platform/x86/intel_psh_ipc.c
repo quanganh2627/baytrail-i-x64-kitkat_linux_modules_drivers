@@ -282,6 +282,18 @@ void intel_psh_ipc_unbind(int ch)
 }
 EXPORT_SYMBOL(intel_psh_ipc_unbind);
 
+void intel_psh_ipc_disable_irq(void)
+{
+	disable_irq(ipc_ctrl.pdev->irq);
+}
+EXPORT_SYMBOL(intel_psh_ipc_disable_irq);
+
+void intel_psh_ipc_enable_irq(void)
+{
+	enable_irq(ipc_ctrl.pdev->irq);
+}
+EXPORT_SYMBOL(intel_psh_ipc_enable_irq);
+
 static void psh_recv_handle(int i)
 {
 	int msg, param;

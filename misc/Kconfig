@@ -38,7 +38,7 @@ config SENSORS_APDS990X_FORK
 	   To compile this driver as a module, choose M here: the
 	   module will be called apds990x. If unsure, say N here.
 
-source "../modules/drivers/misc/bcm-lpm/Kconfig"
-source "../modules/drivers/misc/ti-st/Kconfig"
-source "../modules/drivers/misc/tp2l/Kconfig"
-source "../modules/drivers/misc/iqvandroid/Kconfig"
+source "drivers/external_drivers/drivers/misc/bcm-lpm/Kconfig"
+source "drivers/external_drivers/drivers/misc/ti-st/Kconfig"
+source "drivers/external_drivers/drivers/misc/tp2l/Kconfig"
+source "drivers/external_drivers/drivers/misc/iqvandroid/Kconfig"

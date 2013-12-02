@@ -330,12 +330,6 @@ struct pmic_event {
 	u8 chgrirq1_stat;
 };
 
-struct temp_lookup {
-	int adc_val;
-	int temp;
-	int temp_err;
-};
-
 struct pmic_regs_def {
 	char reg_name[PMIC_REG_NAME_LEN];
 	u16 addr;

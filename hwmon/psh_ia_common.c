@@ -79,7 +79,7 @@ void ia_lbuf_read_init(struct loop_buffer *lbuf,
 	lbuf->in_reading = 0;
 }
 
-static void ia_lbuf_read_reset(struct loop_buffer *lbuf)
+void ia_lbuf_read_reset(struct loop_buffer *lbuf)
 {
 	if (lbuf) {
 		lbuf->off_head = lbuf->off_tail = 0;
@@ -234,7 +234,6 @@ int ia_send_cmd(struct psh_ia_priv *psh_ia_data,
 	mutex_lock(&psh_ia_data->cmd_mutex);
 	if (cmd->cmd_id == CMD_RESET) {
 		cmd->tran_id = 0;
-		ia_lbuf_read_reset(psh_ia_data->lbuf);
 		ia_circ_reset_off(&psh_ia_data->circ);
 	}
 
@@ -303,7 +302,6 @@ ssize_t ia_start_control(struct device *dev,
 			psh_err("do_setup_ddr failed\n");
 			return ret;
 		} else {
-			ia_lbuf_read_reset(psh_ia_data->lbuf);
 			return count;
 		}
 	}

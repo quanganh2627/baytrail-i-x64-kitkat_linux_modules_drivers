@@ -69,11 +69,11 @@
 #define ADC_TO_TEMP 1
 #define TEMP_TO_ADC 0
 #define is_valid_temp(tmp)\
-	(!(tmp > adc_tbl[0].temp ||\
-		tmp < adc_tbl[ARRAY_SIZE(adc_tbl) - 1].temp))
+	(!(tmp > chc.pdata->adc_tbl[0].temp ||\
+	tmp < chc.pdata->adc_tbl[chc.pdata->max_tbl_row_cnt - 1].temp))
 #define is_valid_adc_code(val)\
-	(!(val < adc_tbl[0].adc_val ||\
-		val > adc_tbl[ARRAY_SIZE(adc_tbl) - 1].adc_val))
+	(!(val < chc.pdata->adc_tbl[0].adc_val ||\
+	val > chc.pdata->adc_tbl[chc.pdata->max_tbl_row_cnt - 1].adc_val))
 #define CONVERT_ADC_TO_TEMP(adc_val, temp)\
 	adc_temp_conv(adc_val, temp, ADC_TO_TEMP)
 #define CONVERT_TEMP_TO_ADC(temp, adc_val)\
@@ -131,26 +131,6 @@ static struct interrupt_info chgrirq0_info[] = {
 	},
 };
 
-static struct temp_lookup adc_tbl[] = {
-	{0x24, 125, 0}, {0x28, 120, 0},
-	{0x2D, 115, 0}, {0x32, 110, 0},
-	{0x38, 105, 0}, {0x40, 100, 0},
-	{0x48, 95, 0}, {0x51, 90, 0},
-	{0x5C, 85, 0}, {0x68, 80, 0},
-	{0x77, 75, 0}, {0x87, 70, 0},
-	{0x99, 65, 0}, {0xAE, 60, 0},
-	{0xC7, 55, 0}, {0xE2, 50, 0},
-	{0x101, 45, 0}, {0x123, 40, 0},
-	{0x149, 35, 0}, {0x172, 30, 0},
-	{0x19F, 25, 0}, {0x1CE, 20, 0},
-	{0x200, 15, 0}, {0x233, 10, 0},
-	{0x266, 5, 0}, {0x299, 0, 0},
-	{0x2CA, -5, 0}, {0x2F9, -10, 0},
-	{0x324, -15, 0}, {0x34B, -20, 0},
-	{0x36D, -25, 0}, {0x38A, -30, 0},
-	{0x3A4, -35, 0}, {0x3B8, -40, 0},
-};
-
 u16 pmic_inlmt[][2] = {
 	{ 100, CHGRCTRL1_FUSB_INLMT_100},
 	{ 150, CHGRCTRL1_FUSB_INLMT_150},
@@ -202,42 +182,55 @@ static int interpolate_x(int dy1y0, int dx1x0, int dyy0, int x0)
 
 static int adc_temp_conv(int in_val, int *out_val, int conv)
 {
-	int tbl_row_cnt = ARRAY_SIZE(adc_tbl), i;
+	int tbl_row_cnt, i;
+	struct temp_lookup *adc_temp_tbl;
+
+	if (!chc.pdata) {
+		dev_err(chc.dev, "ADC-lookup table not yet available\n");
+		return -ERANGE;
+	}
+
+	tbl_row_cnt = chc.pdata->max_tbl_row_cnt;
+	adc_temp_tbl = chc.pdata->adc_tbl;
 
 	if (conv == ADC_TO_TEMP) {
 		if (!is_valid_adc_code(in_val))
 			return -ERANGE;
 
-		if (in_val == adc_tbl[tbl_row_cnt-1].adc_val)
+		if (in_val == adc_temp_tbl[tbl_row_cnt-1].adc_val)
 			i = tbl_row_cnt - 1;
 		else {
 			for (i = 0; i < tbl_row_cnt; ++i)
-				if (in_val < adc_tbl[i].adc_val)
+				if (in_val < adc_temp_tbl[i].adc_val)
 					break;
 		}
 
 		*out_val =
-		    interpolate_y((adc_tbl[i].adc_val - adc_tbl[i - 1].adc_val),
-				  (adc_tbl[i].temp - adc_tbl[i - 1].temp),
-				  (in_val - adc_tbl[i - 1].adc_val),
-				  adc_tbl[i - 1].temp);
+		    interpolate_y((adc_temp_tbl[i].adc_val
+					- adc_temp_tbl[i - 1].adc_val),
+				  (adc_temp_tbl[i].temp
+				   - adc_temp_tbl[i - 1].temp),
+				  (in_val - adc_temp_tbl[i - 1].adc_val),
+				  adc_temp_tbl[i - 1].temp);
 	} else {
 		if (!is_valid_temp(in_val))
 			return -ERANGE;
 
-		if (in_val == adc_tbl[tbl_row_cnt-1].temp)
+		if (in_val == adc_temp_tbl[tbl_row_cnt-1].temp)
 			i = tbl_row_cnt - 1;
 		else {
 			for (i = 0; i < tbl_row_cnt; ++i)
-				if (in_val > adc_tbl[i].temp)
+				if (in_val > adc_temp_tbl[i].temp)
 					break;
 		}
 
 		*((short int *)out_val) =
-		    interpolate_x((adc_tbl[i].temp - adc_tbl[i - 1].temp),
-				  (adc_tbl[i].adc_val - adc_tbl[i - 1].adc_val),
-				  (in_val - adc_tbl[i - 1].temp),
-				  adc_tbl[i - 1].adc_val);
+		    interpolate_x((adc_temp_tbl[i].temp
+					- adc_temp_tbl[i - 1].temp),
+				  (adc_temp_tbl[i].adc_val
+				   - adc_temp_tbl[i - 1].adc_val),
+				  (in_val - adc_temp_tbl[i - 1].temp),
+				  adc_temp_tbl[i - 1].adc_val);
 	}
 	return 0;
 }

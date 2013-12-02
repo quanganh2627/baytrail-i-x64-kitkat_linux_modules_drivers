@@ -43,15 +43,8 @@
 #include <linux/gpio.h>
 #include <linux/wakelock.h>
 #include <linux/version.h>
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
 #include <linux/usb/otg.h>
 #include <linux/platform_data/intel_mid_remoteproc.h>
-#else
-#include <linux/usb/penwell_otg.h>
-#include <asm/intel_mid_remoteproc.h>
-#endif
-
 #include <linux/rpmsg.h>
 
 #include <asm/intel_mid_gpadc.h>
@@ -272,6 +265,7 @@ struct bq24192_chip {
 	bool boost_mode;
 	bool online;
 	bool present;
+	bool sfttmr_expired;
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -1134,8 +1128,6 @@ static inline int bq24192_enable_charging(
 		return ret;
 	}
 
-	ret = val ? POWER_ON_CFG_CHRG_CFG_EN : POWER_ON_CFG_CHRG_CFG_DIS;
-
 	/*
 	 * check if we have the battery emulator connected. We do not start
 	 * charging if the emulator is connected. Disable the charging
@@ -1153,10 +1145,6 @@ static inline int bq24192_enable_charging(
 		return ret;
 	}
 
-	ret = bq24192_reg_multi_bitset(chip->client,
-					BQ24192_POWER_ON_CFG_REG,
-					ret, CHR_CFG_BIT_POS,
-					CHR_CFG_BIT_LEN);
 	if (val) {
 		/* Schedule the charger task worker now */
 		schedule_delayed_work(&chip->chrg_task_wrkr, 0);
@@ -1187,9 +1175,20 @@ static inline int bq24192_enable_charging(
 		/* If no charger connected, cancel the workers */
 		if (!(ret & SYSTEM_STAT_VBUS_OTG)) {
 			dev_info(&chip->client->dev, "NO charger connected\n");
+			chip->sfttmr_expired = false;
 			cancel_delayed_work_sync(&chip->chrg_task_wrkr);
 		}
 	}
+
+	ret = val ? POWER_ON_CFG_CHRG_CFG_EN : POWER_ON_CFG_CHRG_CFG_DIS;
+
+	if (!val && chip->sfttmr_expired)
+		return ret;
+
+	ret = bq24192_reg_multi_bitset(chip->client,
+					BQ24192_POWER_ON_CFG_REG,
+					ret, CHR_CFG_BIT_POS,
+					CHR_CFG_BIT_LEN);
 
 	return ret;
 }
@@ -1553,6 +1552,10 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 		} else
 			dev_info(&chip->client->dev, "No charger connected\n");
 	}
+	if ((reg_fault & FAULT_STAT_CHRG_TMR_FLT) == FAULT_STAT_CHRG_TMR_FLT) {
+		chip->sfttmr_expired = true;
+		dev_info(&chip->client->dev, "Safety timer expired\n");
+	}
 	if (reg_status != SYSTEM_STAT_CHRG_DONE)
 		power_supply_changed(&chip->usb);
 
@@ -1730,11 +1733,7 @@ static inline int register_otg_notification(struct bq24192_chip *chip)
 	/*
 	 * Get the USB transceiver instance
 	 */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
 	chip->transceiver = usb_get_phy(USB_PHY_TYPE_USB2);
-#else
-	chip->transceiver = usb_get_transceiver();
-#endif
 	if (!chip->transceiver) {
 		dev_err(&chip->client->dev, "Failed to get the USB transceiver\n");
 		return -EINVAL;
