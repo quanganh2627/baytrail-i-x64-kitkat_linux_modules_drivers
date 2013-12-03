@@ -24,6 +24,7 @@
 		hsucmd_name(qcmd_cl),		\
 		hsucmd_name(qcmd_port_irq),	\
 		hsucmd_name(qcmd_dma_irq),	\
+		hsucmd_name(qcmd_enable_irq),   \
 		hsucmd_name(qcmd_cmd_off))
 
 

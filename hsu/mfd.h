@@ -46,6 +46,7 @@ enum {
 	qcmd_cl,
 	qcmd_port_irq,
 	qcmd_dma_irq,
+	qcmd_enable_irq,
 	qcmd_cmd_off,
 	qcmd_max,
 };
