@@ -101,6 +101,7 @@
 
 #define DEFAULT_INTERRUPT_MASK      0x0e
 #define CALIBRATION_INTERRUPT_MASK  0x08
+#define TOUCH_ID_START              1
 
 struct r69001_ts_finger {
 	u16 x;
@@ -258,7 +259,7 @@ static int r69001_ts_read_coordinates_data(struct r69001_ts_data *ts)
 			finger[i].y =
 				((u16)(data[7] & 0xf0) << 4) | (u16)(data[6]);
 			finger[i].z = data[8];
-			finger[i].t = (data[0] & 0xf0) >> 4;
+			finger[i].t = ((data[0] & 0xf0) >> 4) - TOUCH_ID_START;
 		} else {
 			error = r69001_ts_read_data(ts,
 					REG_COORDINATES_DATA, lowreg[i / 2],
@@ -270,7 +271,7 @@ static int r69001_ts_read_coordinates_data(struct r69001_ts_data *ts)
 			finger[i].y =
 				((u16)(data[3] & 0xf0) << 4) | (u16)(data[2]);
 			finger[i].z = data[4];
-			finger[i].t = data[0] & 0x0f;
+			finger[i].t = (data[0] & 0x0f) - TOUCH_ID_START;
 		}
 	}
 
