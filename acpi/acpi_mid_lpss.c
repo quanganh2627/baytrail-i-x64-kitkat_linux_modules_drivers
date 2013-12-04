@@ -38,6 +38,8 @@ static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
 	{ "80862286" },
 	/* CHT DMA2 */
 	{ "808622C0" },
+	/* PS STM8T143*/
+	{ "SRCL0001" },
 	{ }
 };
 

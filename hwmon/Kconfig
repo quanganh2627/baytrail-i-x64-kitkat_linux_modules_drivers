@@ -106,6 +106,8 @@ config SENSORS_PSH_BYT
           For more information, please refer to the driver
           source code.
 
+endchoice
+
 config GENERAL_SENSOR
        tristate  "General Sensor Driver"
        depends on I2C && INPUT
@@ -124,4 +126,10 @@ config GENERAL_SENSOR_DEBUG
           debug option for general sensor driver.
           Say y here to enable.
 
-endchoice
+config PS_STM8T143
+       bool "STM8T143 proxmity sensor Driver"
+       default n
+       help
+          STM8T143 proxmity sensor Driver
+          Say y here to enable.
+
