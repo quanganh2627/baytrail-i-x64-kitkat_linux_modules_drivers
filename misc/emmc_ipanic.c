@@ -286,7 +286,7 @@ static ssize_t emmc_ipanic_gbuffer_proc_read(struct file *file, char __user *buf
 	return rc;
 }
 
-static int emmc_ipanic_proc_read_hdr(struct file *file, char __user *buffer,
+static ssize_t emmc_ipanic_proc_read_hdr(struct file *file, char __user *buffer,
 			     size_t count, loff_t *ppos)
 {
 	struct emmc_ipanic_data *ctx = &drv_ctx;
@@ -313,8 +313,8 @@ static int emmc_ipanic_proc_read_hdr(struct file *file, char __user *buffer,
 					last_chunk_buf, *ppos, count, false);
 	if (read_count <= 0) {
 		mutex_unlock(&drv_mutex);
-		pr_err("%s: emmc_read: invalid args: offset:0x%08lx, count:%d",
-			__func__, (unsigned long)(*ppos), count);
+		pr_err("%s: emmc_read: invalid args: offset:0x%08llx, count:%zd",
+			__func__, (u64)(*ppos), count);
 		return read_count;
 	}
 
@@ -526,7 +526,7 @@ static void emmc_panic_notify_add(void)
 	read_buf_ptr = read_dev_sector(emmc->bdev, emmc->start_block+1, &sect);
 	if (!read_buf_ptr) {
 		pr_err("%s: read sector error(%llu)!\n", __func__,
-			emmc->start_block + 1);
+			(u64)emmc->start_block + 1);
 		return;
 	}
 
@@ -936,7 +936,7 @@ static void emmc_ipanic_write_gbuffer(struct mmc_emergency_info *emmc,
 void panic_set_gbuffer(struct g_buffer_header *buf)
 {
 	if (gbuffer.base) {
-		pr_err("%s: gbuffer already set to %p, can not set again",
+		pr_err("%s: gbuffer already set to 0x%p, can not set again",
 		       __func__, gbuffer.base);
 		return;
 	}
