@@ -84,6 +84,16 @@
 #define DLP_TRACE_TX_PDU_SIZE	1024	/* 1 KBytes */
 #define DLP_TRACE_RX_PDU_SIZE	8192	/* 8 KBytes */
 
+/* Packet desc : Start Address + Size */
+#define DLP_PACKET_DESC_SIZE		8
+#define DLP_PACKET_SIGNATURE_SIZE	4
+#define DLP_PACKET_IN_PDU_COUNT		8  /* TX PDU desc items number */
+
+#define DLP_DEFAULT_DESC_OFFSET                           \
+	ALIGN(DLP_PACKET_SIGNATURE_SIZE +                     \
+		(DLP_PACKET_DESC_SIZE * DLP_PACKET_IN_PDU_COUNT), \
+		DLP_PACKET_ALIGN_CP)
+
 /* Alignment params */
 #define DLP_PACKET_ALIGN_AP		16
 #define DLP_PACKET_ALIGN_CP		16
@@ -197,6 +207,13 @@ enum {
 	EDLP_ERR_RESOURCE_NOT_AVAILABLE,
 	EDLP_ERR_DATA_IN_PROCESS,
 	EDLP_ERR_UNKNOWN = 0xFF
+};
+
+/* eDLP packet status */
+enum {
+	EDLP_PACKET_FREE,
+	EDLP_PACKET_RESERVED,
+	EDLP_PACKET_COPIED
 };
 
 /*  */
@@ -490,12 +507,14 @@ int dlp_ctx_is_empty_safe(struct dlp_xfer_ctx *xfer_ctx);
 
 void dlp_ctx_update_status(struct dlp_xfer_ctx *xfer_ctx);
 
+inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx);
 /****************************************************************************
  *
  * Generic FIFO handling
  *
  ***************************************************************************/
 inline __must_check struct hsi_msg *dlp_fifo_tail(struct list_head *fifo);
+inline struct hsi_msg *dlp_fifo_head(struct list_head *fifo);
 
 inline void _dlp_fifo_pdu_push(struct hsi_msg *pdu, struct list_head *fifo);
 
@@ -511,6 +530,8 @@ struct hsi_msg *dlp_fifo_wait_pop(struct dlp_xfer_ctx *xfer_ctx);
 
 inline void dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
 			       struct hsi_msg *pdu);
+inline void _dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
+			       struct hsi_msg *pdu);
 
 inline void dlp_fifo_wait_push_back(struct dlp_xfer_ctx *xfer_ctx,
 				    struct hsi_msg *pdu);
@@ -523,6 +544,9 @@ void dlp_pop_wait_push_ctrl(struct dlp_xfer_ctx *xfer_ctx);
  *
  ***************************************************************************/
 inline struct hsi_msg *dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx);
+inline struct hsi_msg *_dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx);
+inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
+					  struct hsi_msg *pdu);
 
 __must_check int dlp_pop_recycled_push_ctrl(struct dlp_xfer_ctx *xfer_ctx);
 
@@ -594,8 +618,6 @@ int dlp_ctrl_close_channel(struct dlp_channel *ch_ctx);
 int dlp_ctrl_send_nop(struct dlp_channel *ch_ctx);
 
 int dlp_ctrl_send_ack_nack(struct dlp_channel *ch_ctx);
-
-void dlp_ctrl_clean_stored_cmd(void);
 
 inline void
 dlp_ctrl_set_channel_state(unsigned int hsi_channel, unsigned char);

@@ -149,6 +149,9 @@ static struct platform_device *iTCO_wdt_platform_device;
 /* the watchdog reboot notifier */
 static struct notifier_block reboot_notifier;
 
+/* variable to bypass keep alive after reboot notifier call */
+static bool bypass_keepalive;
+
 /* module parameters */
 #define WATCHDOG_HEARTBEAT 30	/* 30 sec default heartbeat */
 static int heartbeat = WATCHDOG_HEARTBEAT;  /* in seconds */
@@ -266,6 +269,11 @@ static int iTCO_wdt_stop(void)
 
 static int iTCO_wdt_keepalive(void)
 {
+	if (bypass_keepalive) {
+		pr_info("Reboot on going keep alive is bypassed\n");
+		return -EBUSY;
+	}
+
 	spin_lock(&iTCO_wdt_private.io_lock);
 
 	/* Reload the timer by writing to the TCO Timer Counter register */
@@ -518,6 +526,15 @@ static int TCO_reboot_notifier(struct notifier_block *this,
 		outl(val, TCO1_CNT);
 		spin_unlock(&iTCO_wdt_private.io_lock);
 	}
+
+	/* Set new heart beat giving 5s to kernel to shutdown cleanly */
+	iTCO_wdt_set_heartbeat(5);
+
+	/* Do a last keep alive before bypassing to allow shutdown
+	to proceed with new timing */
+	iTCO_wdt_keepalive();
+	bypass_keepalive = true;
+
 	return NOTIFY_DONE;
 }
 
@@ -711,7 +728,7 @@ static int iTCO_wdt_remove(struct platform_device *dev)
 
 static void iTCO_wdt_shutdown(struct platform_device *dev)
 {
-	iTCO_wdt_stop();
+	pr_info("Shutdown not stopping watchdog");
 }
 
 static int iTCO_wdt_suspend(struct platform_device *dev, pm_message_t state)

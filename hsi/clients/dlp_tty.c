@@ -893,7 +893,9 @@ int dlp_tty_do_write(struct dlp_xfer_ctx *xfer_ctx, unsigned char *buf,
 	avail = 0;
 	copied = 0;
 
+	spin_lock_irqsave(&xfer_ctx->channel->lock, flags);
 	if (!dlp_ctx_have_credits(xfer_ctx, xfer_ctx->channel)) {
+		spin_unlock_irqrestore(&xfer_ctx->channel->lock, flags);
 		if ((EDLP_TTY_TX_DATA_REPORT) ||
 			(EDLP_TTY_TX_DATA_LEN_REPORT))
 				pr_warn(DRVNAME ": CH%d (HSI CH%d) out of credits (%d)",
@@ -902,6 +904,7 @@ int dlp_tty_do_write(struct dlp_xfer_ctx *xfer_ctx, unsigned char *buf,
 					xfer_ctx->seq_num);
 		goto out;
 	}
+	spin_unlock_irqrestore(&xfer_ctx->channel->lock, flags);
 
 	write_lock_irqsave(&xfer_ctx->lock, flags);
 	pdu = dlp_fifo_tail(&xfer_ctx->wait_pdus);

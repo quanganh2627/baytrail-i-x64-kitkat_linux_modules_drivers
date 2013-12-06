@@ -41,12 +41,7 @@
 
 /* Forward declarations */
 static void dlp_pdu_destructor(struct hsi_msg *pdu);
-
 static inline void dlp_ctx_update_state_rx(struct dlp_xfer_ctx *xfer_ctx);
-static inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx);
-
-static inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
-					  struct hsi_msg *pdu);
 
 /*
  * Static protocol driver global variables
@@ -760,9 +755,7 @@ int dlp_ctx_have_credits(struct dlp_xfer_ctx *xfer_ctx,
 			 struct dlp_channel *ch_ctx)
 {
 	int have_credits = 0;
-	unsigned long flags;
 
-	spin_lock_irqsave(&ch_ctx->lock, flags);
 	/* No credits available if TX timeout/TTY closed */
 	if (!dlp_tty_is_link_valid())
 		goto out;
@@ -774,12 +767,10 @@ int dlp_ctx_have_credits(struct dlp_xfer_ctx *xfer_ctx,
 			((ttype == HSI_MSG_WRITE) && (ch_ctx->credits))) {
 			have_credits = 1;
 		}
-	} else {
+	} else
 		have_credits = 1;
-	}
 
 out:
-	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 	return have_credits;
 }
 
@@ -858,7 +849,7 @@ static inline void dlp_ctx_update_state_rx(struct dlp_xfer_ctx *xfer_ctx)
  * dlp_ctx_update_state_tx - update the TX state and timers
  * @xfer_ctx: a reference to the xfer TX context to consider
  */
-static inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx)
+inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx)
 {
 	if (xfer_ctx->ctrl_len <= 0) {
 		del_timer_sync(&dlp_drv.timer[xfer_ctx->channel->ch_id]);
@@ -883,7 +874,7 @@ static inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx)
  *			 if the FIFO is empty
  * @fifo: a reference of the FIFO to consider
  */
-static inline struct hsi_msg *dlp_fifo_head(struct list_head *fifo)
+inline struct hsi_msg *dlp_fifo_head(struct list_head *fifo)
 {
 	struct hsi_msg *pdu = NULL;
 
@@ -990,6 +981,13 @@ inline void dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
 	unsigned long flags;
 
 	write_lock_irqsave(&xfer_ctx->lock, flags);
+	_dlp_fifo_wait_push(xfer_ctx, pdu);
+	write_unlock_irqrestore(&xfer_ctx->lock, flags);
+}
+
+inline void _dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
+			       struct hsi_msg *pdu)
+{
 	if (pdu->ttype == HSI_MSG_WRITE)
 		pdu->status = HSI_STATUS_PENDING;
 
@@ -998,7 +996,6 @@ inline void dlp_fifo_wait_push(struct dlp_xfer_ctx *xfer_ctx,
 
 	/* at the end of the list */
 	list_add_tail(&pdu->link, &xfer_ctx->wait_pdus);
-	write_unlock_irqrestore(&xfer_ctx->lock, flags);
 }
 
 /**
@@ -1070,7 +1067,7 @@ static int _dlp_from_wait_to_ctrl(struct dlp_xfer_ctx *xfer_ctx)
 		dlp_ctx_set_state(xfer_ctx, READY);
 	} else {
 		read_lock_irqsave(&xfer_ctx->lock, flags);
-		ret = (xfer_ctx->ctrl_len > 0);
+		ret = (xfer_ctx->ctrl_len + xfer_ctx->wait_len > 0);
 		read_unlock_irqrestore(&xfer_ctx->lock, flags);
 		if (ret) {
 			struct dlp_channel *ch_ctx  = xfer_ctx->channel;
@@ -1126,7 +1123,7 @@ void dlp_pop_wait_push_ctrl(struct dlp_xfer_ctx *xfer_ctx)
  *
  ***************************************************************************/
 
-static inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
+inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
 					  struct hsi_msg *pdu)
 {
 	/* at the end of the list */
@@ -1143,10 +1140,20 @@ static inline void dlp_fifo_recycled_push(struct dlp_xfer_ctx *xfer_ctx,
 struct hsi_msg *dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx)
 {
 	struct hsi_msg *pdu = NULL;
-	struct list_head *first;
 	unsigned long flags;
 
 	write_lock_irqsave(&xfer_ctx->lock, flags);
+	pdu = _dlp_fifo_recycled_pop(xfer_ctx);
+	write_unlock_irqrestore(&xfer_ctx->lock, flags);
+
+	return pdu;
+}
+
+struct hsi_msg *_dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx)
+{
+	struct hsi_msg *pdu = NULL;
+	struct list_head *first;
+
 	first = &xfer_ctx->recycled_pdus;
 
 	/* Empty ? */
@@ -1157,8 +1164,6 @@ struct hsi_msg *dlp_fifo_recycled_pop(struct dlp_xfer_ctx *xfer_ctx)
 		/* Remove the pdu from the list */
 		list_del_init(&pdu->link);
 	}
-
-	write_unlock_irqrestore(&xfer_ctx->lock, flags);
 	return pdu;
 }
 
@@ -1250,7 +1255,9 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 	int err = 0;
 
 	/* Check credits */
+	spin_lock_irqsave(&ch_ctx->lock, flags);
 	if (!dlp_ctx_have_credits(xfer_ctx, ch_ctx)) {
+		spin_unlock_irqrestore(&ch_ctx->lock, flags);
 		pr_warn(DRVNAME ": CH%d (HSI CH%d) out of credits (%d)",
 				ch_ctx->ch_id,
 				ch_ctx->hsi_channel, ch_ctx->tx.seq_num);
@@ -1260,13 +1267,15 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 	}
 
 	/* Decrease counters values */
-	write_lock_irqsave(&xfer_ctx->lock, flags);
-	xfer_ctx->room -= lost_room;
-	xfer_ctx->ctrl_len++;
 	if (pdu->ttype == HSI_MSG_WRITE) {
 		xfer_ctx->channel->credits--;
 		xfer_ctx->seq_num++;
 	}
+	spin_unlock_irqrestore(&ch_ctx->lock, flags);
+
+	write_lock_irqsave(&xfer_ctx->lock, flags);
+	xfer_ctx->room -= lost_room;
+	xfer_ctx->ctrl_len++;
 	write_unlock_irqrestore(&xfer_ctx->lock, flags);
 
 	/* Set the DLP signature + seq_num */
@@ -1278,7 +1287,11 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 		if (state != DLP_CH_STATE_OPENED) {
 			pr_err(DRVNAME ": Can't push PDU for CH%d => invalid state: %d\n",
 					ch_ctx->ch_id, state);
-
+			/* Don't set back credit value as modem could have
+			 * updated credit in the meantime. It's better getting
+			 * one credit less than risking a protocol violation.
+			 * Correct credit value will be updated later by modem.
+			 */
 			err = -EACCES;
 			goto out;
 		}
@@ -1294,17 +1307,16 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 		unsigned int ctrl_len;
 		pr_err(DRVNAME ": hsi_async(ctrl_push) failed (%d)", err);
 
-		/* Failed to send pdu, set back counters values */
+		/* Failed to send pdu, set back counters values;
+		 * excepted credit value as modem could have updated
+		 * credit value in the meantime.
+		 */
 		write_lock_irqsave(&xfer_ctx->lock, flags);
 		xfer_ctx->room += lost_room;
 		xfer_ctx->ctrl_len--;
-
-		if (pdu->ttype == HSI_MSG_WRITE) {
-			xfer_ctx->channel->credits++;
-			xfer_ctx->seq_num--;
-		}
-
 		ctrl_len = xfer_ctx->ctrl_len;
+		if (pdu->ttype == HSI_MSG_WRITE)
+			xfer_ctx->seq_num--;
 		write_unlock_irqrestore(&xfer_ctx->lock, flags);
 
 		if (!ctrl_len)
@@ -1324,7 +1336,8 @@ out:
  */
 inline void dlp_hsi_controller_pop(struct dlp_xfer_ctx *xfer_ctx)
 {
-	xfer_ctx->ctrl_len--;
+	if (xfer_ctx->ctrl_len > 0)
+		xfer_ctx->ctrl_len--;
 }
 
 /**
@@ -1751,25 +1764,6 @@ static void dlp_driver_delete(void)
 }
 
 /*
- * @brief Clean the stored open_conn command from channel context
- *
- * @param none
- *
- * @return none
- */
-void dlp_reset_channels_params(void)
-{
-	int i;
-	struct dlp_hsi_channel *hsi_ch;
-
-	/* Clear any postponed OPEN_CONN command */
-	for (i = 0; i < DLP_CHANNEL_COUNT; i++) {
-		hsi_ch = &dlp_drv.channels_hsi[i];
-		hsi_ch->open_conn = 0;
-	}
-}
-
-/*
  * Callback to be called by the system in case of reboot and halt
  * This allow to block the DLP driver API until the driver is removed
  * by the system.
@@ -1893,10 +1887,9 @@ static int dlp_driver_remove(struct device *dev)
 
 	pr_debug(DRVNAME ": driver removed\n");
 
-	/* Unregister the HSI client */
+	/* Unregister HSI events */
 	if (hsi_port_claimed(client))
 		hsi_unregister_port_event(client);
-	hsi_client_set_drvdata(client, NULL);
 
 	unregister_reboot_notifier(&dlp_drv.nb);
 
@@ -1905,6 +1898,9 @@ static int dlp_driver_remove(struct device *dev)
 
 	/* UnClaim the HSI port */
 	dlp_hsi_port_unclaim();
+
+	/* Clear the HSI client */
+	hsi_client_set_drvdata(client, NULL);
 
 	/* Free allocated memory */
 	dlp_driver_delete();

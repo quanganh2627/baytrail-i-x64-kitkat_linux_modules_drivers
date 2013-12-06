@@ -900,14 +900,14 @@ int pmic_set_cv(int new_cv)
 	return 0;
 }
 
-int pmic_set_ilimmA(int ilim_mA)
+int pmic_set_ilimma(int ilim_ma)
 {
 	u8 reg_val;
 	int ret;
 
 	lookup_regval(pmic_inlmt, ARRAY_SIZE(pmic_inlmt),
-			ilim_mA, &reg_val);
-	dev_dbg(chc.dev, "Setting inlmt %d in register %x=%x\n", ilim_mA,
+			ilim_ma, &reg_val);
+	dev_dbg(chc.dev, "Setting inlmt %d in register %x=%x\n", ilim_ma,
 		CHGRCTRL1_ADDR, reg_val);
 	ret = intel_scu_ipc_iowrite8(CHGRCTRL1_ADDR, reg_val);
 
@@ -1028,11 +1028,11 @@ static void handle_internal_usbphy_notifications(int mask)
 	cap.chrg_type = get_charger_type();
 
 	if (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_SDP)
-		cap.mA = 0;
+		cap.ma = 0;
 	else if ((cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_DCP)
 			|| (cap.chrg_type == POWER_SUPPLY_TYPE_USB_CDP)
 			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_SE1))
-		cap.mA = 1500;
+		cap.ma = 1500;
 
 	atomic_notifier_call_chain(&chc.otg->notifier,
 			USB_EVENT_CHARGER, &cap);
@@ -1051,6 +1051,7 @@ int pmic_handle_low_supply(void)
 		return 0;
 	}
 
+	msleep(50);
 	ret = pmic_read_reg(SCHGRIRQ1_ADDR, &val);
 	if (ret) {
 		dev_err(chc.dev,
@@ -1384,7 +1385,7 @@ static inline void print_ps_pse_mod_prof(struct ps_pse_mod_prof *bcprof)
 	dev_info(chc.dev, "ChrgProf: battery_type:%u\n", bcprof->battery_type);
 	dev_info(chc.dev, "ChrgProf: capacity:%u\n", bcprof->capacity);
 	dev_info(chc.dev, "ChrgProf: voltage_max:%u\n", bcprof->voltage_max);
-	dev_info(chc.dev, "ChrgProf: chrg_term_mA:%u\n", bcprof->chrg_term_mA);
+	dev_info(chc.dev, "ChrgProf: chrg_term_ma:%u\n", bcprof->chrg_term_ma);
 	dev_info(chc.dev, "ChrgProf: low_batt_mV:%u\n", bcprof->low_batt_mV);
 	dev_info(chc.dev, "ChrgProf: disch_tmp_ul:%d\n", bcprof->disch_tmp_ul);
 	dev_info(chc.dev, "ChrgProf: disch_tmp_ll:%d\n", bcprof->disch_tmp_ll);
@@ -1466,7 +1467,7 @@ static void set_pmic_batt_prof(struct ps_pse_mod_prof *new_prof,
 	new_prof->battery_type = bprof->battery_type;
 	new_prof->capacity = bprof->capacity;
 	new_prof->voltage_max =  bprof->voltage_max;
-	new_prof->chrg_term_mA = bprof->chrg_term_mA;
+	new_prof->chrg_term_ma = bprof->chrg_term_ma;
 	new_prof->low_batt_mV =  bprof->low_batt_mV;
 	new_prof->disch_tmp_ul = bprof->disch_tmp_ul;
 	new_prof->disch_tmp_ll = bprof->disch_tmp_ll;
