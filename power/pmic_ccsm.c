@@ -1620,6 +1620,11 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 		chc.sfi_bcprof = NULL;
 	}
 
+	retval = intel_scu_ipc_update_register(CHGRCTRL0_ADDR, SWCONTROL_ENABLE,
+			CHGRCTRL0_SWCONTROL_MASK);
+	if (retval)
+		dev_err(chc.dev, "Error enabling sw control. Charging may continue in h/w control mode\n");
+
 	if (!chc.invalid_batt) {
 		chc.actual_bcprof = kzalloc(sizeof(struct ps_pse_mod_prof),
 					GFP_KERNEL);
@@ -1650,11 +1655,6 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 		memcpy(chc.runtime_bcprof, chc.actual_bcprof,
 			sizeof(struct ps_pse_mod_prof));
 	}
-
-	retval = intel_scu_ipc_update_register(CHGRCTRL0_ADDR, SWCONTROL_ENABLE,
-			CHGRCTRL0_SWCONTROL_MASK);
-	if (retval)
-		dev_err(chc.dev, "Error enabling sw control. Charging may continue in h/w control mode\n");
 
 	chc.pmic_intr_iomap = ioremap_nocache(PMIC_SRAM_INTR_ADDR, 8);
 	if (!chc.pmic_intr_iomap) {
