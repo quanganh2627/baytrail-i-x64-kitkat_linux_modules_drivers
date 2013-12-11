@@ -563,11 +563,11 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx,
 		struct hsi_msg *pdu);
 
 void dlp_do_start_tx(struct work_struct *work);
-void dlp_do_stop_tx(struct work_struct *work);
+void dlp_do_send_nop(struct work_struct *work);
 
 void dlp_start_tx(struct dlp_xfer_ctx *xfer_ctx);
 void dlp_stop_tx(struct dlp_xfer_ctx *xfer_ctx);
-
+void dlp_send_nop(struct dlp_xfer_ctx *xfer_ctx);
 inline void dlp_stop_rx(struct dlp_xfer_ctx *xfer_ctx,
 			struct dlp_channel *ch_ctx);
 
