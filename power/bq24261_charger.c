@@ -122,6 +122,7 @@
 #define BQ24261_VENDOR_MASK		(0x07 << 5)
 #define BQ24261_VENDOR			(0x02 << 5)
 #define BQ24261_REV_MASK		(0x07)
+#define BQ24261_2_3_REV			(0x06)
 #define BQ24261_REV			(0x02)
 #define BQ24260_REV			(0x01)
 
@@ -304,6 +305,7 @@ struct bq24261_charger {
 	int cntl_state;
 	int max_temp;
 	int min_temp;
+	int revision;
 	enum bq24261_chrgr_stat chrgr_stat;
 	bool online;
 	bool present;
@@ -318,7 +320,8 @@ struct bq24261_charger {
 };
 
 enum bq2426x_model_num {
-	BQ24260 = 0,
+	BQ2426X = 0,
+	BQ24260,
 	BQ24261,
 };
 
@@ -328,6 +331,7 @@ struct bq2426x_model {
 };
 
 static struct bq2426x_model bq24261_model_name[] = {
+	{ "bq2426x", BQ2426X },
 	{ "bq24260", BQ24260 },
 	{ "bq24261", BQ24261 },
 };
@@ -1631,9 +1635,10 @@ static enum bq2426x_model_num bq24261_get_model(int bq24261_rev_reg)
 	case BQ24260_REV:
 		return BQ24260;
 	case BQ24261_REV:
+	case BQ24261_2_3_REV:
 		return BQ24261;
 	default:
-		return -EINVAL;
+		return BQ2426X;
 	}
 }
 
@@ -1643,7 +1648,8 @@ static int bq24261_probe(struct i2c_client *client,
 	struct i2c_adapter *adapter;
 	struct bq24261_charger *chip;
 	int ret;
-	enum bq2426x_model_num bq24261_rev;
+	int bq2426x_rev;
+	enum bq2426x_model_num bq24261_rev_index;
 
 	adapter = to_i2c_adapter(client->dev.parent);
 
@@ -1659,19 +1665,19 @@ static int bq24261_probe(struct i2c_client *client,
 		return -EIO;
 	}
 
-	ret = bq24261_read_reg(client, BQ24261_VENDOR_REV_ADDR);
-	if (ret < 0) {
+	bq2426x_rev = bq24261_read_reg(client, BQ24261_VENDOR_REV_ADDR);
+	if (bq2426x_rev < 0) {
 		dev_err(&client->dev,
-			"Error (%d) in reading BQ24261_VENDOR_REV_ADDR\n", ret);
-		return ret;
+			"Error (%d) in reading BQ24261_VENDOR_REV_ADDR\n", bq2426x_rev);
+		return bq2426x_rev;
 	}
+	dev_info(&client->dev, "bq2426x revision: 0x%x found!!\n", bq2426x_rev);
 
-	bq24261_rev = bq24261_get_model(ret);
-	if (((ret & BQ24261_VENDOR_MASK) != BQ24261_VENDOR) ||
-		(bq24261_rev < 0)) {
+	bq24261_rev_index = bq24261_get_model(bq2426x_rev);
+	if ((bq2426x_rev & BQ24261_VENDOR_MASK) != BQ24261_VENDOR) {
 		dev_err(&client->dev,
 			"Invalid Vendor/Revision number in BQ24261_VENDOR_REV_ADDR: %d",
-			ret);
+			bq2426x_rev);
 		return -ENODEV;
 	}
 
@@ -1711,9 +1717,10 @@ static int bq24261_probe(struct i2c_client *client,
 	chip->max_cc = 1500;
 	chip->chrgr_stat = BQ24261_CHRGR_STAT_UNKNOWN;
 	chip->chrgr_health = POWER_SUPPLY_HEALTH_UNKNOWN;
+	chip->revision = bq2426x_rev;
 
 	strncpy(chip->model_name,
-		bq24261_model_name[bq24261_rev].model_name,
+		bq24261_model_name[bq24261_rev_index].model_name,
 		MODEL_NAME_SIZE);
 	strncpy(chip->manufacturer, DEV_MANUFACTURER,
 		DEV_MANUFACTURER_NAME_SIZE);
