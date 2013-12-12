@@ -989,19 +989,37 @@ int pmic_get_battery_pack_temp(int *temp)
 
 static int get_charger_type()
 {
-	int ret;
+	int ret, i = 0;
 	u8 val;
 	int chgr_type;
 
-	ret = pmic_read_reg(USBSRCDETSTATUS_ADDR, &val);
-	if (ret != 0) {
-		dev_err(chc.dev,
-			"Error reading USBSRCDETSTAT-register 0x%2x\n",
-			USBSRCDETSTATUS_ADDR);
+	do {
+		ret = pmic_read_reg(USBSRCDETSTATUS_ADDR, &val);
+		if (ret != 0) {
+			dev_err(chc.dev,
+				"Error reading USBSRCDETSTAT-register 0x%2x\n",
+				USBSRCDETSTATUS_ADDR);
+			return 0;
+		}
+
+		i++;
+		dev_info(chc.dev, "Read USBSRCDETSTATUS val: %x\n", val);
+
+		if (val & USBSRCDET_SUSBHWDET_DETSUCC)
+			break;
+		else
+			msleep(USBSRCDET_SLEEP_TIME);
+	} while (i < USBSRCDET_RETRY_CNT);
+
+	if (!(val & USBSRCDET_SUSBHWDET_DETSUCC)) {
+		dev_err(chc.dev, "Charger detection unsuccessful after %dms\n",
+			i * USBSRCDET_SLEEP_TIME);
 		return 0;
 	}
 
 	chgr_type = (val & USBSRCDET_USBSRCRSLT_MASK) >> 2;
+	dev_info(chc.dev, "Charger type after detection complete: %d\n",
+			(val & USBSRCDET_USBSRCRSLT_MASK) >> 2);
 
 	switch (chgr_type) {
 	case PMIC_CHARGER_TYPE_SDP:
@@ -1025,10 +1043,14 @@ static void handle_internal_usbphy_notifications(int mask)
 {
 	struct power_supply_cable_props cap;
 
-	cap.chrg_evt = mask ?
-		POWER_SUPPLY_CHARGER_EVENT_CONNECT :
-		POWER_SUPPLY_CHARGER_EVENT_DISCONNECT;
-	cap.chrg_type = get_charger_type();
+	if (mask) {
+		cap.chrg_evt = POWER_SUPPLY_CHARGER_EVENT_CONNECT;
+		cap.chrg_type = get_charger_type();
+		chc.charger_type = cap.chrg_type;
+	} else {
+		cap.chrg_evt = POWER_SUPPLY_CHARGER_EVENT_DISCONNECT;
+		cap.chrg_type = chc.charger_type;
+	}
 
 	if (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_SDP)
 		cap.ma = 0;
@@ -1037,6 +1059,9 @@ static void handle_internal_usbphy_notifications(int mask)
 			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_SE1))
 		cap.ma = 1500;
 
+	dev_info(chc.dev, "Notifying OTG ev:%d, evt:%d, chrg_type:%d, mA:%d\n",
+			USB_EVENT_CHARGER, cap.chrg_evt, cap.chrg_type,
+			cap.ma);
 	atomic_notifier_call_chain(&chc.otg->notifier,
 			USB_EVENT_CHARGER, &cap);
 }

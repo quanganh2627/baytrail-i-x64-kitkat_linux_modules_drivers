@@ -189,10 +189,15 @@
 #define CHRTTADDR_ADDR		0x56
 #define CHRTTDATA_ADDR		0x57
 
+#define USBSRCDET_RETRY_CNT		4
+#define USBSRCDET_SLEEP_TIME		200
 #define USBSRCDETSTATUS_ADDR		0x5D
 #define USBSRCDET_SUSBHWDET_MASK	(D0|D1)
 #define USBSRCDET_USBSRCRSLT_MASK	(D2|D3|D4|D5)
 #define USBSRCDET_SDCD_MASK		(D6|D7)
+#define USBSRCDET_SUSBHWDET_DETON	(0x01 << 0)
+#define USBSRCDET_SUSBHWDET_DETSUCC	(0x01 << 1)
+#define USBSRCDET_SUSBHWDET_DETFAIL	(0x03 << 0)
 
 /* Register on I2C-dev2-0x6E */
 #define USBPATH_ADDR		0x011C
@@ -299,6 +304,19 @@ struct interrupt_info {
 	void (*stat_handle) (bool);
 };
 
+enum pmic_charger_cable_type {
+	PMIC_CHARGER_TYPE_NONE = 0,
+	PMIC_CHARGER_TYPE_SDP,
+	PMIC_CHARGER_TYPE_DCP,
+	PMIC_CHARGER_TYPE_CDP,
+	PMIC_CHARGER_TYPE_ACA,
+	PMIC_CHARGER_TYPE_SE1,
+	PMIC_CHARGER_TYPE_MHL,
+	PMIC_CHARGER_TYPE_FLOAT_DP_DN,
+	PMIC_CHARGER_TYPE_OTHER,
+	PMIC_CHARGER_TYPE_DCP_EXTPHY,
+};
+
 struct pmic_chrgr_drv_context {
 	bool invalid_batt;
 	bool is_batt_present;
@@ -309,6 +327,7 @@ struct pmic_chrgr_drv_context {
 	int health;
 	u8 pmic_id;
 	bool is_internal_usb_phy;
+	enum pmic_charger_cable_type charger_type;
 	/* ShadyCove-WA for VBUS removal detect issue */
 	bool vbus_connect_status;
 	struct ps_batt_chg_prof *sfi_bcprof;
@@ -335,16 +354,4 @@ struct pmic_regs_def {
 	u16 addr;
 };
 
-enum pmic_charger_cable_type {
-	PMIC_CHARGER_TYPE_NONE = 0,
-	PMIC_CHARGER_TYPE_SDP,
-	PMIC_CHARGER_TYPE_DCP,
-	PMIC_CHARGER_TYPE_CDP,
-	PMIC_CHARGER_TYPE_ACA,
-	PMIC_CHARGER_TYPE_SE1,
-	PMIC_CHARGER_TYPE_MHL,
-	PMIC_CHARGER_TYPE_FLOAT_DP_DN,
-	PMIC_CHARGER_TYPE_OTHER,
-	PMIC_CHARGER_TYPE_DCP_EXTPHY,
-};
 #endif
