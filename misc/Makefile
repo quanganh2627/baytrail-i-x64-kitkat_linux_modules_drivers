@@ -9,3 +9,4 @@ obj-$(CONFIG_EMMC_IPANIC)	+= emmc_ipanic.o
 obj-$(CONFIG_SENSORS_APDS990X_FORK) += apds990x.o
 obj-y                           += tp2l/
 obj-$(CONFIG_INTEL_IQVANDROID)  += iqvandroid/
+obj-$(CONFIG_RAWIO)             += rawio/
