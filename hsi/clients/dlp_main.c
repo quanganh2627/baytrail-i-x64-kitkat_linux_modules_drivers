@@ -1887,9 +1887,10 @@ static int dlp_driver_remove(struct device *dev)
 
 	pr_debug(DRVNAME ": driver removed\n");
 
-	/* Unregister HSI events */
+	/* Unregister the HSI client */
 	if (hsi_port_claimed(client))
 		hsi_unregister_port_event(client);
+	hsi_client_set_drvdata(client, NULL);
 
 	unregister_reboot_notifier(&dlp_drv.nb);
 
@@ -1898,9 +1899,6 @@ static int dlp_driver_remove(struct device *dev)
 
 	/* UnClaim the HSI port */
 	dlp_hsi_port_unclaim();
-
-	/* Clear the HSI client */
-	hsi_client_set_drvdata(client, NULL);
 
 	/* Free allocated memory */
 	dlp_driver_delete();
