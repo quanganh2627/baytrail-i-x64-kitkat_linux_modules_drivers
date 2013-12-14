@@ -85,10 +85,6 @@ struct OSIP_header {            /* os image profile */
     force shuts down */
 static int force_shutdown_occured;
 
-/* A boolean variable, that is set to check if a power supply
-   is present during shutdown. */
-static int shutdown_power_supply_supplied;
-
 module_param(force_shutdown_occured, int, 0644);
 MODULE_PARM_DESC(force_shutdown_occured,
 		"Variable to be set by user space"
@@ -96,7 +92,7 @@ MODULE_PARM_DESC(force_shutdown_occured,
 		" system shut down even with charger connected");
 
 
-int get_force_shutdown_occured()
+int get_force_shutdown_occured(void)
 {
 	pr_info("%s, force_shutdown_occured=%d\n",
 		__func__, force_shutdown_occured);
@@ -105,13 +101,13 @@ int get_force_shutdown_occured()
 EXPORT_SYMBOL(get_force_shutdown_occured);
 #endif
 
-int emmc_match(struct device *dev, void *data)
+int emmc_match(struct device *dev, const void *data)
 {
 	if (strcmp(dev_name(dev), EMMC_OSIP_BLKDEVICE) == 0)
 		return 1;
 	return 0;
 }
-int hdd_match(struct device *dev, void *data)
+int hdd_match(struct device *dev, const void *data)
 {
 	if (strcmp(dev_name(dev), HDD_OSIP_BLKDEVICE) == 0)
 		return 1;
@@ -241,7 +237,7 @@ bd_put:
 
 static int osip_invalidate(struct OSIP_header *osip, void *data)
 {
-	int id = (int)data;
+	int id = (uintptr_t)data;
 	osip->desc[id].ddr_load_address = 0;
 	osip->desc[id].entry_point = 0;
 	return 1;
@@ -249,7 +245,7 @@ static int osip_invalidate(struct OSIP_header *osip, void *data)
 
 static int osip_restore(struct OSIP_header *osip, void *data)
 {
-	int id = (int)data;
+	int id = (uintptr_t)data;
 	/* hardcoding addresses. According to the FAS, this is how
 	   the OS image blob has to be loaded, and where is the
 	   bootstub entry point.
@@ -388,7 +384,7 @@ struct cmdline_priv {
 	struct block_device *bdev;
 	int lba;
 	char *cmdline;
-	int osip_id;
+	long osip_id;
 	uint8_t attribute;
 };
 
@@ -412,7 +408,7 @@ int open_cmdline(struct inode *i, struct file *f)
 		goto end;
 	}
 	if (i->i_private)
-		p->osip_id = (int) i->i_private;
+		p->osip_id = (long) i->i_private;
 	f->private_data = 0;
 	access_osip_record(osip_find_cmdline, (void *)p);
 	if (!p->lba) {

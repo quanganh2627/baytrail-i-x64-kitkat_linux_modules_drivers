@@ -1,0 +1,11 @@
+if PWM
+
+config PWM_BAYTRAIL
+	tristate "Intel Baytrail SoC PWM support"
+
+	help
+	  Generic PWM framework driver for Intel Baytrail SoC.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called pwm-byt.
+endif

@@ -430,6 +430,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.scl_cfg = vlv2_i2c_scl_cfg,
 		.reset = vlv2_reset,
 		.share_irq = 1,
+		.acpi_name = "\\_SB.I2C4"
 	},
 	[valleyview_4] = {
 		.bus_num     = 5,
@@ -938,7 +939,8 @@ static void i2c_dw_xfer_init(struct dw_i2c_dev *dev)
 	/* Enable the adapter */
 	i2c_dw_enable(dev);
 
-	/* Enable interrupts */
+	/* Clear and enable interrupts */
+	i2c_dw_clear_int(dev);
 	dw_writel(dev, DW_IC_INTR_DEFAULT_MASK, DW_IC_INTR_MASK);
 }
 

@@ -73,9 +73,9 @@
  #define BCUIRQ		0x007
  #define MBCUIRQ	0x014
 
- #define VWARNA_THRES		0x07 /*2.9V*/
- #define VWARNB_THRES		0x06 /*2.7V*/
- #define VWARNCRIT_THRES	0x07 /*2.6V*/
+ #define VWARNA_THRES		0x06 /*3.0V*/
+ #define VWARNB_THRES		0x04 /*2.9V*/
+ #define VWARNCRIT_THRES	0x06 /*2.7V*/
 
 #endif
 
