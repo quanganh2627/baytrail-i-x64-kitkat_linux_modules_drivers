@@ -35,7 +35,7 @@
 #include <linux/pnp.h>
 #include <linux/platform_device.h>
 #include <linux/acpi.h>
-#include <linux/rawio.h>
+#include "rawio.h"
 
 /*
  * On some platforms, a read or write to a device which is in a low power

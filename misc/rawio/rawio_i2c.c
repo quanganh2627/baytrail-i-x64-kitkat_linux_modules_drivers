@@ -30,7 +30,7 @@
 #include <linux/slab.h>
 #include <linux/pm_runtime.h>
 #include <linux/i2c.h>
-#include <linux/rawio.h>
+#include "rawio.h"
 
 static int i2c_prepare(u8 i2c_bus, u16 i2c_addr, u16 i2c_reg, u16 len,
 			int ten_bit_addr, struct i2c_adapter **ppadap)

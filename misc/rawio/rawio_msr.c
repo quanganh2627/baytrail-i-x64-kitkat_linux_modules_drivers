@@ -32,8 +32,8 @@
 #include <linux/slab.h>
 #include <linux/pm_runtime.h>
 #include <linux/seq_file.h>
-#include <linux/rawio.h>
 #include <asm/msr.h>
+#include "rawio.h"
 
 static int rawio_msr_read_and_show(struct rawio_driver *driver, int width,
 				u64 *input, u8 *postfix, int input_num)

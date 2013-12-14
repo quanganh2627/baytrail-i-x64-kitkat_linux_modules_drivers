@@ -31,7 +31,7 @@
 #include <linux/err.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
-#include <linux/rawio.h>
+#include "rawio.h"
 
 #define SHOW_NUM_PER_LINE	(32 / active_width)
 #define LINE_WIDTH		32

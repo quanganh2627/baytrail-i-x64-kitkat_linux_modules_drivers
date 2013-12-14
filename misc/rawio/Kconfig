@@ -5,7 +5,7 @@
 menuconfig RAWIO
 	tristate "Debug fs based raw io device read/write framework "
 	depends on DEBUG_FS
-	default no
+	default y 
 	help
 	  This option enables support for reading or writing registers/memory
 	  region in a io device via debug fs.
@@ -25,7 +25,7 @@ if RAWIO
 config RAWIO_PCI
 	tristate "rawio PCI driver"
 	depends on RAWIO && PCI
-	default no
+	default y
 	help
 	  This option enables the rawio PCI driver.
 	  With this driver, you can read or write any PCI device's
@@ -36,7 +36,7 @@ config RAWIO_PCI
 config RAWIO_IOMEM
 	tristate "rawio I/O memory driver"
 	depends on RAWIO
-	default no
+	default y
 	help
 	  This option enables the rawio I/O memory driver.
 	  With this driver, you can read or write registers of a memory
@@ -48,7 +48,7 @@ config RAWIO_IOMEM
 config RAWIO_I2C
 	tristate "rawio I2C driver"
 	depends on RAWIO && I2C
-	default no
+	default y
 	help
 	  This option enables the rawio I2C driver.
 	  With this driver, you can read or write any I2C device's
@@ -59,7 +59,7 @@ config RAWIO_I2C
 config RAWIO_MSGBUS
 	tristate "rawio Message Bus driver"
 	depends on RAWIO && X86_WANT_INTEL_MID
-	default no
+	default y
 	help
 	  This option enables the rawio Message Bus driver.
 	  With this driver, you can read or write any message bus
@@ -70,7 +70,7 @@ config RAWIO_MSGBUS
 config RAWIO_MSR
 	tristate "rawio MSR driver"
 	depends on RAWIO && X86
-	default no
+	default y
 	help
 	  This option enables the rawio MSR driver.
 	  With this driver, you can read or write any MSR register

@@ -32,7 +32,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
-#include <linux/rawio.h>
+#include "rawio.h"
 
 static int pci_prepare(int pci_domain, unsigned int pci_bus,
 		u8 pci_dev, u8 pci_func, enum width width,

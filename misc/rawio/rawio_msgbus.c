@@ -29,8 +29,8 @@
 #include <linux/types.h>
 #include <linux/slab.h>
 #include <linux/pm_runtime.h>
-#include <linux/rawio.h>
 #include <asm/intel_mid_pcihelpers.h>
+#include "rawio.h"
 
 static int rawio_msgbus_read(struct rawio_driver *driver, int width, u64 *input,
 	u8 *postfix, int input_num, void **output, int *output_num)
