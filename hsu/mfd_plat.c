@@ -17,6 +17,7 @@
 #include <linux/acpi.h>
 #include <linux/intel_mid_pm.h>
 #include <linux/pm_qos.h>
+#include <linux/pci.h>
 
 #include "mfd.h"
 
@@ -213,6 +214,20 @@ static struct platform_driver hsu_plat_driver = {
 
 static int __init hsu_plat_init(void)
 {
+	struct pci_dev *hsu_pci;
+
+	/*
+	 * Try to get pci device, if exist, then exit ACPI platform
+	 * register, On BYT FDK, include two enum mode: PCI, ACPI,
+	 * ignore ACPI enum mode.
+	 */
+	hsu_pci = pci_get_device(PCI_VENDOR_ID_INTEL, 0x0F0A, NULL);
+	if (hsu_pci) {
+		pr_info("HSU serial: Find HSU controller in PCI device, "
+			"exit ACPI platform register!\n");
+		return 0;
+	}
+
 	return platform_driver_probe(&hsu_plat_driver, serial_hsu_plat_port_probe);
 }
 

@@ -38,6 +38,7 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/acpi.h>
+#include <linux/pci.h>
 #include <linux/pm_runtime.h>
 #include "i2c-designware-core.h"
 
@@ -194,6 +195,20 @@ static struct platform_driver dw_i2c_driver = {
 
 static int __init dw_i2c_init_driver(void)
 {
+	struct pci_dev *dw_pci;
+
+	/*
+	 * Try to get pci device, if exist, then exit ACPI platform
+	 * register, On BYT FDK, include two enum mode: PCI, ACPI,
+	 * ignore ACPI enum mode.
+	 */
+	dw_pci = pci_get_device(PCI_VENDOR_ID_INTEL, 0x0F41, NULL);
+	if (dw_pci) {
+		pr_info("DW I2C: Find I2C controller in PCI device, "
+			"exit ACPI platform register!\n");
+		return 0;
+	}
+
 	return platform_driver_probe(&dw_i2c_driver, dw_i2c_probe);
 }
 module_init(dw_i2c_init_driver);
