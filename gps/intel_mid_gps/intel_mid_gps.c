@@ -145,6 +145,7 @@ static int intel_mid_gps_init(struct platform_device *pdev)
 {
 	int ret;
 	struct intel_mid_gps_platform_data *pdata = dev_get_drvdata(&pdev->dev);
+	struct device *parent, *grand_parent;
 
 	/* we need to rename the sysfs entry to match the one created with SFI,
 	   and we are sure that there is always one GPS per platform */
@@ -158,6 +159,19 @@ static int intel_mid_gps_init(struct platform_device *pdev)
 	if (ret)
 		dev_err(&pdev->dev,
 			"Failed to create intel_mid_gps sysfs interface\n");
+
+	/* With ACPI device tree, GPS is UART child, we need to create symlink at
+	   /sys/devices/platform/ level (user libgps is expecting this).
+	   To be removed when GPIO sysfs path will not be used from user space */
+	if (ACPI_HANDLE(&pdev->dev)) {
+		parent = pdev->dev.parent;
+		grand_parent = (parent == NULL ? NULL : parent->parent);
+		if (parent != NULL && grand_parent != NULL) {
+			ret = sysfs_create_link(&grand_parent->kobj, &pdev->dev.kobj, DRIVER_NAME);
+			if (ret)
+				pr_err("%s: failed to create symlink\n", __func__);
+		}
+	}
 
 	/* Handle reset GPIO */
 	if (gpio_is_valid(pdata->gpio_reset)) {
