@@ -101,7 +101,8 @@
 
 #define DEFAULT_INTERRUPT_MASK      0x0e
 #define CALIBRATION_INTERRUPT_MASK  0x08
-#define TOUCH_ID_START              1
+#define TOUCH_ID_MIN                1
+#define TOUCH_ID_INVALID            0xff
 
 struct r69001_ts_finger {
 	u16 x;
@@ -198,7 +199,8 @@ r69001_ts_write_data(struct r69001_ts_data *ts, u8 addr_h, u8 addr_l, u8 data)
 	return error;
 }
 
-static void r69001_ts_report_coordinates_data(struct r69001_ts_data *ts)
+static void
+r69001_ts_report_coordinates_data(struct r69001_ts_data *ts, int filter)
 {
 	struct r69001_ts_finger *finger = ts->finger;
 	struct input_dev *input_dev = ts->input_dev;
@@ -206,6 +208,9 @@ static void r69001_ts_report_coordinates_data(struct r69001_ts_data *ts)
 	u8 i;
 
 	for (i = 0; i < ts->t_num; i++) {
+		if (finger[i].t < TOUCH_ID_MIN || finger[i].t == filter)
+			continue;
+		finger[i].t -= TOUCH_ID_MIN;
 		input_mt_slot(input_dev, finger[i].t);
 		input_mt_report_slot_state(input_dev, MT_TOOL_FINGER, true);
 		input_report_abs(input_dev, ABS_MT_POSITION_X, finger[i].x);
@@ -242,6 +247,7 @@ static int r69001_ts_read_coordinates_data(struct r69001_ts_data *ts)
 	u8 data[ONE_SET_COORD_DATA_SIZE] = { 0 };
 	u8 lowreg[5] = {REG_DATA0, REG_DATA1, REG_DATA2, REG_DATA3, REG_DATA4};
 	int error;
+	bool inval_id = false;
 
 	error = r69001_ts_read_data(ts,
 			REG_COORDINATES_DATA, REG_INFO1, 1, &numt);
@@ -259,7 +265,10 @@ static int r69001_ts_read_coordinates_data(struct r69001_ts_data *ts)
 			finger[i].y =
 				((u16)(data[7] & 0xf0) << 4) | (u16)(data[6]);
 			finger[i].z = data[8];
-			finger[i].t = ((data[0] & 0xf0) >> 4) - TOUCH_ID_START;
+			finger[i].t = (data[0] & 0xf0) >> 4;
+			if (finger[i].t < TOUCH_ID_MIN)
+				inval_id = true;
+
 		} else {
 			error = r69001_ts_read_data(ts,
 					REG_COORDINATES_DATA, lowreg[i / 2],
@@ -271,19 +280,24 @@ static int r69001_ts_read_coordinates_data(struct r69001_ts_data *ts)
 			finger[i].y =
 				((u16)(data[3] & 0xf0) << 4) | (u16)(data[2]);
 			finger[i].z = data[4];
-			finger[i].t = (data[0] & 0x0f) - TOUCH_ID_START;
+			finger[i].t = data[0] & 0x0f;
+			if (finger[i].t < TOUCH_ID_MIN)
+				inval_id = true;
 		}
 	}
 
 	/* Only update the number when there is no error happened */
 	ts->t_num = numt;
-	return 0;
+	return inval_id ? TOUCH_ID_INVALID : 0;
 }
 
 static irqreturn_t r69001_ts_irq_handler(int irq, void *dev_id)
 {
 	struct r69001_ts_data *ts = dev_id;
+	struct i2c_client *client = ts->client;
 	u8 mode = 0;
+	int err = 0;
+	int filter = 0;
 
 	r69001_ts_read_data(ts, REG_CONTROL, REG_SCAN_MODE, 1, &mode);
 
@@ -299,8 +313,17 @@ static irqreturn_t r69001_ts_irq_handler(int irq, void *dev_id)
 			r69001_set_mode(ts, ts->mode, POLL_INTERVAL);
 		}
 
-		r69001_ts_read_coordinates_data(ts);
-		r69001_ts_report_coordinates_data(ts);
+		err = r69001_ts_read_coordinates_data(ts);
+		if (err < 0) {
+			dev_err(&client->dev,
+					"%s: Read coordinate data failed\n",
+					__func__);
+
+			return IRQ_HANDLED;
+		}
+		if (err == TOUCH_ID_INVALID)
+			filter = 1;
+		r69001_ts_report_coordinates_data(ts, filter);
 	}
 
 	return IRQ_HANDLED;
