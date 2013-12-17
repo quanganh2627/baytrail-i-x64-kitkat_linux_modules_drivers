@@ -100,6 +100,12 @@ static int mdm_ctrl_cold_boot(struct mdm_ctrl *drv)
 
 	mdm_ctrl_launch_timer(&drv->flashing_timer,
 			      cflash_delay, MDM_TIMER_FLASH_ENABLE);
+
+	/* If no IPC ready signal between modem and AP */
+	if (!drv->pdata->cpu.get_irq_rst(drv->pdata->cpu_data)) {
+		atomic_set(&drv->rst_ongoing, 0);
+		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_IPC_READY);
+	}
 	return 0;
 }
 
@@ -698,28 +704,34 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	if (new_drv->pdata->pmic.init(new_drv->pdata->pmic_data))
 		goto del_dev;
 
-	ret =
-	    request_irq(new_drv->pdata->cpu.
-			get_irq_rst(new_drv->pdata->cpu_data),
-			mdm_ctrl_reset_it,
-			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
-			IRQF_NO_SUSPEND, DRVNAME, new_drv);
-	if (ret) {
-		pr_err(DRVNAME ": IRQ request failed for GPIO (RST_OUT)");
-		ret = -ENODEV;
-		goto del_dev;
+	if (new_drv->pdata->cpu.get_irq_rst(new_drv->pdata->cpu_data) > 0) {
+		ret =
+		    request_irq(new_drv->pdata->cpu.
+				get_irq_rst(new_drv->pdata->cpu_data),
+				mdm_ctrl_reset_it,
+				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
+				IRQF_NO_SUSPEND, DRVNAME, new_drv);
+		if (ret) {
+			pr_err(DRVNAME ": IRQ request failed for GPIO"
+					" (RST_OUT)");
+			ret = -ENODEV;
+			goto del_dev;
+		}
 	}
 
-	ret =
-	    request_irq(new_drv->pdata->cpu.
-			get_irq_cdump(new_drv->pdata->cpu_data),
-			mdm_ctrl_coredump_it,
-			IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND, DRVNAME,
-			new_drv);
-	if (ret) {
-		pr_err(DRVNAME ": IRQ request failed for GPIO (CORE DUMP)");
-		ret = -ENODEV;
-		goto free_all;
+	if (new_drv->pdata->cpu.get_irq_cdump(new_drv->pdata->cpu_data) > 0) {
+		ret =
+		    request_irq(new_drv->pdata->cpu.
+				get_irq_cdump(new_drv->pdata->cpu_data),
+				mdm_ctrl_coredump_it,
+				IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND, DRVNAME,
+				new_drv);
+		if (ret) {
+			pr_err(DRVNAME ": IRQ request failed for GPIO"
+					" (CORE DUMP)");
+			ret = -ENODEV;
+			goto free_all;
+		}
 	}
 
 	/* Everything is OK */
