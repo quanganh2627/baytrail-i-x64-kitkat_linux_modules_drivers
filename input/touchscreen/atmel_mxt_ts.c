@@ -530,7 +530,7 @@ static int mxt_debug_msg_init(struct mxt_data *data)
 	}
 	sysfs_bin_attr_init(&data->debug_msg_attr);
 	data->debug_msg_attr.attr.name = "debug_msg";
-	data->debug_msg_attr.attr.mode = 0666;
+	data->debug_msg_attr.attr.mode = 0664;
 	data->debug_msg_attr.read = mxt_debug_msg_read;
 	data->debug_msg_attr.write = mxt_debug_msg_write;
 	data->debug_msg_attr.size = data->T5_msg_size * DEBUG_MSG_MAX;
