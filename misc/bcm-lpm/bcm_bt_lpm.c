@@ -101,7 +101,7 @@ static int bcm_bt_lpm_acpi_probe(struct platform_device *pdev)
 	/*
 	 * Handle ACPI specific initializations.
 	 */
-	dev_dbg(&pdev->dev, "BCM2E1A ACPI specific probe\n");
+	dev_dbg(&pdev->dev, "ACPI specific probe\n");
 
 	bt_lpm.gpio_enable_bt = acpi_get_gpio_by_index(&pdev->dev,
 						gpio_enable_bt_acpi_idx, &info);
@@ -557,6 +557,7 @@ static struct acpi_device_id bcm_id_table[] = {
 	/* ACPI IDs here */
 	{ "BCM2E1A", 0 },
 	{ "BCM2E3A", 0 },
+	{ "OBDA8723", 0},
 	{ }
 };
 
