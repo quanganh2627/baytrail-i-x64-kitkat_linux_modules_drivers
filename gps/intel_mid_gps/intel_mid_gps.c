@@ -20,7 +20,7 @@
 #include <linux/lnw_gpio.h>
 #include <linux/acpi.h>
 #include <linux/acpi_gpio.h>
-
+#include <linux/efi.h>
 #include <linux/intel_mid_gps.h>
 
 #define DRIVER_NAME "intel_mid_gps"
@@ -263,14 +263,21 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 			pdata->has_enable = 1; /* Available */
 		}
 
-		pdata->gpio_reset = pdata->has_reset ?
-			acpi_get_gpio_by_index(&pdev->dev, 0, &info)
-			: -EINVAL;
-
-		pdata->gpio_enable = pdata->has_enable ?
-			acpi_get_gpio_by_index(&pdev->dev, 1, &info)
-			: -EINVAL;
-
+		/* Check below if EDK Bios (EFI RS enabled) or FDK Ifwi
+		 as we have to maintain both ACPI tables for now */
+		if (efi_enabled(EFI_RUNTIME_SERVICES))
+			pdata->gpio_enable = pdata->has_enable ?
+				acpi_get_gpio_by_index(&pdev->dev, 0, &info)
+				: -EINVAL;
+		else {
+			pdata->gpio_reset = pdata->has_reset ?
+				acpi_get_gpio_by_index(&pdev->dev, 0, &info)
+				: -EINVAL;
+			pdata->gpio_enable = pdata->has_enable ?
+				acpi_get_gpio_by_index(&pdev->dev, 1, &info)
+				: -EINVAL;
+		}
+		pr_info("%s enable: %d, reset: %d\n", __func__, pdata->gpio_enable, pdata->gpio_reset);
 		platform_set_drvdata(pdev, pdata);
 	} else {
 		platform_set_drvdata(pdev, pdev->dev.platform_data);
