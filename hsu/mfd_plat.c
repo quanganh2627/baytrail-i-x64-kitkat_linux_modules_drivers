@@ -157,6 +157,12 @@ static int serial_hsu_plat_port_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, up);
 
+	if (!pdev->dev.dma_mask) {
+		pdev->dev.dma_mask = &pdev->dev.coherent_dma_mask;
+		pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
+	}
+	dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
+
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 	pm_runtime_allow(&pdev->dev);

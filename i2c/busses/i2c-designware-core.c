@@ -730,8 +730,10 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 
 	return dev;
 
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
 err_del_adap:
 	i2c_del_adapter(&dev->adapter);
+#endif
 err_free_irq:
 	free_irq(irq, dev);
 err_kfree:
@@ -743,6 +745,102 @@ exit:
 	return ERR_PTR(r);
 }
 EXPORT_SYMBOL(i2c_dw_setup);
+
+#ifdef CONFIG_ACPI
+static int acpi_i2c_get_freq(struct acpi_resource *ares,
+					void *data)
+{
+	struct dw_i2c_dev *i2c = data;
+
+	if (ares->type == ACPI_RESOURCE_TYPE_SERIAL_BUS) {
+		struct acpi_resource_i2c_serialbus *sb;
+
+		sb = &ares->data.i2c_serial_bus;
+		if (sb->type == ACPI_RESOURCE_SERIAL_TYPE_I2C) {
+			i2c->freq = sb->connection_speed;
+			if (i2c->freq == DW_STD_SPEED) {
+				i2c->master_cfg &= ~DW_IC_SPEED_MASK;
+				i2c->master_cfg |= DW_IC_CON_SPEED_STD;
+			} else if (i2c->freq == DW_FAST_SPEED) {
+				i2c->master_cfg &= ~DW_IC_SPEED_MASK;
+				i2c->master_cfg |= DW_IC_CON_SPEED_FAST;
+			} else if (i2c->freq == DW_HIGH_SPEED) {
+				i2c->master_cfg &= ~DW_IC_SPEED_MASK;
+				i2c->master_cfg |= DW_IC_CON_SPEED_HIGH;
+			}
+
+			down(&i2c->lock);
+			i2c_dw_init(i2c);
+			up(&i2c->lock);
+		}
+	}
+
+	return 1;
+}
+
+static acpi_status acpi_i2c_find_device_speed(acpi_handle handle, u32 level,
+					void *data, void **return_value)
+{
+	struct dw_i2c_dev *i2c = data;
+	struct list_head resource_list;
+	struct acpi_device *adev;
+	acpi_status status;
+	unsigned long long sta = 0;
+	int ret;
+
+	if (acpi_bus_get_device(handle, &adev))
+		return AE_OK;
+	if (acpi_bus_get_status(adev) || !adev->status.present)
+		return AE_OK;
+
+	INIT_LIST_HEAD(&resource_list);
+	ret = acpi_dev_get_resources(adev, &resource_list,
+				     acpi_i2c_get_freq, i2c);
+	acpi_dev_free_resource_list(&resource_list);
+
+	if (ret < 0)
+		return AE_OK;
+
+	pr_debug("i2c device: %s, freq: %dkHz\n",
+			dev_name(&adev->dev), i2c->freq/1000);
+
+	return AE_OK;
+}
+
+void i2c_acpi_devices_setup(struct device *pdev, struct dw_i2c_dev *dev)
+{
+	acpi_handle pdev_handle = ACPI_HANDLE(pdev);
+	acpi_handle handle = NULL;
+	acpi_status status;
+
+	if (pdev_handle) {
+		handle = pdev_handle;
+	} else if (dev->controller->acpi_name) {
+		acpi_get_handle(NULL,
+			dev->controller->acpi_name, &handle);
+
+		ACPI_HANDLE_SET(pdev, handle);
+	}
+
+	if (handle == NULL)
+		return;
+
+	acpi_i2c_register_devices(&dev->adapter);
+
+	/* Find I2C adapter bus frequency */
+	status = acpi_walk_namespace(ACPI_TYPE_DEVICE, handle, 1,
+				     acpi_i2c_find_device_speed, NULL,
+				     dev, NULL);
+	if (ACPI_FAILURE(status))
+		dev_warn(pdev, "failed to get I2C bus freq\n");
+
+	/* Set the handle back to its raw value */
+	ACPI_HANDLE_SET(pdev, pdev_handle);
+}
+#else
+void i2c_acpi_devices_setup(struct device *pdev, struct dw_i2c_dev *dev) { }
+#endif
+EXPORT_SYMBOL(i2c_acpi_devices_setup);
 
 void i2c_dw_free(struct device *pdev, struct dw_i2c_dev *dev)
 {

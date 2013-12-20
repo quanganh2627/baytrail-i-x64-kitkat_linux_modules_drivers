@@ -211,12 +211,16 @@ int process_send_cmd(struct psh_ia_priv *ia_data,
 
 		msleep(1000);
 
-		return 0;
+		ret = 0;
+
+		goto exit;
 	} else if (ch == 0 && psh_if_info->irq_disabled == 1) {
 		/* prevent sending command during firmware updating,
 		 * or update will fail.
 		 */
-		return -EPERM;
+		ret = -EPERM;
+
+		goto exit;
 	}
 
 	ret = i2c_transfer(psh_if_info->pshc->adapter, &i2c_cmd, 1);
@@ -226,7 +230,10 @@ int process_send_cmd(struct psh_ia_priv *ia_data,
 	} else {
 		ret = 0;
 	}
+
 	pm_runtime_mark_last_busy(&psh_if_info->pshc->dev);
+
+exit:
 	pm_runtime_put_autosuspend(&psh_if_info->pshc->dev);
 
 	return ret;

@@ -47,132 +47,6 @@
 #define DRIVER_NAME "i2c-designware-pci"
 #define DW_I2C_STATIC_BUS_NUM	10
 
-#define DW_STD_SPEED	100000
-#define DW_FAST_SPEED	400000
-#define DW_HIGH_SPEED	3400000
-
-#ifdef CONFIG_ACPI
-struct i2c_dw_board_info {
-	struct i2c_adapter *adap;
-	struct i2c_board_info info;
-};
-
-static int i2c_dw_find_irq(struct acpi_resource *ares, void *data)
-{
-	struct i2c_dw_board_info *dwinfo = data;
-
-	if (dwinfo->info.irq < 0) {
-		struct resource r;
-
-		if (acpi_dev_resource_interrupt(ares, 0, &r))
-			dwinfo->info.irq = r.start;
-	}
-
-	/* Tell the ACPI core to skip this resource */
-	return 1;
-}
-
-static int i2c_dw_find_slaves(struct acpi_resource *ares, void *data)
-{
-	struct i2c_dw_board_info *dwinfo = data;
-	struct device *dev = &dwinfo->adap->dev;
-	struct dw_i2c_dev *i2c = i2c_get_adapdata(dwinfo->adap);
-	unsigned int connection_speed;
-
-	if (ares->type == ACPI_RESOURCE_TYPE_SERIAL_BUS) {
-		struct acpi_resource_i2c_serialbus *sb;
-
-		sb = &ares->data.i2c_serial_bus;
-		if (sb->type == ACPI_RESOURCE_SERIAL_TYPE_I2C) {
-			connection_speed = sb->connection_speed;
-			if (connection_speed == DW_STD_SPEED) {
-				i2c->master_cfg &= ~DW_IC_SPEED_MASK;
-				i2c->master_cfg |= DW_IC_CON_SPEED_STD;
-			} else if (connection_speed == DW_FAST_SPEED) {
-				i2c->master_cfg &= ~DW_IC_SPEED_MASK;
-				i2c->master_cfg |= DW_IC_CON_SPEED_FAST;
-			} else if (connection_speed == DW_HIGH_SPEED) {
-				i2c->master_cfg &= ~DW_IC_SPEED_MASK;
-				i2c->master_cfg |= DW_IC_CON_SPEED_HIGH;
-			}
-
-			down(&i2c->lock);
-			i2c_dw_init(i2c);
-			up(&i2c->lock);
-
-			dev_info(dev, "I2C speed get from acpi is %dKHz\n",
-				connection_speed/1000);
-
-			dwinfo->info.addr = sb->slave_address;
-			if (sb->access_mode == ACPI_I2C_10BIT_MODE)
-				dwinfo->info.flags |= I2C_CLIENT_TEN;
-			dev_info(dev, "\t\tslave_addr 0x%x, irq %d\n",
-				dwinfo->info.addr, dwinfo->info.irq);
-			if (!i2c_new_device(dwinfo->adap, &dwinfo->info))
-				dev_err(dev, "failed to add %s\n",
-					dwinfo->info.type);
-		}
-	}
-
-	/* Tell the ACPI core to skip this resource */
-	return 1;
-}
-
-static acpi_status i2c_dw_add_device(acpi_handle handle, u32 level,
-				       void *data, void **return_value)
-{
-	struct i2c_dw_board_info *dwinfo = data;
-	struct device *dev = &dwinfo->adap->dev;
-	struct list_head resource_list;
-	struct acpi_device *adev;
-	int ret;
-
-	dev_info(dev, "\tCheck next device ...");
-	ret = acpi_bus_get_device(handle, &adev);
-	if (ret) {
-		dev_info(dev, "\t err %d\n", ret);
-		return AE_OK;
-	}
-	dev_info(dev, "\t%s\n", dev_name(&adev->dev));
-	if (acpi_bus_get_status(adev) || !adev->status.present) {
-		dev_err(dev, "\t\terror, present %d\n", adev->status.present);
-		return AE_OK;
-	}
-
-	dwinfo->info.acpi_node.handle = handle;
-	dwinfo->info.irq = -1;
-	strlcpy(dwinfo->info.type, dev_name(&adev->dev),
-			sizeof(dwinfo->info.type));
-
-	INIT_LIST_HEAD(&resource_list);
-	acpi_dev_get_resources(adev, &resource_list,
-				     i2c_dw_find_irq, dwinfo);
-	acpi_dev_get_resources(adev, &resource_list,
-				     i2c_dw_find_slaves, dwinfo);
-	acpi_dev_free_resource_list(&resource_list);
-
-	return AE_OK;
-}
-
-static void i2c_dw_scan_devices(struct i2c_adapter *adapter, char *acpi_name)
-{
-	acpi_handle handle;
-	acpi_status status;
-	struct i2c_dw_board_info dw_info;
-	struct device *dev = &adapter->dev;
-
-	dev_err(dev, "Scan devices on i2c-%d\n", adapter->nr);
-	memset(&dw_info, 0, sizeof(dw_info));
-	dw_info.adap = adapter;
-	acpi_get_handle(NULL, acpi_name, &handle);
-	acpi_walk_namespace(ACPI_TYPE_DEVICE, handle, 1,
-				     i2c_dw_add_device, NULL,
-				     &dw_info, NULL);
-}
-#else
-static void i2c_dw_scan_devices(struct i2c_adapter *adapter, char *acpi_name) {}
-#endif
-
 static int i2c_dw_pci_suspend(struct device *dev)
 {
 	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
@@ -286,8 +160,7 @@ const struct pci_device_id *id)
 
 	pci_set_drvdata(pdev, dev);
 
-	if (dev->controller->acpi_name)
-		i2c_dw_scan_devices(&dev->adapter, dev->controller->acpi_name);
+	i2c_acpi_devices_setup(&pdev->dev, dev);
 
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
 	pm_runtime_use_autosuspend(&pdev->dev);
