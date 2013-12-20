@@ -418,6 +418,7 @@ static __be16 dlp_net_type_trans(const char *buffer)
 	return htons(0);
 }
 
+
 /**
  * dlp_net_complete_tx - bottom-up flow for the TX side
  * @pdu: a reference to the completed pdu
@@ -619,6 +620,7 @@ void dlp_net_tx_stop(unsigned long param)
 	dlp_stop_tx(xfer_ctx);
 }
 
+
 /**
  * dlp_net_rx_stop - update the RX state machine after expiration of the RX active
  *		 timeout further to a no outstanding RX transaction status
@@ -738,6 +740,7 @@ int dlp_net_stop(struct net_device *dev)
 
 	return 0;
 }
+
 
 /*
 * @brief Get a recycled PDU or alloc a new one
@@ -987,6 +990,7 @@ void dlp_net_tx_timeout(struct net_device *dev)
 	net_ctx->ndev->stats.tx_errors++;
 }
 
+
 /*
  *
  */
@@ -1112,7 +1116,7 @@ struct dlp_channel *dlp_net_ctx_create(unsigned int ch_id,
 			  dlp_net_complete_rx, HSI_MSG_READ);
 
 	INIT_WORK(&ch_ctx->start_tx_w, dlp_do_start_tx);
-	INIT_WORK(&ch_ctx->stop_tx_w, dlp_do_send_nop);
+	INIT_WORK(&ch_ctx->stop_tx_w, dlp_do_stop_tx);
 
 	ch_ctx->tx.timer.function = dlp_net_tx_stop;
 	ch_ctx->rx.timer.function = dlp_net_rx_stop;

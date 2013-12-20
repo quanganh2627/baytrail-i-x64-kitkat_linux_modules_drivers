@@ -1283,7 +1283,7 @@ struct dlp_channel *dlp_tty_ctx_create(unsigned int ch_id,
 			  dlp_tty_complete_rx, HSI_MSG_READ);
 
 	INIT_WORK(&ch_ctx->start_tx_w, dlp_do_start_tx);
-	INIT_WORK(&ch_ctx->stop_tx_w, dlp_do_send_nop);
+	INIT_WORK(&ch_ctx->stop_tx_w, dlp_do_stop_tx);
 
 	INIT_WORK(&tty_ctx->do_tty_forward, dlp_do_tty_forward);
 

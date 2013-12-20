@@ -855,7 +855,6 @@ inline void dlp_ctx_update_state_tx(struct dlp_xfer_ctx *xfer_ctx)
 		del_timer_sync(&dlp_drv.timer[xfer_ctx->channel->ch_id]);
 
 		if (xfer_ctx->wait_len == 0) {
-			dlp_send_nop(xfer_ctx);
 			mod_timer(&xfer_ctx->timer, jiffies + xfer_ctx->delay);
 
 			/* Wake_up dlp_tty_wait_until_ctx_sent */
@@ -1366,28 +1365,25 @@ void dlp_do_start_tx(struct work_struct *work)
 }
 
 /**
- * dlp_do_send_nop - making a synchronous HSI send NOP request
+ * dlp_do_stop_tx - making a synchronous HSI TX stop request
  * @work: a reference to work queue element
  */
-void dlp_do_send_nop(struct work_struct *work)
+void dlp_do_stop_tx(struct work_struct *work)
 {
+	int ret;
 	struct dlp_channel *ch_ctx =
 		container_of(work, struct dlp_channel, stop_tx_w);
 
 	/* Send the NOP command to avoid tailing bits issue */
 	dlp_ctrl_send_nop(ch_ctx);
-}
 
-/**
- * dlp_send_nop - schedule HSI send NOP work
- * @xfer_ctx: a reference to the TX context to consider
- */
-void dlp_send_nop(struct dlp_xfer_ctx *xfer_ctx)
-{
-	if (dlp_ctx_get_state(xfer_ctx) == ACTIVE &&
-			list_empty(&xfer_ctx->wait_pdus))
-		/* Schedule the NOP command work */
-		queue_work(dlp_drv.tx_wq, &xfer_ctx->channel->stop_tx_w);
+	/* Stop the TX */
+	ret = hsi_stop_tx(dlp_drv.client);
+	if (ret) {
+		pr_err(DRVNAME ": hsi_stop_tx failed (ch%d, err: %d)\n",
+				ch_ctx->hsi_channel, ret);
+		dlp_ctx_set_state(&ch_ctx->tx, READY);
+	}
 }
 
 /**
@@ -1419,21 +1415,14 @@ void dlp_start_tx(struct dlp_xfer_ctx *xfer_ctx)
  */
 void dlp_stop_tx(struct dlp_xfer_ctx *xfer_ctx)
 {
-	struct dlp_channel *ch_ctx = xfer_ctx->channel;
-	int ret;
 
-	if (dlp_ctx_get_state(xfer_ctx) != IDLE &&
+	if (dlp_ctx_get_state(xfer_ctx) == ACTIVE &&
 			list_empty(&xfer_ctx->wait_pdus)) {
 		/* Update the context state */
 		dlp_ctx_set_state(xfer_ctx, IDLE);
 
-		/* Stop the TX */
-		ret = hsi_stop_tx(dlp_drv.client);
-		if (ret) {
-			pr_err(DRVNAME ": hsi_stop_tx failed (ch%d, err: %d)\n",
-				ch_ctx->hsi_channel, ret);
-			dlp_ctx_set_state(&ch_ctx->tx, READY);
-		}
+		/* Schedule the stop TX work */
+		queue_work(dlp_drv.tx_wq, &xfer_ctx->channel->stop_tx_w);
 	}
 }
 
