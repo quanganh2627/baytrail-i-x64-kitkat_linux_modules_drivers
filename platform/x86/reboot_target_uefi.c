@@ -43,37 +43,23 @@ static void uefi_string_to_varname(const char *name, int size, wchar_t *varname)
 	varname[size - 1] = 0;
 }
 
-static const char TARGET_VARNAME[]     = "BootNext";
-static const char LOAD_OPTION_FORMAT[] = "Boot%04X";
+static const efi_guid_t LOADER_GUID =
+	EFI_GUID(0x4a67b082, 0x0a4c, 0x41cf, 0xb6, 0xc7, 0x44, 0x0b, 0x29, 0xbb, 0x8c, 0x4f);
+static const char TARGET_VARNAME[] = "LoaderEntryOneShot";
 
-static bool uefi_load_option_is_present(const u16 id)
-{
-	char varname8[sizeof(LOAD_OPTION_FORMAT)];
-	wchar_t varname16[sizeof(LOAD_OPTION_FORMAT)];
-
-	sprintf(varname8, LOAD_OPTION_FORMAT, id);
-	uefi_string_to_varname(varname8, sizeof(varname8), varname16);
-
-	return !!uefi_get_var_entry(varname16);
-}
-
-static int uefi_set_boot_next(const u16 target_id)
+static int uefi_set_loader_entry_one_shot(const char *name)
 {
 	wchar_t varname[sizeof(TARGET_VARNAME)];
 	u32 attributes = EFI_VARIABLE_NON_VOLATILE
 		| EFI_VARIABLE_BOOTSERVICE_ACCESS
 		| EFI_VARIABLE_RUNTIME_ACCESS;
-
-	if (!uefi_load_option_is_present(target_id)) {
-		pr_err("%s: Load option %04X not found\n", __func__, target_id);
-		return EINVAL;
-	}
+	wchar_t name16[strlen(name) + 1];
 
 	uefi_string_to_varname(TARGET_VARNAME, sizeof(TARGET_VARNAME), varname);
+	uefi_string_to_varname(name, strlen(name) + 1, name16);
 
-	return efivar_entry_set_safe(varname, EFI_GLOBAL_VARIABLE_GUID,
-				     attributes, true, sizeof(target_id),
-				     (void *)&target_id);
+	return efivar_entry_set_safe(varname, LOADER_GUID, attributes, true,
+				     sizeof(name16), name16);
 }
 
 static const char RESCUE_MODE_TARGET[]		     = "dnx";
@@ -168,7 +154,7 @@ static int uefi_set_reboot_target(const char *name, const int id)
 	if (strcmp(name, RESCUE_MODE_TARGET) == 0)
 		return uefi_ask_for_rescue_mode();
 
-	return uefi_set_boot_next(ANDROID_LOAD_OPTION_MASK | (id & 0xFF));
+	return uefi_set_loader_entry_one_shot(name);
 }
 
 struct reboot_target reboot_target_uefi = {
