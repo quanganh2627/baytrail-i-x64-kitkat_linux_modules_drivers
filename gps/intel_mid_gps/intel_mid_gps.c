@@ -17,6 +17,8 @@
 #include <linux/slab.h>
 #include <linux/platform_device.h>
 #include <linux/gpio.h>
+#include <acpi/acpi.h>
+#include <acpi/acpi_bus.h>
 #include <linux/acpi.h>
 #include <linux/acpi_gpio.h>
 #include <linux/efi.h>
@@ -329,6 +331,7 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 		/* create a new platform data that will be
 		   populated with gpio data from ACPI table */
 		struct acpi_gpio_info info;
+		unsigned long long port;
 		pdata = kzalloc(sizeof(struct intel_mid_gps_platform_data),
 			GFP_KERNEL);
 
@@ -359,6 +362,15 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 		pdata->gpio_hostwake = -EINVAL;
 
 		pr_info("%s enable: %d, reset: %d\n", __func__, pdata->gpio_enable, pdata->gpio_reset);
+
+		if (ACPI_FAILURE(acpi_evaluate_integer((acpi_handle)ACPI_HANDLE(&pdev->dev),
+						       "UART", NULL, &port)))
+			dev_err(&pdev->dev, "Error evaluating acpi table, no HSU port\n");
+		else {
+			pdata->hsu_port = (unsigned int)port;
+			pr_info("GPS HSU port read from ACPI = %d\n", pdata->hsu_port);
+		}
+
 		platform_set_drvdata(pdev, pdata);
 	} else {
 		platform_set_drvdata(pdev, pdev->dev.platform_data);
