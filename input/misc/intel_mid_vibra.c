@@ -372,6 +372,8 @@ struct vibra_info *mid_vibra_setup(struct device *dev, struct mid_vibra_pdata *d
 		info->enable = vibra_drv8601_enable;
 	} else if (!strncmp(info->name, "drv2605", 8)) {
 		info->enable = vibra_drv2605_enable;
+	} else if (!strncmp(info->name, "drv2603", 8)) {
+		info->enable = vibra_drv2605_enable;
 	} else {
 		pr_err("%s: unsupported vibrator device", __func__);
 		return NULL;
@@ -473,6 +475,7 @@ static void intel_mid_vibra_remove(struct pci_dev *pci)
 static DEFINE_PCI_DEVICE_TABLE(intel_vibra_ids) = {
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_VIBRA_CLV), 0},
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_VIBRA_MRFLD), 0},
+	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_VIBRA_MOOR), 0},
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, intel_vibra_ids);
