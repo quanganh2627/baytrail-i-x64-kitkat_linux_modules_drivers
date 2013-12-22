@@ -2409,7 +2409,7 @@ void serial_hsu_port_shutdown(struct uart_hsu_port *up)
 EXPORT_SYMBOL(serial_hsu_port_shutdown);
 
 int serial_hsu_dma_setup(struct device *pdev,
-	resource_size_t start, resource_size_t len, int irq)
+	resource_size_t start, resource_size_t len, unsigned int irq, int share)
 {
 	struct hsu_dma_chan *dchan;
 	int i, ret;
@@ -2428,7 +2428,7 @@ int serial_hsu_dma_setup(struct device *pdev,
 	}
 
 	/* will share irq with port if irq < 0 */
-	if (irq < 0)
+	if (share)
 		phsu->irq_port_and_dma = 1;
 	else {
 		phsu->dma_irq = irq;

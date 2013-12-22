@@ -220,7 +220,7 @@ static int serial_hsu_pci_dma_probe(struct pci_dev *pdev,
 				const struct pci_device_id *ent)
 {
 	struct hsu_dma_chan *dchan;
-	int ret;
+	int ret, share_irq = 0;
 	resource_size_t start, len;
 
 	start = pci_resource_start(pdev, 0);
@@ -244,9 +244,9 @@ static int serial_hsu_pci_dma_probe(struct pci_dev *pdev,
 	if ((intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER &&
 		pdev->revision >= 0x1) ||
 		intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE)
-		pdev->irq = -1;
+		share_irq = 1;
 
-	ret = serial_hsu_dma_setup(&pdev->dev, start, len, pdev->irq);
+	ret = serial_hsu_dma_setup(&pdev->dev, start, len, pdev->irq, share_irq);
 	if (ret)
 		goto err;
 

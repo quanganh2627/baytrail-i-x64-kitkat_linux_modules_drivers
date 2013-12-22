@@ -242,7 +242,7 @@ struct uart_hsu_port *serial_hsu_port_setup(struct device *pdev, int port,
 void serial_hsu_port_free(struct uart_hsu_port *up);
 void serial_hsu_port_shutdown(struct uart_hsu_port *up);
 int serial_hsu_dma_setup(struct device *pdev,
-	resource_size_t start, resource_size_t len, int irq);
+	resource_size_t start, resource_size_t len, unsigned int irq, int share);
 void serial_hsu_dma_free(void);
 int serial_hsu_do_suspend(struct uart_hsu_port *up);
 int serial_hsu_do_resume(struct uart_hsu_port *up);
