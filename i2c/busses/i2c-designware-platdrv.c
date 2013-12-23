@@ -174,7 +174,8 @@ static int __exit dw_i2c_remove(struct platform_device *pdev)
 	i2c_dw_free(&pdev->dev, dev);
 	platform_set_drvdata(pdev, NULL);
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	release_mem_region(mem->start, resource_size(mem));
+	if (mem)
+		release_mem_region(mem->start, resource_size(mem));
 	return 0;
 }
 
