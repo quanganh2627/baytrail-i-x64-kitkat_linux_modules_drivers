@@ -203,8 +203,13 @@ static int vlv2_i2c_scl_cfg(struct dw_i2c_dev *dev)
 	dw_writel(dev, VLV2_SS_SCLK_HCNT, DW_IC_SS_SCL_HCNT);
 	dw_writel(dev, VLV2_SS_SCLK_LCNT, DW_IC_SS_SCL_LCNT);
 
-	dw_writel(dev, VLV2_FS_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
-	dw_writel(dev, VLV2_FS_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+	if (dev->fast_plus) {
+		dw_writel(dev, VLV2_FS_P_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+		dw_writel(dev, VLV2_FS_P_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+	} else {
+		dw_writel(dev, VLV2_FS_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+		dw_writel(dev, VLV2_FS_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+	}
 
 	dw_writel(dev, VLV2_HS_SCLK_HCNT, DW_IC_HS_SCL_HCNT);
 	dw_writel(dev, VLV2_HS_SCLK_LCNT, DW_IC_HS_SCL_LCNT);
@@ -535,6 +540,11 @@ static ssize_t store_mode(struct device *dev,
 		i2c->master_cfg &= ~DW_IC_SPEED_MASK;
 		i2c->master_cfg |= DW_IC_CON_SPEED_STD;
 	} else if (!strncmp("fast", mode, MODE_NAME_SIZE)) {
+		i2c->fast_plus = 0;
+		i2c->master_cfg &= ~DW_IC_SPEED_MASK;
+		i2c->master_cfg |= DW_IC_CON_SPEED_FAST;
+	} else if (!strncmp("fast+", mode, MODE_NAME_SIZE)) {
+		i2c->fast_plus = 1;
 		i2c->master_cfg &= ~DW_IC_SPEED_MASK;
 		i2c->master_cfg |= DW_IC_CON_SPEED_FAST;
 	} else if (!strncmp("high", mode, MODE_NAME_SIZE)) {
@@ -570,7 +580,10 @@ static ssize_t show_mode(struct device *dev,
 		ret = snprintf(buf, PAGE_SIZE, "%s\n", "std");
 		break;
 	case DW_IC_CON_SPEED_FAST:
-		ret = snprintf(buf, PAGE_SIZE, "%s\n", "fast");
+		if (i2c->fast_plus)
+			ret = snprintf(buf, PAGE_SIZE, "%s\n", "fast+");
+		else
+			ret = snprintf(buf, PAGE_SIZE, "%s\n", "fast");
 		break;
 	case DW_IC_CON_SPEED_HIGH:
 		ret = snprintf(buf, PAGE_SIZE, "%s\n", "high");
@@ -686,6 +699,7 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 	dev->abort = intel_mid_dw_i2c_abort;
 	dev->tx_fifo_depth = controller->tx_fifo_depth;
 	dev->rx_fifo_depth = controller->rx_fifo_depth;
+	dev->fast_plus = controller->fast_plus;
 
 	r = i2c_dw_init(dev);
 	if (r)
