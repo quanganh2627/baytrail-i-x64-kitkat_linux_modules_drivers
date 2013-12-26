@@ -1522,8 +1522,10 @@ static int mxt_soft_reset(struct mxt_data *data, u8 value)
 	INIT_COMPLETION(data->reset_completion);
 
 	ret = mxt_t6_command(data, MXT_COMMAND_RESET, MXT_RESET_VALUE, false);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "%s: Soft command failed\n", __func__);
 		return ret;
+	}
 
 	ret = mxt_wait_for_completion(data, &data->reset_completion,
 				      MXT_RESET_TIMEOUT);
@@ -1780,6 +1782,7 @@ static int mxt_check_reg_init(struct mxt_data *data, bool force)
 			else {
 				dev_info(dev, "CRC check OK\n");
 				if (!force) {
+					mxt_soft_reset(data, MXT_RESET_VALUE);
 					ret = 0;
 					goto release;
 				}
@@ -2936,45 +2939,12 @@ release_firmware:
 	return ret;
 }
 
-static int mxt_update_file_name(struct device *dev, char **file_name,
-				const char *buf, size_t count)
-{
-	char *file_name_tmp;
-
-	/* Simple sanity check */
-	if (count > 64) {
-		dev_warn(dev, "File name too long\n");
-		return -EINVAL;
-	}
-
-	file_name_tmp = krealloc(*file_name, count + 1, GFP_KERNEL);
-	if (!file_name_tmp) {
-		dev_warn(dev, "no memory\n");
-		return -ENOMEM;
-	}
-
-	*file_name = file_name_tmp;
-	memcpy(*file_name, buf, count);
-
-	/* Echo into the sysfs entry may append newline at the end of buf */
-	if (buf[count - 1] == '\n')
-		(*file_name)[count - 1] = '\0';
-	else
-		(*file_name)[count] = '\0';
-
-	return 0;
-}
-
 static ssize_t mxt_update_fw_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count)
 {
 	struct mxt_data *data = dev_get_drvdata(dev);
 	int error;
-
-	error = mxt_update_file_name(dev, &data->fw_name, buf, count);
-	if (error)
-		return error;
 
 	error = mxt_load_fw(dev);
 	if (error) {
@@ -3007,10 +2977,6 @@ static ssize_t mxt_update_cfg_store(struct device *dev,
 		dev_err(dev, "Not in appmode\n");
 		return -EINVAL;
 	}
-
-	ret = mxt_update_file_name(dev, &data->cfg_name, buf, count);
-	if (ret)
-		return ret;
 
 	data->enable_reporting = false;
 	mxt_free_input_device(data);
@@ -3087,6 +3053,16 @@ static ssize_t mxt_debug_enable_store(struct device *dev,
 	}
 }
 
+static ssize_t mxt_soft_reset_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct mxt_data *data = dev_get_drvdata(dev);
+
+	mxt_soft_reset(data, MXT_RESET_VALUE);
+
+	return count;
+}
+
 static int mxt_check_mem_access_params(struct mxt_data *data, loff_t off,
 				       size_t *count)
 {
@@ -3147,6 +3123,7 @@ static DEVICE_ATTR(debug_v2_enable, S_IWUSR | S_IRUSR, NULL,
 static DEVICE_ATTR(debug_notify, S_IRUGO, mxt_debug_notify_show, NULL);
 static DEVICE_ATTR(debug_enable, S_IWUSR | S_IRUSR, mxt_debug_enable_show,
 		mxt_debug_enable_store);
+static DEVICE_ATTR(soft_reset, S_IWUSR, NULL, mxt_soft_reset_store);
 
 static struct attribute *mxt_attrs[] = {
 	&dev_attr_fw_version.attr,
@@ -3157,6 +3134,7 @@ static struct attribute *mxt_attrs[] = {
 	&dev_attr_debug_enable.attr,
 	&dev_attr_debug_v2_enable.attr,
 	&dev_attr_debug_notify.attr,
+	&dev_attr_soft_reset.attr,
 	NULL
 };
 
