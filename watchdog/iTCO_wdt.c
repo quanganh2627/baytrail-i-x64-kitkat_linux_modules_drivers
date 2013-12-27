@@ -68,9 +68,6 @@
 #include <linux/io.h>			/* For inb/outb/... */
 #include <linux/debugfs.h>
 #include <linux/reboot.h>
-#include <linux/interrupt.h>
-#include <linux/acpi.h>
-#include <linux/nmi.h>
 
 /* TCO related info */
 enum iTCO_chipsets {
@@ -124,7 +121,6 @@ MODULE_DEVICE_TABLE(pci, iTCO_wdt_pci_tbl);
 #define SECOND_TO_STS_BIT	(1 << 17)
 #define TCO_STS_BIT		(1 << 13)
 #define EOS_BIT			(1 << 1)
-#define TCO_EN_BIT		(1 << 13)
 
 #define STRING_RESET_TYPE_MAX_LEN 12
 #define STRING_COLD_OFF "COLD_OFF"
@@ -132,8 +128,6 @@ MODULE_DEVICE_TABLE(pci, iTCO_wdt_pci_tbl);
 
 static u32 pmc_base_address;
 #define PMC_CFG		(pmc_base_address + 0x8)
-
-#define TCO_WARNING_IRQ 51
 
 static struct dentry *iTCO_debugfs_dir;
 
@@ -665,24 +659,6 @@ static int TCO_reboot_notifier(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
-static irqreturn_t tco_irq_handler(int irq, void *arg)
-{
-	unsigned long val32;
-
-	pr_warn("[SHTDWN] %s, WATCHDOG TIMEOUT HANDLER!\n", __func__);
-
-	/* reduce the timeout to the minimum, but sufficient for tracing */
-	iTCO_wdt_set_heartbeat(15);
-	iTCO_wdt_keepalive();
-
-	trigger_all_cpu_backtrace();
-	panic("Kernel Watchdog");
-
-	/* This code should not be reached */
-
-	return IRQ_HANDLED;
-}
-
 /*
  *	Init & exit routines
  */
@@ -747,7 +723,7 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 	if (turn_SMI_watchdog_clear_off >= iTCO_wdt_private.iTCO_version) {
 		/* Bit 13: TCO_EN -> 0 = Disables TCO logic generating an SMI# */
 		val32 = inl(SMI_EN);
-		val32 &= ~TCO_EN_BIT;	/* Turn off TCO watchdog timer */
+		val32 &= 0xffffdfff;	/* Turn off SMI clearing watchdog */
 		outl(val32, SMI_EN);
 	}
 
@@ -764,6 +740,16 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 		iTCO_chipset_info[ent->driver_data].name,
 		iTCO_chipset_info[ent->driver_data].iTCO_version,
 		TCOBASE);
+
+	/* Clear out the (probably old) status */
+	val32 = TCO_TIMEOUT_BIT | SECOND_TO_STS_BIT;
+	outl(val32, TCO1_STS);	/* Clear the Time Out Status bit and
+				   SECOND_TO_STS bit */
+	outl(TCO_STS_BIT, SMI_STS); /* Clear the Time Out Status bit */
+
+	val32 = inl(SMI_EN);
+	val32 &= EOS_BIT;	/* Finish handling SMI */
+	outl(val32, SMI_EN);
 
 	/* Check that the heartbeat value is within it's range;
 	   if not reset to the default */
@@ -785,32 +771,6 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 	/* Reset OS policy */
 	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
 
-	ret = acpi_register_gsi(NULL, TCO_WARNING_IRQ,
-				ACPI_EDGE_SENSITIVE, ACPI_ACTIVE_HIGH);
-	if (ret < 0) {
-		pr_err("failed to configure TCO warning IRQ %d\n", TCO_WARNING_IRQ);
-		goto misc_unreg;
-	}
-	ret = request_irq(TCO_WARNING_IRQ, tco_irq_handler, 0, "tco_watchdog", NULL);
-	if (ret < 0) {
-		pr_err("failed to request TCO warning IRQ %d\n", TCO_WARNING_IRQ);
-		goto gsi_unreg;
-	}
-
-	/* Clear old TCO timeout status */
-	val32 = TCO_TIMEOUT_BIT | SECOND_TO_STS_BIT;
-	outl(val32, TCO1_STS);
-	/* Clear the SMI status */
-	outl(TCO_STS_BIT, SMI_STS);
-
-	/* Enable SMI for TCO */
-	val32 = inl(SMI_EN);
-	val32 |= TCO_EN_BIT;
-	outl(val32, SMI_EN);
-	/* then ensure that PMC is ready to handle next SMI */
-	val32 |= EOS_BIT;
-	outl(val32, SMI_EN);
-
 	reboot_notifier.notifier_call = TCO_reboot_notifier;
 	reboot_notifier.priority = 1;
 	ret = register_reboot_notifier(&reboot_notifier);
@@ -821,10 +781,6 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 
 	return 0;
 
-gsi_unreg:
-	acpi_unregister_gsi(TCO_WARNING_IRQ);
-misc_unreg:
-	misc_deregister(&iTCO_wdt_miscdev);
 unreg_region:
 	release_region(TCOBASE, 0x20);
 unreg_smi_sts:
