@@ -632,23 +632,6 @@ static int TCO_reboot_notifier(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
-static irqreturn_t tco_irq_handler(int irq, void *arg)
-{
-	pr_warn("[SHTDWN] %s, WATCHDOG TIMEOUT HANDLER!\n", __func__);
-
-	/* reduce the timeout to the minimum, but sufficient for tracing */
-	iTCO_wdt_set_heartbeat(15);
-	iTCO_wdt_keepalive();
-
-	trigger_all_cpu_backtrace();
-	panic("Kernel Watchdog");
-
-	/* This code should not be reached */
-
-	return IRQ_HANDLED;
-}
-
-
 static ssize_t shutdown_ongoing_store(struct device *dev,
 			struct device_attribute *attr, const char *buf, size_t size)
 {
@@ -708,7 +691,6 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 	u32 base_address;
 	unsigned long val32;
 	struct pci_dev *parent;
-	struct resource *irq;
 
 	if (!pdev->dev.parent || !dev_is_pci(pdev->dev.parent)) {
 		pr_err("Unqualified parent device.\n");
@@ -779,6 +761,16 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 
 	pr_info("Found a TCO device (TCOBASE=0x%04lx)\n", TCOBASE);
 
+	/* Clear out the (probably old) status */
+	val32 = TCO_TIMEOUT_BIT | SECOND_TO_STS_BIT;
+	outl(val32, TCO1_STS);	/* Clear the Time Out Status bit and
+				   SECOND_TO_STS bit */
+	outl(TCO_STS_BIT, SMI_STS); /* Clear the Time Out Status bit */
+
+	val32 = inl(SMI_EN);
+	val32 &= EOS_BIT;	/* Finish handling SMI */
+	outl(val32, SMI_EN);
+
 	/* Check that the heartbeat value is within it's range;
 	   if not reset to the default */
 	if (iTCO_wdt_set_heartbeat(heartbeat)) {
@@ -799,42 +791,6 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 	/* Reset OS policy */
 	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
 
-	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!irq) {
-		pr_err("No warning interrupt resource found\n");
-		goto misc_unreg;
-	}
-
-	ret = acpi_register_gsi(NULL, irq->start,
-				irq->flags & (IORESOURCE_IRQ_HIGHEDGE | IORESOURCE_IRQ_LOWEDGE)
-				? ACPI_EDGE_SENSITIVE : ACPI_LEVEL_SENSITIVE,
-				irq->flags & (IORESOURCE_IRQ_HIGHEDGE | IORESOURCE_IRQ_HIGHLEVEL)
-				? ACPI_ACTIVE_HIGH : ACPI_ACTIVE_LOW);
-	if (ret < 0) {
-		pr_err("failed to configure TCO warning IRQ %d\n", (int)irq->start);
-		goto misc_unreg;
-	}
-
-	ret = request_irq(irq->start, tco_irq_handler, 0, "tco_watchdog", NULL);
-	if (ret < 0) {
-		pr_err("failed to request TCO warning IRQ %d\n", (int)irq->start);
-		goto gsi_unreg;
-	}
-
-	/* Clear old TCO timeout status */
-	val32 = TCO_TIMEOUT_BIT | SECOND_TO_STS_BIT;
-	outl(val32, TCO1_STS);
-	/* Clear the SMI status */
-	outl(TCO_STS_BIT, SMI_STS);
-
-	/* Enable SMI for TCO */
-	val32 = inl(SMI_EN);
-	val32 |= TCO_EN_BIT;
-	outl(val32, SMI_EN);
-	/* then ensure that PMC is ready to handle next SMI */
-	val32 |= EOS_BIT;
-	outl(val32, SMI_EN);
-
 	reboot_notifier.notifier_call = TCO_reboot_notifier;
 	reboot_notifier.priority = 1;
 	ret = register_reboot_notifier(&reboot_notifier);
@@ -844,11 +800,6 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 		pr_err("cannot register reboot notifier %d\n", ret);
 
 	return 0;
-
-gsi_unreg:
-	acpi_unregister_gsi((int)(irq->start));
-misc_unreg:
-	misc_deregister(&iTCO_wdt_miscdev);
 unreg_region:
 	release_region(TCOBASE, 0x20);
 unreg_smi_sts:
