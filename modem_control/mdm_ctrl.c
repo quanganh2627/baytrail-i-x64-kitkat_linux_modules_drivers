@@ -612,10 +612,7 @@ static const struct file_operations mdm_ctrl_ops = {
 	.write = mdm_ctrl_dev_write,
 	.poll = mdm_ctrl_dev_poll,
 	.release = mdm_ctrl_dev_close,
-	.unlocked_ioctl = mdm_ctrl_dev_ioctl,
-#ifdef CONFIG_COMPAT
-	.compat_ioctl = mdm_ctrl_dev_ioctl
-#endif
+	.unlocked_ioctl = mdm_ctrl_dev_ioctl
 };
 
 /**
