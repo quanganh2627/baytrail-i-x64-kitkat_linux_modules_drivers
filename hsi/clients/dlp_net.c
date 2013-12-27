@@ -128,7 +128,8 @@ void dlp_net_pdu_delete(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu,
  */
 static void dlp_net_pdu_destructor(struct hsi_msg *pdu)
 {
-	struct dlp_xfer_ctx *xfer_ctx = pdu->context;
+	struct dlp_net_pdu *pdu_data = pdu->context;
+	struct dlp_xfer_ctx *xfer_ctx = pdu_data->ctx_data;
 	unsigned long flags;
 
 	/* Decrease the CTRL fifo size */

@@ -24,6 +24,25 @@
 
 #include "reboot_target.h"
 
+static struct efivar_entry *uefi_get_var_entry(wchar_t *varname)
+{
+	struct efivar_entry *entry;
+
+	efivar_entry_iter_begin();
+	entry = efivar_entry_find(varname, EFI_GLOBAL_VARIABLE_GUID,
+				  &efivar_sysfs_list, false);
+	efivar_entry_iter_end();
+
+	return entry;
+}
+
+static void uefi_string_to_varname(const char *name, int size, wchar_t *varname)
+{
+	utf8s_to_utf16s(name, size, UTF16_LITTLE_ENDIAN, varname,
+			size * sizeof(*varname) / sizeof(*name));
+	varname[size - 1] = 0;
+}
+
 static const char TARGET_VARNAME[]     = "BootNext";
 static const char LOAD_OPTION_FORMAT[] = "Boot%04X";
 
@@ -31,41 +50,125 @@ static bool uefi_load_option_is_present(const u16 id)
 {
 	char varname8[sizeof(LOAD_OPTION_FORMAT)];
 	wchar_t varname16[sizeof(LOAD_OPTION_FORMAT)];
-	bool found = false;
 
 	sprintf(varname8, LOAD_OPTION_FORMAT, id);
-	utf8s_to_utf16s(varname8, sizeof(varname8),
-			UTF16_LITTLE_ENDIAN, varname16, sizeof(varname16));
-	varname16[sizeof(LOAD_OPTION_FORMAT) - 1] = 0;
+	uefi_string_to_varname(varname8, sizeof(varname8), varname16);
 
-	efivar_entry_iter_begin();
-	if (efivar_entry_find(varname16, EFI_GLOBAL_VARIABLE_GUID,
-			      &efivar_sysfs_list, false))
-		found = true;
-	efivar_entry_iter_end();
-
-	return found;
+	return !!uefi_get_var_entry(varname16);
 }
 
-static int uefi_set_reboot_target(const char *name, const int id)
+static int uefi_set_boot_next(const u16 target_id)
 {
 	wchar_t varname[sizeof(TARGET_VARNAME)];
 	u32 attributes = EFI_VARIABLE_NON_VOLATILE
 		| EFI_VARIABLE_BOOTSERVICE_ACCESS
 		| EFI_VARIABLE_RUNTIME_ACCESS;
-	u16 target_id = (0x1 << 8) | (id & 0xFF);
 
 	if (!uefi_load_option_is_present(target_id)) {
-		pr_err("%s: Load option %04X not found", __func__, target_id);
+		pr_err("%s: Load option %04X not found\n", __func__, target_id);
 		return EINVAL;
 	}
 
-	utf8s_to_utf16s(TARGET_VARNAME, sizeof(TARGET_VARNAME),
-			UTF16_LITTLE_ENDIAN, varname, sizeof(varname));
-	varname[sizeof(TARGET_VARNAME) - 1] = 0;
+	uefi_string_to_varname(TARGET_VARNAME, sizeof(TARGET_VARNAME), varname);
 
 	return efivar_entry_set_safe(varname, EFI_GLOBAL_VARIABLE_GUID,
-				     attributes, true, sizeof(u16), &target_id);
+				     attributes, true, sizeof(target_id),
+				     (void *)&target_id);
+}
+
+static const char RESCUE_MODE_TARGET[]		     = "dnx";
+static const char OS_INDICATIONS_SUPPORTED_VARNAME[] = "OsIndicationsSupported";
+static const char OS_INDICATIONS_VARNAME[] 	     = "OsIndications";
+static const u64  EFI_OS_INDICATION_RESCUE_MODE      = 1 << 5;
+
+static int uefi_read_u64_entry(struct efivar_entry *entry, u64 *value,
+			       u32 *attributes)
+{
+	unsigned long size;
+	int ret;
+
+	ret = efivar_entry_size(entry, &size);
+	if (ret || size != sizeof(*value))
+		return ret ? ret : -EINVAL;
+
+	ret = efivar_entry_get(entry, attributes, &size, value);
+	if (ret || size != sizeof(*value))
+		return ret ? ret : -EINVAL;
+
+	return 0;
+}
+
+static bool uefi_is_os_indication_supported(const u64 os_indication)
+{
+	wchar_t varname[sizeof(OS_INDICATIONS_SUPPORTED_VARNAME)];
+	struct efivar_entry *entry;
+	u64 value;
+	u32 attributes;
+	int ret;
+
+	uefi_string_to_varname(OS_INDICATIONS_SUPPORTED_VARNAME,
+			       sizeof(OS_INDICATIONS_SUPPORTED_VARNAME),
+			       varname);
+
+	entry = uefi_get_var_entry(varname);
+	if (!entry) {
+		pr_err("%s: %s EFI variable not available\n",
+		       __func__, OS_INDICATIONS_SUPPORTED_VARNAME);
+		return false;
+	}
+
+	ret = uefi_read_u64_entry(entry, &value, &attributes);
+	if (ret)
+		pr_err("%s: Failed to read %s EFI variable, return=%d\n",
+		       __func__, OS_INDICATIONS_SUPPORTED_VARNAME, ret);
+
+	return ret ? false : !!(value & os_indication);
+}
+
+static int uefi_ask_for_rescue_mode(void)
+{
+	wchar_t varname[sizeof(OS_INDICATIONS_VARNAME)];
+	struct efivar_entry *entry;
+	u64 value = EFI_OS_INDICATION_RESCUE_MODE;
+	u32 attributes = EFI_VARIABLE_NON_VOLATILE
+		| EFI_VARIABLE_BOOTSERVICE_ACCESS
+		| EFI_VARIABLE_RUNTIME_ACCESS;
+	int ret;
+
+	if (!uefi_is_os_indication_supported(EFI_OS_INDICATION_RESCUE_MODE)) {
+		pr_err("%s: Rescue mode OS indication is not supported\n",
+		       __func__);
+		return -ENODEV;
+	}
+
+	uefi_string_to_varname(OS_INDICATIONS_VARNAME,
+			       sizeof(OS_INDICATIONS_VARNAME), varname);
+
+	entry = uefi_get_var_entry(varname);
+	if (!entry)
+		return efivar_entry_set_safe(varname, EFI_GLOBAL_VARIABLE_GUID,
+					     attributes, true, sizeof(value),
+					     (void *)&value);
+
+	ret = uefi_read_u64_entry(entry, &value, &attributes);
+	if (ret) {
+		pr_err("%s: Failed to read %s EFI variable, return=%d\n",
+		       __func__, OS_INDICATIONS_VARNAME, ret);
+		return ret;
+	}
+
+	value |= EFI_OS_INDICATION_RESCUE_MODE;
+	return efivar_entry_set(entry, attributes, sizeof(u64), &value, NULL);
+}
+
+static const u16 ANDROID_LOAD_OPTION_MASK = 1 << 8;
+
+static int uefi_set_reboot_target(const char *name, const int id)
+{
+	if (strcmp(name, RESCUE_MODE_TARGET) == 0)
+		return uefi_ask_for_rescue_mode();
+
+	return uefi_set_boot_next(ANDROID_LOAD_OPTION_MASK | (id & 0xFF));
 }
 
 struct reboot_target reboot_target_uefi = {

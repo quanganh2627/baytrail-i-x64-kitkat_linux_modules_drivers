@@ -837,8 +837,10 @@ static inline int bq24261_enable_boost_mode(
 
 	if (val) {
 
-		if (chip->pdata->enable_vbus)
-			chip->pdata->enable_vbus(true);
+		if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+			if (chip->pdata->enable_vbus)
+				chip->pdata->enable_vbus(true);
+		}
 
 		/* TODO: Support different Host Mode Current limits */
 
@@ -856,7 +858,8 @@ static inline int bq24261_enable_boost_mode(
 			return ret;
 		chip->boost_mode = true;
 
-		schedule_delayed_work(&chip->wdt_work, 0);
+		if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV)
+			schedule_delayed_work(&chip->wdt_work, 0);
 
 		dev_info(&chip->client->dev, "Boost Mode enabled\n");
 	} else {
@@ -876,10 +879,13 @@ static inline int bq24261_enable_boost_mode(
 			bq24261_enable_charger(chip, false);
 		chip->boost_mode = false;
 		dev_info(&chip->client->dev, "Boost Mode disabled\n");
-		cancel_delayed_work_sync(&chip->wdt_work);
 
-		if (chip->pdata->enable_vbus)
-			chip->pdata->enable_vbus(false);
+		if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+			cancel_delayed_work_sync(&chip->wdt_work);
+
+			if (chip->pdata->enable_vbus)
+				chip->pdata->enable_vbus(false);
+		}
 
 		/* Notify power supply subsystem to enable charging
 		 * if needed. Eg. if DC adapter is connected
@@ -1741,8 +1747,10 @@ static int bq24261_probe(struct i2c_client *client,
 				bq24261_low_supply_fault_work);
 	INIT_DELAYED_WORK(&chip->exception_mon_work,
 				bq24261_exception_mon_work);
-	INIT_DELAYED_WORK(&chip->wdt_work,
-				bq24261_wdt_reset_worker);
+	if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+		INIT_DELAYED_WORK(&chip->wdt_work,
+					bq24261_wdt_reset_worker);
+	}
 
 	INIT_WORK(&chip->irq_work, bq24261_irq_worker);
 	if (chip->client->irq) {
@@ -1798,8 +1806,10 @@ static int bq24261_suspend(struct device *dev)
 {
 	struct bq24261_charger *chip = dev_get_drvdata(dev);
 
-	if (chip->boost_mode)
-		cancel_delayed_work_sync(&chip->wdt_work);
+	if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+		if (chip->boost_mode)
+			cancel_delayed_work_sync(&chip->wdt_work);
+	}
 	dev_dbg(&chip->client->dev, "bq24261 suspend\n");
 	return 0;
 }
@@ -1808,8 +1818,10 @@ static int bq24261_resume(struct device *dev)
 {
 	struct bq24261_charger *chip = dev_get_drvdata(dev);
 
-	if (chip->boost_mode)
-		bq24261_enable_boost_mode(chip, 1);
+	if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+		if (chip->boost_mode)
+			bq24261_enable_boost_mode(chip, 1);
+	}
 
 	dev_dbg(&chip->client->dev, "bq24261 resume\n");
 	return 0;

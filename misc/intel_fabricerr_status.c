@@ -1045,24 +1045,35 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 	return NULL;
 }
 
-static char *Scu_ErrorTypes[] = {
+static char *ScuBoot_ErrorTypes[] = {
 	"Unknown",
 	"Memory error",
 	"Instruction error",
 	"Fabric error",
 	"Shared SRAM ECC error",
 	"Unknown",
-	"North FEP failure",
-	"SCU DLT expired",
-	"PLL Lock Slip",
-	"Failed to receive MBB completion",
+	"North Fuses failure",
+	"Unknown",
+	"Unknown",
+	"Unknown",
 	"Kernel DLT expired",
-	"Security WDT expired",
-	"undefinedLevel1Interrupt reset",
-	"Punit Interrupt MBB Timeout_reset",
+	"Kernel WDT expired",
+	"SCU CHAABI watchdog expired",
 	"FabricError xml request reset",
+};
+
+static char *ScuRuntime_ErrorTypes[] = {
+	"PLL Lock Slip",
+	"Unknown",
+	"Undefined L1 Interrupt"
+	"Punit Interrupt MBB Timeout_reset",
 	"Volt attack violation reset",
 	"Volt attack/SAI violation reset",
+	"LPE unknown interrupt",
+	"PSH Unknown interrupt",
+	"Fuse unknown interrupt",
+	"IPC2 unsupported error",
+	"Invalid KWDT IPC"
 };
 
 #define BEGIN_MAIN_FABRIC_REGID		16
@@ -1419,10 +1430,24 @@ char *get_errortype_str(u16 error_type)
 {
 	u16 error = error_type & 0xFF;
 
-	if (error < ARRAY_SIZE(Scu_ErrorTypes))
-		return Scu_ErrorTypes[error];
+	switch(error_type & 0xFF00) {
 
-	return "Unknown";
+	case 0xE100 :
+
+		if (error < ARRAY_SIZE(ScuBoot_ErrorTypes))
+			return ScuBoot_ErrorTypes[error];
+		return "Unknown";
+
+	case 0xE600 :
+
+		if (error < ARRAY_SIZE(ScuRuntime_ErrorTypes))
+			return ScuRuntime_ErrorTypes[error];
+		return "Unknown";
+
+	default :
+
+		return "Unknown";
+	}
 }
 
 char *get_initiator_id_str(int init_id, u32 fabric_id)

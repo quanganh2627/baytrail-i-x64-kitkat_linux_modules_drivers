@@ -70,13 +70,13 @@ static int set_reboot_target(const char *name)
 	int id;
 
 	if (name == NULL) {
-		pr_err("Error in %s: NULL target", __func__);
+		pr_err("Error in %s: NULL target\n", __func__);
 		return -EINVAL;
 	}
 
 	id  = reboot_target_name2id(name);
 	if (id < 0) {
-		pr_err("Error in %s: '%s' is not a valid target",
+		pr_err("Error in %s: '%s' is not a valid target\n",
 		       __func__, name );
 		return -EINVAL;
 	}
@@ -98,7 +98,7 @@ static int reboot_target_notify(struct notifier_block *notifier,
 
 	ret = set_reboot_target(target);
 	if (ret)
-		pr_err("%s: Failed to set the reboot target, return=%d",
+		pr_err("%s: Failed to set the reboot target, return=%d\n",
 		       __func__, ret);
 
 out:

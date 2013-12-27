@@ -374,6 +374,9 @@ static const struct file_operations pn544_dev_fops = {
 #ifdef HAVE_UNLOCKED_IOCTL
 	.unlocked_ioctl	= pn544_dev_ioctl,
 #endif
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = pn544_dev_ioctl
+#endif
 };
 
 static int pn544_probe(struct i2c_client *client,
