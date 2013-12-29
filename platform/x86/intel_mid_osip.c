@@ -281,19 +281,20 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 			/*
 			* PNW and CLVP depend on watchdog driver to
 			* send COLD OFF message to SCU.
-			* SCU watchdog is not available from TNG A0,
-			* so SCU FW provides a new IPC message to shut
+			* TNG and ANN use COLD_OFF IPC message to shut
 			* down the system.
 			*/
-			if (intel_mid_identify_cpu() ==
-			    INTEL_MID_CPU_CHIP_TANGIER) {
-				    pr_err("[SHTDWN] %s, executing COLD_OFF...\n",
-					    __func__);
-				    ret = rpmsg_send_generic_simple_command(
-					    RP_COLD_OFF, 0);
-				    if (ret)
-					    pr_err("%s(): COLD_OFF ipc failed\n",
-						    __func__);
+			if ((intel_mid_identify_cpu() ==
+					INTEL_MID_CPU_CHIP_TANGIER) ||
+					(intel_mid_identify_cpu() ==
+					INTEL_MID_CPU_CHIP_ANNIEDALE)) {
+				pr_err("[SHTDWN] %s, executing COLD_OFF...\n",
+								__func__);
+				ret = rpmsg_send_generic_simple_command(
+							RP_COLD_OFF, 0);
+				if (ret)
+					pr_err("%s(): COLD_OFF ipc failed\n",
+								__func__);
 			}
 		} else {
 			pr_warn("[SHTDWN] %s, invalid value\n", __func__);
