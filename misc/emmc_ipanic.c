@@ -62,6 +62,8 @@ static unsigned int ipanic_part_number;
 module_param(ipanic_part_number, int, 0);
 MODULE_PARM_DESC(ipanic_part_number, "IPanic dump partition on defined block device");
 
+static u32 disable_emmc_ipanic;
+core_param(disable_emmc_ipanic, disable_emmc_ipanic, uint, 0644);
 
 /*
  * The part_number will be filled in driver init.
@@ -87,7 +89,6 @@ static int in_panic;
 static struct emmc_ipanic_data drv_ctx;
 static struct work_struct proc_removal_work;
 static int is_found_panic_par;
-static u32 disable_emmc_ipanic;
 static int log_offset[IPANIC_LOG_MAX];
 static int log_len[IPANIC_LOG_MAX];	/* sector count */
 static int log_size[IPANIC_LOG_MAX];	/* byte count */
@@ -109,6 +110,11 @@ static void emmc_panic_erase(unsigned char *buffer, Sector *sect)
 	unsigned char *read_buf_ptr = buffer;
 	Sector new_sect;
 	int rc;
+
+	if (!emmc) {
+		pr_err("%s:invalid emmc infomation\n", __func__);
+		return;
+	}
 
 	if (!read_buf_ptr || !sect) {
 		sect = &new_sect;
@@ -491,10 +497,9 @@ static void emmc_panic_notify_add(void)
 
 	memcpy(&ctx->hdr, read_buf_ptr, sizeof(struct panic_header));
 
-	pr_info("%s: Bound to emmc partition '%s'\n", __func__, emmc->name);
-
 	if (ctx->hdr.magic != PANIC_MAGIC) {
-		pr_info("%s: bad magic %x\n", __func__, ctx->hdr.magic);
+		pr_info("%s: bad magic %x, no data available\n",
+			__func__, ctx->hdr.magic);
 		emmc_panic_erase(read_buf_ptr, &sect);
 		goto put_sector;
 	}
@@ -596,6 +601,11 @@ out_err:
 static void emmc_panic_notify_remove(void)
 {
 	struct emmc_ipanic_data *ctx = &drv_ctx;
+
+	if (ctx->emmc && ctx->emmc->disk_device) {
+		put_device(ctx->emmc->disk_device);
+		ctx->emmc->disk_device = NULL;
+	}
 
 	ctx->emmc = NULL;
 }
@@ -1009,6 +1019,8 @@ static int emmc_ipanic(struct notifier_block *this, unsigned long event,
 	struct mmc_emergency_info *emmc;
 	int rc, log;
 
+	pr_emerg("panic notified\n");
+
 	if (!is_found_panic_par) {
 		pr_emerg("Not found the emergency partition!\n");
 		return NOTIFY_DONE;
@@ -1113,96 +1125,81 @@ static int panic_dbg_set(void *data, u64 val)
 
 DEFINE_SIMPLE_ATTRIBUTE(panic_dbg_fops, panic_dbg_get, panic_dbg_set, "%llu\n");
 
-static int match_panic_par(struct device *dev, void *data)
+static int match_dev_panic(struct device *dev, const void *data)
 {
-	struct mmc_emergency_info *emmc = drv_ctx.emmc;
+	const char *name = (char *)data;
 
-	if (strcmp(dev_name(dev), emmc->emmc_disk_name) == 0) {
-		emmc->disk_device = dev;
-		pr_info("%s:emmc found\n", __func__);
+	if (!strcmp(dev_name(dev), name))
 		return 1;
-	}
-	dev = device_find_child(dev, NULL, match_panic_par);
-	return dev != NULL;
+
+	return 0;
 }
 
-static int emmc_panic_partition_notify(struct notifier_block *nb,
-				       unsigned long action, void *data)
+static int bind_panic_partition(void)
 {
-	struct device *dev = data;
 	struct emmc_ipanic_data *ctx = &drv_ctx;
 	struct mmc_emergency_info *emmc;
 
 	if (!ctx) {
 		pr_err("%s:invalid panic handler\n", __func__);
-		return 0;
+		goto no_bind;
 	}
 
 	emmc = ctx->emmc;
 	if (!emmc) {
-		pr_err("%s:invalid emmc infomation\n", __func__);
-		return 0;
+		pr_err("%s:invalid emmc information\n", __func__);
+		goto no_bind;
 	}
 
-	switch (action) {
-	case BUS_NOTIFY_ADD_DEVICE:
-	case BUS_NOTIFY_BOUND_DRIVER:
-		/* if emmc already found, exit the function */
-		if (emmc->disk_device)
-			return 0;
-		bus_find_device(&pci_bus_type, NULL, NULL, match_panic_par);
-		if (emmc->disk_device) {
-			emmc->disk = dev_to_disk(emmc->disk_device);
-			if (emmc->disk == NULL) {
-				pr_err("unable to get emmc disk\n");
-				return 0;
-			}
-
-			/*get whole disk */
-			emmc->bdev = bdget_disk(emmc->disk, 0);
-			if (!emmc->bdev) {
-				pr_err("unable to get emmc block device\n");
-				return 0;
-			}
-			emmc->part =
-			    disk_get_part(emmc->disk, emmc->part_number);
-			if (emmc->part == NULL) {
-				pr_err("unable to get partition\n");
-				return 0;
-			}
-			pr_info("panic partition found\n");
-			emmc->start_block = emmc->part->start_sect;
-			emmc->block_count = emmc->part->nr_sects;
-
-			is_found_panic_par = 1;
-
-			/*notify to add the panic device */
-			emmc_panic_notify_add();
-		}
-		break;
-	case BUS_NOTIFY_DEL_DEVICE:
-	case BUS_NOTIFY_UNBIND_DRIVER:
-		/*notify to add the panic device */
-		emmc_panic_notify_remove();
-		break;
-	case BUS_NOTIFY_BIND_DRIVER:
-	case BUS_NOTIFY_UNBOUND_DRIVER:
-		/* Nothing to do here, but we don't want
-		 * these actions to generate error messages,
-		 * so we need to catch them
-		 */
-		break;
-	default:
-		pr_err("Unknown action (%lu) on %s\n",
-			action, dev_name(dev));
-		return 0;
+	emmc->disk_device = class_find_device(&block_class, NULL,
+					      emmc->emmc_disk_name,
+					      &match_dev_panic);
+	if (!emmc->disk_device) {
+		pr_err("unable to get emmc device : %s\n",
+		       emmc->emmc_disk_name);
+		goto no_bind;
 	}
+
+	emmc->disk = dev_to_disk(emmc->disk_device);
+	if (!emmc->disk) {
+		pr_err("unable to get emmc disk\n");
+		goto put_dev;
+	}
+
+	/* get whole disk */
+	emmc->bdev = bdget_disk(emmc->disk, 0);
+	if (!emmc->bdev) {
+		pr_err("unable to get emmc block device\n");
+		goto put_dev;
+	}
+
+	emmc->part = disk_get_part(emmc->disk, emmc->part_number);
+	if (!emmc->part) {
+		pr_err("unable to get partition : %d\n", emmc->part_number);
+		goto put_dev;
+	}
+	emmc->start_block = emmc->part->start_sect;
+	emmc->block_count = emmc->part->nr_sects;
+
+	is_found_panic_par = 1;
+
+	pr_info("panic partition found: %sp%d\n",
+		dev_name(emmc->disk_device),
+		emmc->part_number);
+
+	/* notify to add the panic device */
+	emmc_panic_notify_add();
+
 	return 1;
-}
 
-static struct notifier_block panic_partition_notifier = {
-	.notifier_call = emmc_panic_partition_notify,
-};
+put_dev:
+	if (emmc->disk_device) {
+		put_device(emmc->disk_device);
+		emmc->disk_device = NULL;
+	}
+no_bind:
+	return 0;
+}
 
 void emmc_ipanic_stream_emmc(void)
 {
@@ -1212,16 +1209,16 @@ void emmc_ipanic_stream_emmc(void)
 
 EXPORT_SYMBOL(emmc_ipanic_stream_emmc);
 
-int __init emmc_ipanic_init(void)
-{
-	is_found_panic_par = 0;
-	bus_register_notifier(&pci_bus_type, &panic_partition_notifier);
-	atomic_notifier_chain_register(&panic_notifier_list, &panic_blk);
-	debugfs_create_file("emmc_ipanic", 0644, NULL, NULL, &panic_dbg_fops);
-	debugfs_create_u32("disable_emmc_ipanic", 0644, NULL,
-			   &disable_emmc_ipanic);
+static struct dentry *emmc_ipanic_d;
+static struct dentry *emmc_ipanic_disable_d;
 
-	/*initialization of drv_ctx */
+static int __init emmc_ipanic_init(void)
+{
+	int ret;
+
+	is_found_panic_par = 0;
+
+	/* initialization of drv_ctx */
 	memset(&drv_ctx, 0, sizeof(drv_ctx));
 	drv_ctx.emmc = &emmc_info;
 	if (ipanic_part_number)
@@ -1232,13 +1229,34 @@ int __init emmc_ipanic_init(void)
 	drv_ctx.ipanic_proc_entry_name = ipanic_proc_entry_name;
 	drv_ctx.bounce = (void *)__get_free_page(GFP_KERNEL);
 
+	ret = bind_panic_partition();
+	if (!ret) {
+		drv_ctx.emmc = NULL;
+		return -ENODEV;
+	}
+
+	atomic_notifier_chain_register(&panic_notifier_list, &panic_blk);
+
 	INIT_WORK(&proc_removal_work, emmc_ipanic_remove_proc_work);
-	/* String too long to fit on 1 80-char line */
-	pr_info("%s %sp%d!\n",
-		"Android kernel panic handler initialized on partition",
-		emmc_info.emmc_disk_name, emmc_info.part_number);
+
+	emmc_ipanic_d = debugfs_create_file("emmc_ipanic", 0644, NULL, NULL,
+					    &panic_dbg_fops);
+	emmc_ipanic_disable_d = debugfs_create_u32("disable_emmc_ipanic", 0644,
+						   NULL, &disable_emmc_ipanic);
+
+	pr_info("init success\n");
+
 	return 0;
 }
 
-core_param(disable_emmc_ipanic, disable_emmc_ipanic, uint, 0644);
+static void __exit emmc_ipanic_exit(void)
+{
+	debugfs_remove(emmc_ipanic_d);
+	debugfs_remove(emmc_ipanic_disable_d);
+	flush_scheduled_work();
+	atomic_notifier_chain_unregister(&panic_notifier_list, &panic_blk);
+	emmc_panic_notify_remove();
+}
+
 module_init(emmc_ipanic_init);
+module_exit(emmc_ipanic_exit);
