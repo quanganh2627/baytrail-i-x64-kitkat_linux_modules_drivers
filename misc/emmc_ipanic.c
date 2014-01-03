@@ -54,28 +54,17 @@
 #include <linux/kmsg_dump.h>
 #endif
 
-static char *block_name = "";
-module_param(block_name, charp, 0);
-MODULE_PARM_DESC(block_name, "IPanic dump block device name (mmcblk0)");
-
-static unsigned int ipanic_part_number;
-module_param(ipanic_part_number, int, 0);
-MODULE_PARM_DESC(ipanic_part_number, "IPanic dump partition on defined block device");
+static char *part_label = "";
+module_param(part_label, charp, 0);
+MODULE_PARM_DESC(part_label, "IPanic mmc partition device label (panic)");
 
 static u32 disable_emmc_ipanic;
 core_param(disable_emmc_ipanic, disable_emmc_ipanic, uint, 0644);
 
-/*
- * The part_number will be filled in driver init.
- */
-
 static struct mmc_emergency_info emmc_info = {
 	.init = mmc_emergency_init,
 	.write = mmc_emergency_write,
-	.emmc_disk_name = EMMC_PANIC_BLOCK_NAME,
-	.part_number = EMMC_PANIC_PART_NUM,
-	.name = "emmc_ipanic",
-	.disk_device = NULL
+	.part_label = CONFIG_EMMC_IPANIC_PLABEL,
 };
 
 static unsigned char *ipanic_proc_entry_name[PROC_MAX_ENTRIES] = {
@@ -88,7 +77,6 @@ static unsigned char *ipanic_proc_entry_name[PROC_MAX_ENTRIES] = {
 static int in_panic;
 static struct emmc_ipanic_data drv_ctx;
 static struct work_struct proc_removal_work;
-static int is_found_panic_par;
 static int log_offset[IPANIC_LOG_MAX];
 static int log_len[IPANIC_LOG_MAX];	/* sector count */
 static int log_size[IPANIC_LOG_MAX];	/* byte count */
@@ -470,10 +458,6 @@ static void emmc_panic_notify_add(void)
 		pr_err("%s:invalid emmc infomation\n", __func__);
 		goto out_err;
 	}
-#ifdef CONFIG_EMMC_IPANIC_PLABEL
-	if (strcmp(emmc->name, CONFIG_EMMC_IPANIC_PLABEL))
-		goto out_err;
-#endif
 
 	if (!emmc->bdev) {
 		pr_err("%s:invalid emmc block device\n", __func__);
@@ -602,10 +586,8 @@ static void emmc_panic_notify_remove(void)
 {
 	struct emmc_ipanic_data *ctx = &drv_ctx;
 
-	if (ctx->emmc && ctx->emmc->disk_device) {
-		put_device(ctx->emmc->disk_device);
-		ctx->emmc->disk_device = NULL;
-	}
+	if (ctx->emmc && ctx->emmc->part_dev)
+		put_device(ctx->emmc->part_dev);
 
 	ctx->emmc = NULL;
 }
@@ -1022,11 +1004,6 @@ static int emmc_ipanic(struct notifier_block *this, unsigned long event,
 
 	pr_emerg("panic notified\n");
 
-	if (!is_found_panic_par) {
-		pr_emerg("Not found the emergency partition!\n");
-		return NOTIFY_DONE;
-	}
-
 	if (in_panic || disable_emmc_ipanic)
 		return NOTIFY_DONE;
 
@@ -1126,79 +1103,69 @@ static int panic_dbg_set(void *data, u64 val)
 
 DEFINE_SIMPLE_ATTRIBUTE(panic_dbg_fops, panic_dbg_get, panic_dbg_set, "%llu\n");
 
-static int match_dev_panic(struct device *dev, const void *data)
+static int match_dev_panic_part(struct device *dev, const void *data)
 {
+	struct hd_struct *part = dev_to_part(dev);
 	const char *name = (char *)data;
 
-	if (!strcmp(dev_name(dev), name))
-		return 1;
-
-	return 0;
+	return part->info && !strcmp(name, part->info->volname);
 }
 
 static int bind_panic_partition(void)
 {
 	struct emmc_ipanic_data *ctx = &drv_ctx;
 	struct mmc_emergency_info *emmc;
+	struct gendisk *disk;
 
 	if (!ctx) {
 		pr_err("%s:invalid panic handler\n", __func__);
-		goto no_bind;
+		return 0;
 	}
 
 	emmc = ctx->emmc;
 	if (!emmc) {
 		pr_err("%s:invalid emmc information\n", __func__);
-		goto no_bind;
+		return 0;
 	}
 
-	emmc->disk_device = class_find_device(&block_class, NULL,
-					      emmc->emmc_disk_name,
-					      &match_dev_panic);
-	if (!emmc->disk_device) {
-		pr_err("unable to get emmc device : %s\n",
-		       emmc->emmc_disk_name);
-		goto no_bind;
+	emmc->part_dev = class_find_device(&block_class, NULL,
+					   emmc->part_label,
+					   &match_dev_panic_part);
+	if (!emmc->part_dev) {
+		pr_err("unable to get panic partition device, label:'%s'\n",
+		       emmc->part_label);
+		return 0;
 	}
 
-	emmc->disk = dev_to_disk(emmc->disk_device);
-	if (!emmc->disk) {
-		pr_err("unable to get emmc disk\n");
+	emmc->part = dev_to_part(emmc->part_dev);
+	if (!emmc->part) {
+		pr_err("unable to get partition\n");
+		goto put_dev;
+	}
+
+	disk = part_to_disk(emmc->part);
+	if (!disk) {
+		pr_err("unable to get disk\n");
 		goto put_dev;
 	}
 
 	/* get whole disk */
-	emmc->bdev = bdget_disk(emmc->disk, 0);
+	emmc->bdev = bdget_disk(disk, 0);
 	if (!emmc->bdev) {
 		pr_err("unable to get emmc block device\n");
 		goto put_dev;
 	}
 
-	emmc->part = disk_get_part(emmc->disk, emmc->part_number);
-	if (!emmc->part) {
-		pr_err("unable to get partition : %d\n", emmc->part_number);
-		goto put_dev;
-	}
 	emmc->start_block = emmc->part->start_sect;
 	emmc->block_count = emmc->part->nr_sects;
 
-	is_found_panic_par = 1;
-
-	pr_info("panic partition found: %sp%d\n",
-		dev_name(emmc->disk_device),
-		emmc->part_number);
-
-	/* notify to add the panic device */
-	emmc_panic_notify_add();
+	pr_info("panic partition found, label:%s, device:%s\n",
+		emmc->part_label, dev_name(emmc->part_dev));
 
 	return 1;
 
 put_dev:
-	if (emmc->disk_device) {
-		put_device(emmc->disk_device);
-		emmc->disk_device = NULL;
-	}
-no_bind:
+	put_device(emmc->part_dev);
 	return 0;
 }
 
@@ -1215,26 +1182,22 @@ static struct dentry *emmc_ipanic_disable_d;
 
 static int __init emmc_ipanic_init(void)
 {
-	int ret;
-
-	is_found_panic_par = 0;
-
 	/* initialization of drv_ctx */
 	memset(&drv_ctx, 0, sizeof(drv_ctx));
 	drv_ctx.emmc = &emmc_info;
-	if (ipanic_part_number)
-		emmc_info.part_number = ipanic_part_number;
-	if (*block_name)
-		strcpy(emmc_info.emmc_disk_name, block_name);
+
+	if (*part_label)
+		strcpy(emmc_info.part_label, part_label);
 
 	drv_ctx.ipanic_proc_entry_name = ipanic_proc_entry_name;
 	drv_ctx.bounce = (void *)__get_free_page(GFP_KERNEL);
 
-	ret = bind_panic_partition();
-	if (!ret) {
+	if (!bind_panic_partition()) {
 		drv_ctx.emmc = NULL;
 		return -ENODEV;
 	}
+	/* notify to add the panic device */
+	emmc_panic_notify_add();
 
 	atomic_notifier_chain_register(&panic_notifier_list, &panic_blk);
 
