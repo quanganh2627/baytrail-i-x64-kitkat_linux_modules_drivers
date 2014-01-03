@@ -58,7 +58,9 @@
 #define RECOVERABLE_FABERR_INT		9
 #define MAX_FID_REG_LEN			32
 
-#define USE_LEGACY() (intel_mid_identify_cpu() != INTEL_MID_CPU_CHIP_TANGIER)
+#define USE_LEGACY()							\
+	(intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_PENWELL ||	\
+	 intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_CLOVERVIEW)
 
 /* The legacy fabric error logging struct (e.g. Clovertrail) takes 12 dwords
  * of basic, and 9 additional dwords of extension.
