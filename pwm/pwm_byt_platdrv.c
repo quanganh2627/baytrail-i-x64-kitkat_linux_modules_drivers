@@ -96,7 +96,9 @@ static void pwm_byt_plat_remove(struct platform_device *pdev)
 	pm_runtime_forbid(&pdev->dev);
 	pwm_byt_remove(&pdev->dev);
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	release_mem_region(mem->start, resource_size(mem));
+	if (mem) {
+		release_mem_region(mem->start, resource_size(mem));
+	}
 }
 
 static struct platform_driver pwm_byt_plat_driver = {
