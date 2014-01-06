@@ -2068,6 +2068,7 @@ void rmi4_late_resume(struct early_suspend *h)
 
 static const struct i2c_device_id rmi4_id_table[] = {
 	{ S3202_DEV_ID, 0 },
+	{ S3402_DEV_ID, 0 },
 	{ S3400_CGS_DEV_ID, 0 },
 	{ S3400_IGZO_DEV_ID, 0 },
 	{ },
