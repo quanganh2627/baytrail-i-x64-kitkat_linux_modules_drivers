@@ -394,6 +394,12 @@ struct vibra_info *mid_vibra_setup(struct device *dev, struct mid_vibra_pdata *d
 		info->enable = vibra_drv2605_enable;
 	} else if (!strncmp(info->name, "drv2603", 8)) {
 		info->enable = vibra_drv2605_enable;
+	} else if (!strncmp(info->name, "VIBR22A8", 8)) {
+	/* The CHT vibra does not use any driver chip. It does not use "enable"
+	   GPIO either. However, the existing vibra_drv8601_enable() and
+	   vibra_disable() functions  can be reused on CHT since gpio apis
+	   are not called when enable gpio control is not used */
+		info->enable = vibra_drv8601_enable;
 	} else {
 		pr_err("%s: unsupported vibrator device", __func__);
 		return NULL;
@@ -531,6 +537,7 @@ void *mid_vibra_acpi_get_drvdata(const char *hid)
 
 static const struct acpi_device_id vibra_acpi_ids[] = {
 	{ "VIB8601", (kernel_ulong_t) &pmic_vibra_data_byt_ffrd8 },
+	{ "VIBR22A8", (kernel_ulong_t) &pmic_vibra_data_cht },
 	{},
 };
 MODULE_DEVICE_TABLE(acpi, vibra_acpi_ids);

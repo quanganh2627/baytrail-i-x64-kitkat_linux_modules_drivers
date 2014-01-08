@@ -52,6 +52,14 @@ struct mid_vibra_pdata pmic_vibra_data_byt_ffrd8 = {
 	.use_gpio_en    = true,
 };
 
+struct mid_vibra_pdata pmic_vibra_data_cht = {
+	.time_divisor	= 0x7f, /* for 50% duty cycle */
+	.base_unit	= 0x0,
+	.gpio_pwm	= -1,
+	.name		= "VIBR22A8",
+	.use_gpio_en    = false, /* CHT vibra does not use gpio enable control */
+};
+
 static int vibra_pmic_pwm_configure(struct vibra_info *info, bool enable)
 {
 	u8 clk_div;
@@ -139,10 +147,12 @@ int intel_mid_plat_vibra_probe(struct platform_device *pdev)
 					info->gpio_en, ret);
 			return ret;
 		}
+		/* Re configure the PWM EN GPIO to have drive type as CMOS
+		 * and pull disable
+		 */
+		intel_mid_pmic_writeb(CRYSTALCOVE_PMIC_PWM_EN_GPIO_REG,
+				CRYSTALCOVE_PMIC_PWM_EN_GPIO_VALUE);
 	}
-	/* Re configure the PWM EN GPIO to have drive type as CMOS and pull disable*/
-	intel_mid_pmic_writeb(CRYSTALCOVE_PMIC_PWM_EN_GPIO_REG,
-			CRYSTALCOVE_PMIC_PWM_EN_GPIO_VALUE);
 
 	ret = sysfs_create_group(&dev->kobj, info->vibra_attr_group);
 	if (ret) {

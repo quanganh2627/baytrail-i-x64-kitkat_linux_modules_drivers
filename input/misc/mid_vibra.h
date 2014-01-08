@@ -55,7 +55,7 @@ int intel_mid_plat_vibra_probe(struct platform_device *pdev);
 int intel_mid_plat_vibra_remove(struct platform_device *pdev);
 
 extern struct mid_vibra_pdata pmic_vibra_data_byt_ffrd8;
-
+extern struct mid_vibra_pdata pmic_vibra_data_cht;
 
 #define vibra_gpio_set_value(info, v) \
 	if ((info)->use_gpio_en)  gpio_set_value((info)->gpio_en, (v))
