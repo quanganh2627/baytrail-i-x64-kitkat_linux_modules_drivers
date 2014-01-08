@@ -131,8 +131,8 @@ struct lowlevel_action {
 /*
 * lowlevel action index info in sensor_config
 */
-struct lowlevel_action_index {
 #define MAX_LL_ACTION_NUM	0xff
+struct lowlevel_action_index {
 	u8 index;
 	u8 num;
 };
@@ -160,8 +160,8 @@ struct range_setting {
 * sysfs file info
 * @mode:file access mode
 */
-struct sysfs_entry {
 #define  MAX_ATTR_NAME_BYTES	8
+struct sysfs_entry {
 	char name[MAX_ATTR_NAME_BYTES];
 	u16 mode;
 
@@ -231,23 +231,27 @@ struct sysfs_entry {
 * @indexs: index infos of all specified sensor actions
 * @actions: pack all lowlevel actions together to reduce config image size
 */
+#define INVALID_I2C_BUS			0xff
+#define INVALID_I2C_ADDR		0xff
+#define MAX_I2C_ADDRS			4
+#define MAX_DEV_IDS			4
+#define MAX_DEV_NAME_BYTES		32
+#define SENSOR_INVALID_REG		0xff
+#define SENSOR_INVALID_INTERVAL		0xffffffff
+#define MAX_ODR_SETTING_ENTRIES		8
+#define MAX_RANGES			6
+#define MAX_SYSFS_ENTRIES		6
 struct sensor_config {
 	u16 size;
 
 	/*Basic info of sensor driver*/
-#define INVALID_I2C_BUS			0xff
 	u8 i2c_bus;
 	u8 test_reg_addr;
-#define INVALID_I2C_ADDR		0xff
-#define MAX_I2C_ADDRS			4
 	u8 i2c_addrs[MAX_I2C_ADDRS];
-#define MAX_DEV_IDS			4
 	u8 id[MAX_DEV_IDS];
-#define MAX_DEV_NAME_BYTES		32
 	char name[MAX_DEV_NAME_BYTES];
 	char input_name[MAX_DEV_NAME_BYTES];
 	char attr_name[MAX_DEV_NAME_BYTES];
-#define SENSOR_INVALID_REG		0xff
 	u8 id_reg_addr;
 	u8 id_reg_flag;
 	u8 sensor_regs;
@@ -255,7 +259,6 @@ struct sensor_config {
 
 	/*infos to get data method */
 	enum method_get_data {INT = 0, POLL, MIX,} method;
-#define SENSOR_INVALID_INTERVAL		0xffffffff
 	int default_poll_interval;
 	int min_poll_interval;
 	int max_poll_interval;
@@ -268,15 +271,12 @@ struct sensor_config {
 	int shared_nums;
 	int irq_serialize;
 
-#define MAX_ODR_SETTING_ENTRIES		8
 	int odr_entries;
 	struct odr odr_table[MAX_ODR_SETTING_ENTRIES];
 
-#define MAX_RANGES			6
 	int range_entries;
 	struct range_setting range_table[MAX_RANGES];
 
-#define MAX_SYSFS_ENTRIES		6
 	int sysfs_entries;
 	int default_range;
 	struct sysfs_entry sysfs_table[MAX_SYSFS_ENTRIES];
@@ -291,12 +291,20 @@ struct sensor_config {
 */
 struct sensor_config_image {
 	int magic;
-	int version;
+	unsigned int flags;
+	unsigned int dbg_sensors;
+	unsigned int dbg_level;
 	int num;
 	struct sensor_config *configs;
 };
 
 #define DATA_STACK_MAX_SIZE	0x20
 #define PRIVATE_MAX_SIZE	0x20
+
+/*general flags*/
+#define SG_FLAGS_BOOT_DISABLE	0x1
+/*the way to start parse*/
+#define SG_START		0x1
+#define SG_FORCE_START		0x2
 
 #endif

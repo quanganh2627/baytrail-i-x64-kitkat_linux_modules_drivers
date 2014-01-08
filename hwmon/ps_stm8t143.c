@@ -179,7 +179,6 @@ static int stm8t143_get_data_init(struct stm8t143_data *stm8t143)
 		gpio_free(stm8t143->gpio_irq);
 		dev_err(&stm8t143->pdev->dev,
 			"Fail to request irq:%d ret=%d\n", irq, ret);
-		return ret;
 	}
 	return ret;
 }
@@ -256,7 +255,12 @@ static int stm8t143_probe(struct platform_device *pdev)
 
 	stm8t143->pdev = pdev;
 	mutex_init(&stm8t143->lock);
-	stm8t143->gpio_irq = acpi_get_gpio("\\_SB.GPO0", PS_STM8T143_DATA_GPIO);
+	stm8t143->gpio_irq = acpi_get_gpio_by_index(&pdev->dev, 0, NULL);
+	if (stm8t143->gpio_irq < 0) {
+		dev_warn(&pdev->dev, "Fail to get gpio pin by ACPI\n");
+		stm8t143->gpio_irq = acpi_get_gpio("\\_SB.GPO0",
+						PS_STM8T143_DATA_GPIO);
+	}
 	stm8t143->gpio_data = stm8t143->gpio_irq;
 
 	SENSOR_DBG(DBG_LEVEL3, "data gpio:%d\n", stm8t143->gpio_data);
