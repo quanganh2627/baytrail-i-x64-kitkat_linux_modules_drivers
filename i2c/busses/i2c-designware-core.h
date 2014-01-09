@@ -185,8 +185,6 @@
 #define VLV2_FS_SCLK_LCNT 0xad
 #define VLV2_HS_SCLK_HCNT 0x6
 #define VLV2_HS_SCLK_LCNT 0x16
-#define VLV2_FS_P_SCLK_HCNT 0x1b
-#define VLV2_FS_P_SCLK_LCNT 0x3a
 
 #define DW_STD_SPEED	100000
 #define DW_FAST_SPEED	400000
@@ -256,7 +254,6 @@ struct dw_i2c_dev {
 	u32			speed_cfg;
 	u32			lock_flag;
 	u32			freq;
-	u32			fast_plus;
 };
 
 struct dw_controller {
@@ -265,7 +262,6 @@ struct dw_controller {
 	u32 tx_fifo_depth;
 	u32 rx_fifo_depth;
 	u32 clk_khz;
-	u32 fast_plus;
 	int enable_stop;
 	int share_irq;
 	char *acpi_name;
