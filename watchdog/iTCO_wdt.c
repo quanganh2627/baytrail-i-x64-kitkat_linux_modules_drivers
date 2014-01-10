@@ -126,6 +126,10 @@ MODULE_DEVICE_TABLE(pci, iTCO_wdt_pci_tbl);
 #define EOS_BIT			(1 << 1)
 #define TCO_EN_BIT		(1 << 13)
 
+#define STRING_RESET_TYPE_MAX_LEN 12
+#define STRING_COLD_OFF "COLD_OFF"
+#define STRING_COLD_RESET "COLD_RESET"
+
 static u32 pmc_base_address;
 #define PMC_CFG		(pmc_base_address + 0x8)
 
@@ -137,6 +141,8 @@ static struct dentry *iTCO_debugfs_dir;
 static unsigned long is_active;
 static char expect_release;
 static struct {		/* this is private data for the iTCO_wdt device */
+	/* TCO watchdog action */
+	unsigned int iTCO_wdt_action;
 	/* TCO version/generation */
 	unsigned int iTCO_version;
 	/* The device's ACPIBASE address (TCOBASE = ACPIBASE+0x60) */
@@ -163,14 +169,14 @@ static bool bypass_keepalive;
 static int heartbeat = WATCHDOG_HEARTBEAT;  /* in seconds */
 module_param(heartbeat, int, 0);
 MODULE_PARM_DESC(heartbeat, "Watchdog timeout in seconds. "
-	"3..614, default="
-				__MODULE_STRING(WATCHDOG_HEARTBEAT) ")");
+		 "3..614, default="
+		 __MODULE_STRING(WATCHDOG_HEARTBEAT) ")");
 
 static bool nowayout = WATCHDOG_NOWAYOUT;
 module_param(nowayout, bool, 0);
 MODULE_PARM_DESC(nowayout,
-	"Watchdog cannot be stopped once started (default="
-				__MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
+		 "Watchdog cannot be stopped once started (default="
+		 __MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 
 static int turn_SMI_watchdog_clear_off = 1;
 module_param(turn_SMI_watchdog_clear_off, int, 0);
@@ -185,7 +191,7 @@ static inline unsigned int seconds_to_ticks(int seconds)
 {
 	/* the internal timer is stored as ticks which decrement
 	 * every 0.6 seconds */
-	return (seconds * 10) / 6;
+	return max(((seconds * 10) / 6),2);
 }
 
 static void iTCO_wdt_set_NO_REBOOT_bit(void)
@@ -317,6 +323,17 @@ static int iTCO_wdt_set_heartbeat(int t)
 	return 0;
 }
 
+static void iTCO_wdt_last_kick(int last_delay)
+{
+	/* Set new heart beat giving last_delay to kernel to shutdown cleanly */
+	iTCO_wdt_set_heartbeat(last_delay);
+
+	/* Do a last keep alive before bypassing to allow shutdown
+	to proceed with new timing */
+	iTCO_wdt_keepalive();
+	bypass_keepalive = true;
+}
+
 static int iTCO_wdt_get_timeleft(int *time_left)
 {
 	unsigned int val16;
@@ -394,6 +411,99 @@ static ssize_t iTCO_wdt_write(struct file *file, const char __user *data,
 	return len;
 }
 
+static void iTCO_wdt_set_reset_type(int reset_type)
+{
+	int val;
+
+	spin_lock(&iTCO_wdt_private.io_lock);
+
+	iTCO_wdt_private.iTCO_wdt_action = reset_type;
+
+	val = inl(TCO1_CNT);
+
+	val &= ~(TCO_POLICY_MASK << TCO_POLICY_OFFSET);
+	val |= reset_type << TCO_POLICY_OFFSET;
+
+	outl(val, TCO1_CNT);
+
+	spin_unlock(&iTCO_wdt_private.io_lock);
+}
+
+#ifdef CONFIG_DEBUG_FS
+
+static ssize_t iTCO_wdt_reset_type_write(struct file *file, const char __user *buff,
+		size_t count, loff_t *ppos)
+{
+	char reset_type_str[STRING_RESET_TYPE_MAX_LEN];
+	unsigned long res;
+
+	if (count >= STRING_RESET_TYPE_MAX_LEN) {
+		pr_err("Invalid size %s %d/%d\n", reset_type_str, count,
+					STRING_RESET_TYPE_MAX_LEN);
+		return -EINVAL;
+	}
+
+	memset(reset_type_str, 0x00, STRING_RESET_TYPE_MAX_LEN);
+
+	res = copy_from_user((void *)reset_type_str,
+		(void __user *)buff,
+		(unsigned long)min((unsigned long)(count-1),
+		(unsigned long)(STRING_RESET_TYPE_MAX_LEN-1)));
+
+	if (res) {
+		pr_err("%s: copy from user failed\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!strncmp(reset_type_str, STRING_COLD_OFF, STRING_RESET_TYPE_MAX_LEN)) {
+		iTCO_wdt_set_reset_type(TCO_POLICY_HALT);
+	} else if (!strncmp(reset_type_str, STRING_COLD_RESET,
+					STRING_RESET_TYPE_MAX_LEN)) {
+		iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
+	} else {
+		pr_err("Reset type %s is unknown - Invalid value\n", reset_type_str);
+		return -EINVAL;
+	}
+
+	return count;
+}
+
+static ssize_t iTCO_wdt_reset_type_read(struct file *file, char __user *buff,
+		size_t count, loff_t *ppos)
+{
+	ssize_t len = 0;
+	unsigned long res;
+
+	if (*ppos > 0)
+		return 0;
+
+	switch(iTCO_wdt_private.iTCO_wdt_action) {
+	case TCO_POLICY_NORM:
+		len = ARRAY_SIZE(STRING_COLD_RESET)+1;
+		res = copy_to_user(buff, STRING_COLD_RESET "\n", len);
+		break;
+	case TCO_POLICY_HALT:
+		len = ARRAY_SIZE(STRING_COLD_OFF)+1;
+		res = copy_to_user(buff, STRING_COLD_OFF "\n", len);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (res) {
+		pr_err("%s: copy to user failed\n", __func__);
+		return -EINVAL;
+	}
+
+	*ppos += len;
+	return len;
+}
+
+static const struct file_operations iTCO_wdt_reset_type_fops = {
+	.read = iTCO_wdt_reset_type_read,
+	.write = iTCO_wdt_reset_type_write,
+};
+
 #define STR_MAX_LEN 30
 static ssize_t tl_read(struct file *file, char __user *buff,
 		size_t count, loff_t *ppos)
@@ -429,6 +539,21 @@ static ssize_t tl_read(struct file *file, char __user *buff,
 static const struct file_operations tl_fops = {
 	.read = tl_read,
 };
+
+
+static ssize_t iTCO_wdt_trigger_write(struct file *file, const char __user *buff,
+		size_t count, loff_t *ppos)
+{
+	iTCO_wdt_last_kick(1);
+
+	return 0;
+}
+
+static const struct file_operations iTCO_wdt_trigger_fops = {
+	.write = iTCO_wdt_trigger_write,
+};
+
+#endif /* CONFIG_DEBUG_FS */
 
 static long iTCO_wdt_ioctl(struct file *file, unsigned int cmd,
 							unsigned long arg)
@@ -522,24 +647,11 @@ static int TCO_reboot_notifier(struct notifier_block *this,
 			   unsigned long code,
 			   void *another_unused)
 {
-	int val;
 	if (code == SYS_HALT || code == SYS_POWER_OFF) {
-		spin_lock(&iTCO_wdt_private.io_lock);
-
-		val = inl(TCO1_CNT);
-		val &= ~(TCO_POLICY_MASK << TCO_POLICY_OFFSET);
-		val |= TCO_POLICY_HALT << TCO_POLICY_OFFSET;
-		outl(val, TCO1_CNT);
-		spin_unlock(&iTCO_wdt_private.io_lock);
+		iTCO_wdt_set_reset_type(TCO_POLICY_HALT);
 	}
 
-	/* Set new heart beat giving 5s to kernel to shutdown cleanly */
-	iTCO_wdt_set_heartbeat(5);
-
-	/* Do a last keep alive before bypassing to allow shutdown
-	to proceed with new timing */
-	iTCO_wdt_keepalive();
-	bypass_keepalive = true;
+	iTCO_wdt_last_kick(5);
 
 	return NOTIFY_DONE;
 }
@@ -662,9 +774,7 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 		heartbeat, nowayout);
 
 	/* Reset OS policy */
-	val32 = inl(TCO1_CNT);
-	val32 &= ~(TCO_POLICY_MASK << TCO_POLICY_OFFSET);
-	outl(val32, TCO1_CNT);
+	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
 
 	ret = acpi_register_gsi(NULL, TCO_WARNING_IRQ,
 				ACPI_EDGE_SENSITIVE, ACPI_ACTIVE_HIGH);
@@ -731,7 +841,9 @@ static void iTCO_wdt_cleanup(void)
 	unregister_reboot_notifier(&reboot_notifier);
 	pci_dev_put(iTCO_wdt_private.pdev);
 	iTCO_wdt_private.ACPIBASE = 0;
+#ifdef CONFIG_DEBUG_FS
 	debugfs_remove_recursive(iTCO_debugfs_dir);
+#endif /* CONFIG_DEBUG_FS */
 }
 
 static int iTCO_wdt_probe(struct platform_device *dev)
@@ -748,9 +860,15 @@ static int iTCO_wdt_probe(struct platform_device *dev)
 		if (ent) {
 			found++;
 			ret = iTCO_wdt_init(pdev, ent, dev);
+#ifdef CONFIG_DEBUG_FS
 			iTCO_debugfs_dir = debugfs_create_dir("iTCO", NULL);
 			debugfs_create_file("timeleft", S_IRUSR,
 					iTCO_debugfs_dir, NULL, &tl_fops);
+			debugfs_create_file("reset_type", S_IRUSR,
+					iTCO_debugfs_dir, NULL, &iTCO_wdt_reset_type_fops);
+			debugfs_create_file("trigger", S_IRUSR,
+					iTCO_debugfs_dir, NULL, &iTCO_wdt_trigger_fops);
+#endif /* CONFIG_DEBUG_FS */
 			if (!ret)
 				break;
 		}
@@ -761,6 +879,58 @@ static int iTCO_wdt_probe(struct platform_device *dev)
 
 	return ret;
 }
+
+static ssize_t shutdown_ongoing_store(struct device *dev,
+			struct device_attribute *attr, const char *buf, size_t size)
+{
+	iTCO_wdt_set_reset_type(TCO_POLICY_HALT);
+	return size;
+}
+
+
+static ssize_t reboot_ongoing_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t size)
+{
+	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
+	return size;
+}
+
+/* Watchdog behavior depending on system phase */
+static DEVICE_ATTR(shutdown_ongoing, S_IWUSR | S_IRUGO,
+				NULL, shutdown_ongoing_store);
+static DEVICE_ATTR(reboot_ongoing, S_IWUSR | S_IRUGO,
+				NULL, reboot_ongoing_store);
+
+int create_watchdog_sysfs_files(void)
+{
+	int ret;
+
+	ret = device_create_file(iTCO_wdt_miscdev.this_device,
+			&dev_attr_shutdown_ongoing);
+	if (ret) {
+		pr_warn("cant register dev file for shutdown_ongoing\n");
+		return ret;
+	}
+
+	ret = device_create_file(iTCO_wdt_miscdev.this_device,
+			&dev_attr_reboot_ongoing);
+	if (ret) {
+		pr_warn("cant register dev file for reboot_ongoing\n");
+		return ret;
+	}
+	return 0;
+}
+
+int remove_watchdog_sysfs_files(void)
+{
+	device_remove_file(iTCO_wdt_miscdev.this_device,
+		&dev_attr_shutdown_ongoing);
+	device_remove_file(iTCO_wdt_miscdev.this_device,
+		&dev_attr_reboot_ongoing);
+	return 0;
+}
+
 
 static int iTCO_wdt_remove(struct platform_device *dev)
 {
@@ -814,6 +984,12 @@ static int __init iTCO_wdt_init_module(void)
 		goto unreg_platform_driver;
 	}
 
+	err = create_watchdog_sysfs_files();
+	if (err) {
+		pr_err("%s: Error creating debugfs entries\n", __func__);
+		goto unreg_platform_driver;
+	}
+
 	return 0;
 
 unreg_platform_driver:
@@ -823,6 +999,7 @@ unreg_platform_driver:
 
 static void __exit iTCO_wdt_cleanup_module(void)
 {
+	remove_watchdog_sysfs_files();
 	platform_device_unregister(iTCO_wdt_platform_device);
 	platform_driver_unregister(&iTCO_wdt_driver);
 	pr_info("Watchdog Module Unloaded\n");

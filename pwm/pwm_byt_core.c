@@ -29,10 +29,10 @@
 #include <linux/err.h>
 #include <linux/io.h>
 #include <linux/slab.h>
-#include <linux/pci.h>
 #include <linux/pm_runtime.h>
 #include <linux/fs.h>
 #include <linux/pwm.h>
+#include "pwm_byt_core.h"
 
 /* PWM registers and bits definitions */
 
@@ -72,7 +72,7 @@ static int byt_pwm_wait_update_complete(struct byt_pwm_chip *byt_pwm)
 	uint32_t update;
 	int retry = 0;
 
-	while (retry < 5) {
+	while (retry < 20) {
 		update = ioread32(PWMCR(byt_pwm));
 		if (!(update & PWMCR_UP))
 			break;
@@ -83,7 +83,7 @@ static int byt_pwm_wait_update_complete(struct byt_pwm_chip *byt_pwm)
 		++retry;
 	}
 
-	if (retry >= 5) {
+	if (retry >= 20) {
 		pr_err("PWM update failed, update bit is not cleared!");
 		return -EBUSY;
 	} else {
@@ -393,96 +393,68 @@ static const struct attribute_group byt_pwm_attr_group = {
 	.attrs = byt_pwm_attrs,
 };
 
-static int pwm_byt_probe(struct pci_dev *pdev,
-			    const struct pci_device_id *id)
+int pwm_byt_init(struct device *dev, void __iomem *base,
+		int pwm_num, unsigned int clk_khz)
 {
+
 	struct byt_pwm_chip *byt_pwm;
-	static int pwm_num;
 	int r;
 
-
-	r = pcim_enable_device(pdev);
-	if (r) {
-		dev_err(&pdev->dev, "Failed to enable PWM PCI device (%d)\n",
-			r);
-		return r;
-	}
-
-	r = pcim_iomap_regions(pdev, 1 << 0, pci_name(pdev));
-	if (r) {
-		dev_err(&pdev->dev, "I/O memory remapping failed\n");
-		return r;
-	}
-
-	byt_pwm = devm_kzalloc(&pdev->dev, sizeof(*byt_pwm), GFP_KERNEL);
+	byt_pwm = devm_kzalloc(dev, sizeof(*byt_pwm), GFP_KERNEL);
 	if (!byt_pwm) {
-		dev_err(&pdev->dev, "Failed to allocate memory\n");
-		r = -ENOMEM;
-		goto err_iounmap;
+		dev_err(dev, "Failed to allocate memory\n");
+		return -ENOMEM;
 	}
 
 	mutex_init(&byt_pwm->lock);
-	byt_pwm->dev = &pdev->dev;
-	byt_pwm->chip.dev = &pdev->dev;
+	byt_pwm->dev = dev;
+	byt_pwm->chip.dev = dev;
 	byt_pwm->chip.ops = &byt_pwm_ops;
 	byt_pwm->chip.base = -1;
 	byt_pwm->chip.npwm = 1;
-	byt_pwm->mmio_base = pcim_iomap_table(pdev)[0];
+	byt_pwm->mmio_base = base;
 	byt_pwm->pwm_num = pwm_num;
-	byt_pwm->clk_khz = id->driver_data;
-	++pwm_num;
-	pci_set_drvdata(pdev, byt_pwm);
+	byt_pwm->clk_khz = clk_khz;
+	dev_set_drvdata(dev, byt_pwm);
 
 	r = pwmchip_add(&byt_pwm->chip);
 	if (r < 0) {
-		dev_err(&pdev->dev, "pwmchip_add() failed: %d\n", r);
+		dev_err(dev, "pwmchip_add() failed: %d\n", r);
 		r = -ENODEV;
 		goto err_kfree;
 	}
 
-	r = sysfs_create_group(&pdev->dev.kobj, &byt_pwm_attr_group);
+	r = sysfs_create_group(&dev->kobj, &byt_pwm_attr_group);
 	if (r) {
-		dev_err(&pdev->dev, "failed to create sysfs files: %d\n", r);
+		dev_err(dev, "failed to create sysfs files: %d\n", r);
 		goto err_remove_chip;
 	}
 	list_add_tail(&byt_pwm->list, &pwm_chip_list);
-	dev_info(&pdev->dev, "PWM device probed: pwm_num=%d, mmio_base=%p clk_khz=%d\n",
+	dev_info(dev, "PWM device probed: pwm_num=%d, mmio_base=%p clk_khz=%d\n",
 			byt_pwm->pwm_num, byt_pwm->mmio_base, byt_pwm->clk_khz);
 
-	pm_runtime_set_autosuspend_delay(&pdev->dev, 5);
-	pm_runtime_use_autosuspend(&pdev->dev);
-	pm_runtime_put_noidle(&pdev->dev);
-	pm_runtime_allow(&pdev->dev);
 	return 0;
 
 err_remove_chip:
 	pwmchip_remove(&byt_pwm->chip);
 err_kfree:
-	devm_kfree(&pdev->dev, byt_pwm);
-err_iounmap:
-	pcim_iounmap_regions(pdev, 1 << 0);
-	dev_info(&pdev->dev, "PWM device probe failed!\n");
+	devm_kfree(dev, byt_pwm);
+	dev_info(dev, "PWM device probe failed!\n");
 	return r;
 }
+EXPORT_SYMBOL(pwm_byt_init);
 
-static void pwm_byt_remove(struct pci_dev *pdev)
+void pwm_byt_remove(struct device *dev)
 {
 	struct byt_pwm_chip *byt_pwm;
 
-	pm_runtime_get_noresume(&pdev->dev);
-	pm_runtime_forbid(&pdev->dev);
-
-	byt_pwm = pci_get_drvdata(pdev);
+	sysfs_remove_group(&dev->kobj, &byt_pwm_attr_group);
+	byt_pwm = dev_get_drvdata(dev);
 	list_del(&byt_pwm->list);
 	pwmchip_remove(&byt_pwm->chip);
 	mutex_destroy(&byt_pwm->lock);
-	devm_kfree(&pdev->dev, byt_pwm);
-
-	sysfs_remove_group(&pdev->dev.kobj, &byt_pwm_attr_group);
-	pcim_iounmap_regions(pdev, 1 << 0);
-	pci_disable_device(pdev);
-	pci_dev_put(pdev);
 }
+EXPORT_SYMBOL(pwm_byt_remove);
 
 
 static int pwm_byt_suspend(struct device *dev)
@@ -520,32 +492,9 @@ static int pwm_byt_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops pwm_byt_pm = {
+const struct dev_pm_ops pwm_byt_pm = {
 	.suspend_late = pwm_byt_suspend,
 	.resume_early = pwm_byt_resume,
 	SET_RUNTIME_PM_OPS(pwm_byt_suspend, pwm_byt_resume, NULL)
 };
-
-static DEFINE_PCI_DEVICE_TABLE(pwm_byt_pci_ids) = {
-	{ PCI_VDEVICE(INTEL, 0x0F08), 25000},
-	{ PCI_VDEVICE(INTEL, 0x0F09), 25000},
-	{ 0,}
-};
-MODULE_DEVICE_TABLE(pci, pwm_byt_pci_ids);
-
-static struct pci_driver pwm_byt_driver = {
-	.name	= "pwm-byt-pci",
-	.id_table	= pwm_byt_pci_ids,
-	.probe	= pwm_byt_probe,
-	.remove	= pwm_byt_remove,
-	.driver = {
-		.pm = &pwm_byt_pm,
-	},
-};
-
-module_pci_driver(pwm_byt_driver);
-
-MODULE_ALIAS("pwm-byt-pci");
-MODULE_AUTHOR("Wang, Zhifeng<zhifeng.wang@intel.com>");
-MODULE_DESCRIPTION("Intel Baytrail PWM driver");
-MODULE_LICENSE("GPL");
+EXPORT_SYMBOL(pwm_byt_pm);

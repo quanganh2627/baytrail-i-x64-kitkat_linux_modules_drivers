@@ -211,6 +211,8 @@ static int psh_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	plt_priv->stepping = intel_mid_soc_stepping();
+	if (intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE)
+		plt_priv->stepping = 1;
 
 	if (plt_priv->stepping == 0) {
 		/* A stepping */

@@ -35,6 +35,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/lnw_gpio.h>
 #include <linux/input/intel_mid_vibra.h>
+#include <asm/intel-mid.h>
 #include <trace/events/power.h>
 #include "mid_vibra.h"
 
@@ -307,13 +308,16 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 	vibra_driver_read(adap, DRV2605_I2C_ADDR, DRV2605_MODE, &mode);
 	/* Is Device Ready?? */
 	if (!((mode >> DRV2605_STANDBY_BIT) & 0x1)) {
-
 		vibra_driver_read(adap, DRV2605_I2C_ADDR, DRV2605_STATUS, &status);
 		/* Is it Auto Calibrated?? */
 		if (!((status >> DRV2605_DIAG_RESULT_BIT) & 0x1)) {
-			pr_debug("Do Nothing -  Device Calibrated\n");
-			return 0;
+			if (!((INTEL_MID_BOARD(1, PHONE, MOFD)) ||
+					(INTEL_MID_BOARD(1, TABLET, MOFD)))) {
+				pr_debug("Do Nothing -  Device Calibrated\n");
+				return 0;
+			}
 		}
+			pr_debug("Re-calibrate the vibra for moorefield");
 	}
 
 	/*enable gpio first */
@@ -371,6 +375,8 @@ struct vibra_info *mid_vibra_setup(struct device *dev, struct mid_vibra_pdata *d
 	if (!strncmp(info->name, "drv8601", 8)) {
 		info->enable = vibra_drv8601_enable;
 	} else if (!strncmp(info->name, "drv2605", 8)) {
+		info->enable = vibra_drv2605_enable;
+	} else if (!strncmp(info->name, "drv2603", 8)) {
 		info->enable = vibra_drv2605_enable;
 	} else {
 		pr_err("%s: unsupported vibrator device", __func__);
@@ -473,6 +479,7 @@ static void intel_mid_vibra_remove(struct pci_dev *pci)
 static DEFINE_PCI_DEVICE_TABLE(intel_vibra_ids) = {
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_VIBRA_CLV), 0},
 	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_VIBRA_MRFLD), 0},
+	{ PCI_VDEVICE(INTEL, PCI_DEVICE_ID_INTEL_VIBRA_MOOR), 0},
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, intel_vibra_ids);

@@ -1041,7 +1041,7 @@ static int get_charger_type()
 
 static void handle_internal_usbphy_notifications(int mask)
 {
-	struct power_supply_cable_props cap;
+	struct power_supply_cable_props cap = {0};
 
 	if (mask) {
 		cap.chrg_evt = POWER_SUPPLY_CHARGER_EVENT_CONNECT;

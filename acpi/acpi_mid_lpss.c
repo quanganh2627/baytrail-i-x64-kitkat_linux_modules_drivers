@@ -21,6 +21,8 @@ ACPI_MODULE_NAME("acpi_mid_lpss");
 
 static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
 	/* Mid LPSS devices*/
+	/* BYT PWM */
+	{ "80860F09" },
 	/* BYT I2C */
 	{ "80860F41" },
 	/* BYT HSU */
@@ -36,6 +38,8 @@ static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
 	{ "80862286" },
 	/* CHT DMA2 */
 	{ "808622C0" },
+	/* PS STM8T143*/
+	{ "SRCL0001" },
 	{ }
 };
 

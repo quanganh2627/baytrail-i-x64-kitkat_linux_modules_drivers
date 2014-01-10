@@ -141,7 +141,8 @@ static struct block_device *get_bdev(void)
 static uint8_t calc_checksum(void *_buf, int size)
 {
 	int i;
-	uint8_t checksum = 0, *buf = (uint8_t *)_buf;
+	uint8_t checksum = 0;
+	uint8_t *buf = (uint8_t *)_buf;
 	for (i = 0; i < size; i++)
 		checksum = checksum ^ (buf[i]);
 	return checksum;
@@ -207,7 +208,7 @@ static int access_osip_record(osip_callback_t callback, void *cb_data)
 	lock_page(sect.v);
 	dirty = callback(osip, cb_data);
 	if (dirty) {
-		memcpy(buffer + OSIP_BACKUP_OFFSET, osip_backup,
+		memcpy(osip + OSIP_BACKUP_OFFSET, osip_backup,
 		       sizeof(struct OSIP_header));
 		osip->header_checksum = 0;
 		osip->header_checksum = calc_checksum(osip, osip->header_size);
@@ -237,7 +238,7 @@ bd_put:
 
 static int osip_invalidate(struct OSIP_header *osip, void *data)
 {
-	int id = (uintptr_t)data;
+	unsigned int id = (unsigned int)(uintptr_t)data;
 	osip->desc[id].ddr_load_address = 0;
 	osip->desc[id].entry_point = 0;
 	return 1;
@@ -245,7 +246,7 @@ static int osip_invalidate(struct OSIP_header *osip, void *data)
 
 static int osip_restore(struct OSIP_header *osip, void *data)
 {
-	int id = (uintptr_t)data;
+	unsigned int id = (unsigned int)(uintptr_t)data;
 	/* hardcoding addresses. According to the FAS, this is how
 	   the OS image blob has to be loaded, and where is the
 	   bootstub entry point.
@@ -281,19 +282,20 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 			/*
 			* PNW and CLVP depend on watchdog driver to
 			* send COLD OFF message to SCU.
-			* SCU watchdog is not available from TNG A0,
-			* so SCU FW provides a new IPC message to shut
+			* TNG and ANN use COLD_OFF IPC message to shut
 			* down the system.
 			*/
-			if (intel_mid_identify_cpu() ==
-			    INTEL_MID_CPU_CHIP_TANGIER) {
-				    pr_err("[SHTDWN] %s, executing COLD_OFF...\n",
-					    __func__);
-				    ret = rpmsg_send_generic_simple_command(
-					    RP_COLD_OFF, 0);
-				    if (ret)
-					    pr_err("%s(): COLD_OFF ipc failed\n",
-						    __func__);
+			if ((intel_mid_identify_cpu() ==
+					INTEL_MID_CPU_CHIP_TANGIER) ||
+					(intel_mid_identify_cpu() ==
+					INTEL_MID_CPU_CHIP_ANNIEDALE)) {
+				pr_err("[SHTDWN] %s, executing COLD_OFF...\n",
+								__func__);
+				ret = rpmsg_send_generic_simple_command(
+							RP_COLD_OFF, 0);
+				if (ret)
+					pr_err("%s(): COLD_OFF ipc failed\n",
+								__func__);
 			}
 		} else {
 			pr_warn("[SHTDWN] %s, invalid value\n", __func__);
@@ -384,7 +386,7 @@ struct cmdline_priv {
 	struct block_device *bdev;
 	int lba;
 	char *cmdline;
-	long osip_id;
+	unsigned int osip_id;
 	uint8_t attribute;
 };
 
@@ -401,14 +403,14 @@ int open_cmdline(struct inode *i, struct file *f)
 {
 	struct cmdline_priv *p;
 	int ret, j;
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kzalloc(sizeof(struct cmdline_priv), GFP_KERNEL);
 	if (!p) {
 		pr_err("%s: unable to allocate p!\n", __func__);
 		ret = -ENOMEM;
 		goto end;
 	}
 	if (i->i_private)
-		p->osip_id = (long) i->i_private;
+		p->osip_id = (unsigned int)(uintptr_t) i->i_private;
 	f->private_data = 0;
 	access_osip_record(osip_find_cmdline, (void *)p);
 	if (!p->lba) {
@@ -476,9 +478,13 @@ static ssize_t read_cmdline(struct file *file, char __user *buf,
 static ssize_t write_cmdline(struct file *file, const char __user *buf,
 			     size_t count, loff_t *ppos)
 {
-	struct cmdline_priv *p =
-		(struct cmdline_priv *)file->private_data;
 	int ret, i;
+	struct cmdline_priv *p;
+
+	if (!file)
+		return -ENODEV;
+
+	p = (struct cmdline_priv *)file->private_data;
 	if (!p)
 		return -ENODEV;
 	/* @todo detect if image is signed, and prevent write */

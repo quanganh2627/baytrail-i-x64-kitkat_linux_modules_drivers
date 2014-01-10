@@ -205,7 +205,7 @@ int intel_mid_ilb_read_osnib(struct cmos_osnib *osnib)
 	int i = 0;
 	u8 *b;
 
-	memset(osnib, 0, OSNIB_INTEL_SIZE);
+	memset(osnib, 0, sizeof(struct cmos_osnib));
 	b = (u8 *) osnib;
 	for (i = 0; i < OSNIB_INTEL_SIZE ; i++, b++)
 		*b = intel_mid_ilb_read_osnib_field(osnib, i);
@@ -266,7 +266,7 @@ void intel_mid_ilb_reset_osnib(struct cmos_osnib *osnib)
 
 	pr_err("Reset OSNIB content as checksum failed with value 0x%02x\n",
 			osnib_buffer.checksum);
-	memset(osnib, 0, OSNIB_INTEL_SIZE);
+	memset(osnib, 0, sizeof(struct cmos_osnib));
 	osnib->checksum = 0x1;
 	osnib->header.magic[0] = 'N';
 	osnib->header.magic[1] = 'I';

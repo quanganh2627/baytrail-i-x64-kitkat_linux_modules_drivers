@@ -560,6 +560,8 @@ static int psh_ipc_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err1;
 
 	ipc_ctrl.stepping = intel_mid_soc_stepping();
+	if (intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE)
+		ipc_ctrl.stepping = 1;
 
 	if (ipc_ctrl.stepping != 0x0 && ipc_ctrl.stepping != 0x1) {
 		ret = -EINVAL;
