@@ -184,7 +184,10 @@ EXPORT_SYMBOL(intel_scu_ipc_iowrite8);
 
 int intel_scu_ipc_update_register(u16 addr, u8 data, u8 mask)
 {
-	int ret;
+	int ret = -1;
+
+	if (!pmic->i2c)
+		goto err;
 
 	mutex_lock(&pmic->io_lock);
 
@@ -242,22 +245,26 @@ EXPORT_SYMBOL(intel_scu_ipc_writev);
 
 int intel_mid_pmic_readb(int reg)
 {
-	int ret;
+	int ret = -1;
 
-	mutex_lock(&pmic->io_lock);
-	ret = i2c_smbus_read_byte_data(pmic->i2c, reg);
-	mutex_unlock(&pmic->io_lock);
+	if (pmic->i2c) {
+		mutex_lock(&pmic->io_lock);
+		ret = i2c_smbus_read_byte_data(pmic->i2c, reg);
+		mutex_unlock(&pmic->io_lock);
+	}
 	return ret;
 }
 EXPORT_SYMBOL(intel_mid_pmic_readb);
 
 int intel_mid_pmic_writeb(int reg, u8 val)
 {
-	int ret;
+	int ret = -1;
 
-	mutex_lock(&pmic->io_lock);
-	ret = i2c_smbus_write_byte_data(pmic->i2c, reg, val);
-	mutex_unlock(&pmic->io_lock);
+	if (pmic->i2c) {
+		mutex_lock(&pmic->io_lock);
+		ret = i2c_smbus_write_byte_data(pmic->i2c, reg, val);
+		mutex_unlock(&pmic->io_lock);
+	}
 	return ret;
 }
 EXPORT_SYMBOL(intel_mid_pmic_writeb);
@@ -267,26 +274,32 @@ int intel_mid_pmic_setb(int reg, u8 mask)
 	int ret;
 	int val;
 
-	mutex_lock(&pmic->io_lock);
-	val = i2c_smbus_read_byte_data(pmic->i2c, reg);
-	val |= mask;
-	ret = i2c_smbus_write_byte_data(pmic->i2c, reg, val);
-	mutex_unlock(&pmic->io_lock);
+	if (pmic->i2c) {
+		mutex_lock(&pmic->io_lock);
+		val = i2c_smbus_read_byte_data(pmic->i2c, reg);
+		val |= mask;
+		ret = i2c_smbus_write_byte_data(pmic->i2c, reg, val);
+		mutex_unlock(&pmic->io_lock);
+	}
 	return ret;
 }
+EXPORT_SYMBOL(intel_mid_pmic_setb);
 
 int intel_mid_pmic_clearb(int reg, u8 mask)
 {
 	int ret;
 	int val;
 
-	mutex_lock(&pmic->io_lock);
-	val = i2c_smbus_read_byte_data(pmic->i2c, reg);
-	val &= ~mask;
-	ret = i2c_smbus_write_byte_data(pmic->i2c, reg, val);
-	mutex_unlock(&pmic->io_lock);
+	if (pmic->i2c) {
+		mutex_lock(&pmic->io_lock);
+		val = i2c_smbus_read_byte_data(pmic->i2c, reg);
+		val &= ~mask;
+		ret = i2c_smbus_write_byte_data(pmic->i2c, reg, val);
+		mutex_unlock(&pmic->io_lock);
+	}
 	return ret;
 }
+EXPORT_SYMBOL(intel_mid_pmic_clearb);
 
 static void pmic_irq_enable(struct irq_data *data)
 {
