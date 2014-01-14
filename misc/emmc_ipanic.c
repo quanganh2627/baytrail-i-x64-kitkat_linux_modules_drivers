@@ -915,14 +915,15 @@ static void emmc_ipanic_write_gbuffer(struct mmc_emergency_info *emmc,
 				    int log)
 {
 	struct g_buffer_header *m_gbuffer = &gbuffer;
-	pr_info("write gbuffer data\n");
 
+	log_offset[log] = log_offset[log - 1] + log_len[log - 1];
+
+	pr_info("write gbuffer data\n");
 	if (!m_gbuffer->base) {
 		pr_err("Ipanic error, no gbuffer data\n");
 		return;
 	}
 
-	log_offset[log] = log_offset[log - 1] + log_len[log - 1];
 	log_len[log] = emmc_ipanic_write_gbuffer_data(emmc, m_gbuffer,
 						    log_offset[log],
 						    &log_size[log]);
