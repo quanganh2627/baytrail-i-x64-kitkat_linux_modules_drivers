@@ -40,6 +40,7 @@ struct intel_mid_pmic {
 	int 				irq_num;
 	int 				irq_base;
 	unsigned long	 		irq_mask[INTEL_PMIC_IRQ_MAX/32];
+	int				pmic_int_gpio;
 	int (*init)(void);
 	int (*readb)(int);
 	int (*writeb)(int, u8);

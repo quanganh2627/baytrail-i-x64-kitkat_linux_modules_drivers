@@ -22,6 +22,7 @@
 #include <linux/mfd/intel_mid_pmic.h>
 #include <linux/version.h>
 #include "./pmic.h"
+#include <linux/acpi_gpio.h>
 
 static struct i2c_client *pmic_i2c_client;
 static struct intel_mid_pmic *pmic_i2c;
@@ -68,6 +69,7 @@ static int pmic_i2c_probe(struct i2c_client *i2c,
 	pmic_i2c_client	= i2c;
 	pmic_i2c->dev	= &i2c->dev;
 	pmic_i2c->irq	= i2c->irq;
+	pmic_i2c->pmic_int_gpio = acpi_get_gpio_by_index(pmic_i2c->dev, 0, NULL);
 	pmic_i2c->readb	= pmic_i2c_readb;
 	pmic_i2c->writeb= pmic_i2c_writeb;
 	return intel_pmic_add(pmic_i2c);

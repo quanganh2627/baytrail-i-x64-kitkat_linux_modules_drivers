@@ -25,6 +25,7 @@
 #include <asm/intel_vlv2.h>
 #include <linux/version.h>
 #include "./pmic.h"
+#include <linux/gpio.h>
 
 enum pmic_chip_type {CCOVE, DCOVE};
 
@@ -420,11 +421,25 @@ static int pmic_irq_init(void)
 		irq_set_nested_thread(cur_irq, 1);
 		irq_set_noprobe(cur_irq);
 	}
+
+	if (gpio_is_valid(pmic->pmic_int_gpio)) {
+		ret = gpio_request_one(pmic->pmic_int_gpio,
+					GPIOF_DIR_IN, "PMIC Interupt");
+		if (ret) {
+			dev_err(pmic->dev, "Request PMIC_INT gpio error\n");
+			return ret;
+		}
+
+		pmic->irq = gpio_to_irq(pmic->pmic_int_gpio);
+	}
+
 	ret = request_threaded_irq(pmic->irq, pmic_irq_isr, pmic_irq_thread,
 			pmic->irq_flags, "intel_mid_pmic", pmic);
 	if (ret != 0) {
 		dev_err(pmic->dev, "Failed to request IRQ %d: %d\n",
 				pmic->irq, ret);
+		if (gpio_is_valid(pmic->pmic_int_gpio))
+			gpio_free(pmic->pmic_int_gpio);
 		return ret;
 	}
 	ret = enable_irq_wake(pmic->irq);
