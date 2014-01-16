@@ -330,7 +330,6 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 	if (ACPI_HANDLE(&pdev->dev)) {
 		/* create a new platform data that will be
 		   populated with gpio data from ACPI table */
-		struct acpi_gpio_info info;
 		unsigned long long port;
 		pdata = kzalloc(sizeof(struct intel_mid_gps_platform_data),
 			GFP_KERNEL);
@@ -338,30 +337,12 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 		if (!pdata)
 			return -ENOMEM;
 
-		if (!strncmp(dev_name(&pdev->dev),
-				ACPI_DEVICE_ID_BCM4752,
-				strlen(ACPI_DEVICE_ID_BCM4752))) {
-			pdata->has_reset = 0;  /* Unavailable */
-			pdata->has_enable = 1; /* Available */
-		}
+		pdata->gpio_reset = acpi_get_gpio_by_name(&pdev->dev,"RSET", NULL);
+		pdata->gpio_enable = acpi_get_gpio_by_name(&pdev->dev,"ENAB", NULL);
+		pdata->gpio_hostwake = acpi_get_gpio_by_name(&pdev->dev,"HSTW", NULL);
 
-		/* Check below if EDK Bios (EFI RS enabled) or FDK Ifwi
-		 as we have to maintain both ACPI tables for now */
-		if (efi_enabled(EFI_RUNTIME_SERVICES))
-			pdata->gpio_enable = pdata->has_enable ?
-				acpi_get_gpio_by_index(&pdev->dev, 0, &info)
-				: -EINVAL;
-		else {
-			pdata->gpio_reset = pdata->has_reset ?
-				acpi_get_gpio_by_index(&pdev->dev, 0, &info)
-				: -EINVAL;
-			pdata->gpio_enable = pdata->has_enable ?
-				acpi_get_gpio_by_index(&pdev->dev, 1, &info)
-				: -EINVAL;
-		}
-		pdata->gpio_hostwake = -EINVAL;
-
-		pr_info("%s enable: %d, reset: %d\n", __func__, pdata->gpio_enable, pdata->gpio_reset);
+		pr_info("%s enable: %d, reset: %d, hostwake: %d\n", __func__,
+			pdata->gpio_enable, pdata->gpio_reset, pdata->gpio_hostwake);
 
 		if (ACPI_FAILURE(acpi_evaluate_integer((acpi_handle)ACPI_HANDLE(&pdev->dev),
 						       "UART", NULL, &port)))
