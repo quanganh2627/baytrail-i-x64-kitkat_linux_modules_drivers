@@ -141,6 +141,7 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 	case CPU_TANGIER:
 	case CPU_VVIEW2:
 	case CPU_ANNIEDALE:
+	case CPU_CHERRYVIEW:
 		drv->pdata->cpu.init = cpu_init_gpio;
 		drv->pdata->cpu.cleanup = cpu_cleanup_gpio;
 		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state;
@@ -160,6 +161,7 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 	case PMIC_MRFL:
 	case PMIC_BYT:
 	case PMIC_MOOR:
+	case PMIC_CHT:
 		drv->pdata->pmic.init = pmic_io_init;
 		drv->pdata->pmic.power_on_mdm = pmic_io_power_on_mdm;
 		drv->pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
@@ -184,7 +186,7 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 
 /**
  *  mdm_ctrl_set_state -  Effectively sets the modem state on work execution
- *  @work: Reference to the work structure
+ *  @state : New state to set
  *
  */
 inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
@@ -198,10 +200,14 @@ inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
 		/* Waking up the poll work queue */
 		wake_up(&drv->wait_wq);
 		pr_info(DRVNAME ": Waking up polling 0x%x\r\n", state);
+#ifdef CONFIG_HAS_WAKELOCK
+		/* Grab the wakelock for 10 ms to avoid
+		   the system going to sleep */
+		if (drv->opened)
+			wake_lock_timeout(&drv->stay_awake, msecs_to_jiffies(10));
+#endif
 
 	}
-	/* Waking up the wait_for_state work queue */
-	wake_up(&drv->event);
 }
 
 /**

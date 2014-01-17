@@ -868,6 +868,8 @@ static void dlp_tty_close(struct tty_struct *tty, struct file *filp)
 		dlp_hsi_port_unclaim();
 	}
 
+	dlp_ctrl_clean_stored_cmd();
+
 	pr_debug(DRVNAME ": TTY device close done\n");
 }
 
