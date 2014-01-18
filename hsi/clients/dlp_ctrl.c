@@ -425,6 +425,7 @@ static void dlp_ctrl_complete_rx(struct hsi_msg *msg)
 {
 	struct dlp_channel *ch_ctx;
 	struct dlp_ctrl_context *ctrl_ctx;
+	struct dlp_command *dlp_cmd = msg->context;
 	struct dlp_command_params params, tx_params;
 	unsigned long flags;
 	int hsi_channel, elp_channel, ret, response, msg_complete, state;
@@ -439,6 +440,9 @@ static void dlp_ctrl_complete_rx(struct hsi_msg *msg)
 				dlp_drv.tty_closed, dlp_drv.tx_timeout);
 		/* Delete the received msg */
 		dlp_pdu_free(msg, msg->channel);
+
+		/* Delete the command */
+		dlp_ctrl_cmd_free(dlp_cmd);
 		return;
 	}
 
@@ -563,6 +567,9 @@ push_rx:
 
 		/* Delete the received msg */
 		dlp_pdu_free(msg, msg->channel);
+
+		/* Delete the command */
+		dlp_ctrl_cmd_free(dlp_cmd);
 	}
 }
 
