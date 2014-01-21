@@ -180,6 +180,24 @@ static int bcm43xx_bt_rfkill_set_power(void *data, bool blocked)
 	return 0;
 }
 
+#ifdef CONFIG_ENABLE_S3
+static void bcm43xx_bt_rfkill_suspend(void)
+{
+	pr_debug("%s: BT suspend \n", __func__);
+	gpio_set_value(bt_lpm.gpio_enable_bt, 0);
+	usleep_range(10, 50);
+}
+
+
+static void bcm43xx_bt_rfkill_resume(void)
+{
+	pr_debug("%s: BT resume\n", __func__);
+	gpio_set_value(bt_lpm.gpio_wake, 1);
+	usleep_range(10, 50);
+	gpio_set_value(bt_lpm.gpio_enable_bt, 1);
+}
+#endif
+
 static const struct rfkill_ops bcm43xx_bt_rfkill_ops = {
 	.set_block = bcm43xx_bt_rfkill_set_power,
 };
@@ -529,14 +547,21 @@ static int bcm43xx_bluetooth_remove(struct platform_device *pdev)
 #ifdef LPM_ON
 int bcm43xx_bluetooth_suspend(struct platform_device *pdev, pm_message_t state)
 {
+#ifndef CONFIG_ENABLE_S3
 	int host_wake;
+#endif
 
 	pr_debug("%s\n", __func__);
 
 	if (!bt_enabled)
 		return 0;
 
+#ifdef CONFIG_ENABLE_S3
+	bcm_bt_lpm_wake_peer(bt_lpm.tty_dev);
+	bcm43xx_bt_rfkill_suspend();
+#endif
 	disable_irq(bt_lpm.int_host_wake);
+#ifndef CONFIG_ENABLE_S3
 	host_wake = gpio_get_value(bt_lpm.gpio_host_wake);
 	if (host_wake) {
 		enable_irq(bt_lpm.int_host_wake);
@@ -544,7 +569,7 @@ int bcm43xx_bluetooth_suspend(struct platform_device *pdev, pm_message_t state)
 							bt_lpm.gpio_host_wake);
 		return -EBUSY;
 	}
-
+#endif
 	return 0;
 }
 
@@ -552,8 +577,13 @@ int bcm43xx_bluetooth_resume(struct platform_device *pdev)
 {
 	pr_debug("%s\n", __func__);
 
-	if (bt_enabled)
+	if (bt_enabled){
 		enable_irq(bt_lpm.int_host_wake);
+#ifdef CONFIG_ENABLE_S3
+		bcm43xx_bt_rfkill_resume();
+		bcm_bt_lpm_wake_peer(bt_lpm.tty_dev);
+#endif
+	}
 	return 0;
 }
 #endif
