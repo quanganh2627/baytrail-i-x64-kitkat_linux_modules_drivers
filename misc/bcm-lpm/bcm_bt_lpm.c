@@ -31,12 +31,11 @@
 #include <linux/delay.h>
 #include <asm/intel-mid.h>
 #include <asm/intel_mid_hsu.h>
-
-#ifndef CONFIG_ACPI
 #include <asm/bcm_bt_lpm.h>
-#else
+#ifdef CONFIG_ACPI
 #include <linux/acpi.h>
 #include <linux/acpi_gpio.h>
+#define ACPI_BTH0 "\\_SB_.URT1.BTH0"
 
 enum {
 	gpio_wake_acpi_idx,
@@ -392,9 +391,16 @@ static int bcm43xx_bluetooth_probe(struct platform_device *pdev)
 	bool default_state = true;	/* off */
 	int ret = 0;
 
+#ifdef CONFIG_ACPI
+	acpi_string acpi_name = ACPI_BTH0;
+	acpi_handle handle;
+#endif
 	int_handler_enabled = false;
 
 #ifdef CONFIG_ACPI
+
+	acpi_get_handle(NULL,acpi_name,&handle);
+	pdev->dev.acpi_node.handle = handle;
 	if (ACPI_HANDLE(&pdev->dev)) {
 		/*
 		 * acpi specific probe
@@ -574,9 +580,6 @@ static struct platform_driver bcm43xx_bluetooth_platform_driver = {
 	.driver = {
 		   .name = "bcm_bt_lpm",
 		   .owner = THIS_MODULE,
-#ifdef CONFIG_ACPI
-		.acpi_match_table = ACPI_PTR(bcm_id_table),
-#endif
 		   },
 };
 
