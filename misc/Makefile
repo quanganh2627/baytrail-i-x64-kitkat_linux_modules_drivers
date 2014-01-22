@@ -15,3 +15,4 @@ obj-$(CONFIG_INTEL_IQVANDROID)  += iqvandroid/
 obj-$(CONFIG_RAWIO)             += rawio/
 obj-$(CONFIG_KCT_DAEMON)	+= kct_daemon.o
 obj-y				+= tp2e/
+obj-$(CONFIG_FPS_THROTTLE)	+= fps_throttle.o
