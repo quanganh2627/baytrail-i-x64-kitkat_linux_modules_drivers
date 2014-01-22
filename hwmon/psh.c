@@ -138,6 +138,7 @@ int do_setup_ddr(struct device *dev)
 
 #ifdef VPROG2_SENSOR
 	intel_scu_ipc_msic_vprog2(1);
+	msleep(500);
 #endif
 	if (!request_firmware(&fw_entry, "psh.bin", dev)) {
 		if (!fw_entry)
