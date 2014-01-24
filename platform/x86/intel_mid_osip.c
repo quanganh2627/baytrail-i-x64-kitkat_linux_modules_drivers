@@ -208,7 +208,7 @@ static int access_osip_record(osip_callback_t callback, void *cb_data)
 	lock_page(sect.v);
 	dirty = callback(osip, cb_data);
 	if (dirty) {
-		memcpy(buffer + OSIP_BACKUP_OFFSET, osip_backup,
+		memcpy(osip + OSIP_BACKUP_OFFSET, osip_backup,
 		       sizeof(struct OSIP_header));
 		osip->header_checksum = 0;
 		osip->header_checksum = calc_checksum(osip, osip->header_size);
