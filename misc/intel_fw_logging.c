@@ -994,10 +994,7 @@ static int parse_fab_err_log(
 		*parsed_fab_err_log, *parsed_fab_err_log_sz,
 		"\n\n");
 
-	if (error_typ != ERR_FABRIC_ERR)
-		offset = MAX_NUM_ALL_LOGDWORDS;
-
-	for (i = 0; i < offset; i++)
+	for (i = 0; i < MAX_NUM_ALL_LOGDWORDS; i++)
 		fab_err_snprintf(
 			*parsed_fab_err_log, *parsed_fab_err_log_sz,
 			"DW%d:0x%08x\n",

@@ -1079,7 +1079,7 @@ int pmic_handle_low_supply(void)
 		return 0;
 	}
 
-	msleep(50);
+	msleep(200);
 	ret = pmic_read_reg(SCHGRIRQ1_ADDR, &val);
 	if (ret) {
 		dev_err(chc.dev,

@@ -1758,6 +1758,7 @@ void rmi4_resume(struct rmi4_data *pdata)
 {
 	int retval;
 	struct i2c_client *client = pdata->i2c_client;
+	int try = 0;
 	u8 intr_status[4];
 
 	dev_info(&client->dev, "Enter %s", __func__);
@@ -1770,10 +1771,17 @@ void rmi4_resume(struct rmi4_data *pdata)
 			msleep(50);
 	}
 	enable_irq(pdata->irq);
+retry:
 	retval = rmi4_i2c_clear_bits(pdata,
 			pdata->fn01_ctrl_base_addr, F01_CTRL0_SLEEP);
-	if (retval < 0)
-		dev_err(&client->dev, "clear F01_CTRL0_SLEEP failed\n");
+	if (retval < 0) {
+		dev_err(&client->dev,
+				"clear F01_CTRL0_SLEEP failed, try=%d\n", try);
+		if (++try < MAX_RETRY_COUNT) {
+			msleep(10);
+			goto retry;
+		}
+	}
 
 	/* Clear interrupts */
 	rmi4_i2c_block_read(pdata,

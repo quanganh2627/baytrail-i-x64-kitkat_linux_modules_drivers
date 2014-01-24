@@ -130,3 +130,17 @@ int mcd_mdm_cleanup(void *data)
 {
 	return 0;
 }
+
+/**
+ *  mcd_mdm_cold_boot_m2 - Perform a M2 modem cold boot sequence
+ *  @drv: Reference to the driver structure
+ *
+ *  - Set to HIGH the RESET_BB_N
+ */
+int mcd_mdm_cold_boot_m2(void *data, int rst, int pwr_on)
+{
+	/* Toggle the RESET_BB_N */
+	gpio_set_value(rst, 1);
+
+	return 0;
+}

@@ -25,7 +25,14 @@ config EMMC_IPANIC
 	default n
 	---help---
 	  Driver which handles kernel panics and attempts to write
-	  critical debugging data to EMMC.
+	  critical debugging data to a dedicated partition on EMMC.
+
+config EMMC_IPANIC_PLABEL
+	string "Intel kernel panic driver (EMMC_IPANIC) partition label"
+	depends on EMMC_IPANIC
+	default "panic"
+	---help---
+	  Set the default mmc partition label for EMMC_IPANIC driver.
 
 config SENSORS_APDS990X_FORK
 	 tristate "APDS990X combined als and proximity sensors"

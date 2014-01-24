@@ -35,6 +35,7 @@
 #else
 #include <asm/intel_mid_remoteproc.h>
 #endif
+#include <linux/delay.h>
 #include <asm/intel_scu_ipcutil.h>
 #include <asm/intel_mid_rpmsg.h>
 #include <asm/intel-mid.h>
@@ -208,7 +209,7 @@ static int access_osip_record(osip_callback_t callback, void *cb_data)
 	lock_page(sect.v);
 	dirty = callback(osip, cb_data);
 	if (dirty) {
-		memcpy(osip + OSIP_BACKUP_OFFSET, osip_backup,
+		memcpy(buffer + OSIP_BACKUP_OFFSET, osip_backup,
 		       sizeof(struct OSIP_header));
 		osip->header_checksum = 0;
 		osip->header_checksum = calc_checksum(osip, osip->header_size);
@@ -257,6 +258,12 @@ static int osip_restore(struct OSIP_header *osip, void *data)
 
 }
 
+/* Cold off sequence is initiated 4 sec after power button long press starts.    */
+/* In case of force shutdown, we delay cold off IPC sending by 5 seconds to make */
+/* sure PMIC fault timer has a chance to elapsed after power button is held      */
+/* down for 8 seconds */
+#define FORCE_SHUTDOWN_DELAY_IN_MSEC 5000
+
 static int osip_reboot_notifier_call(struct notifier_block *notifier,
 				     unsigned long what, void *data)
 {
@@ -273,9 +280,11 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 		if (what == SYS_HALT || what == SYS_POWER_OFF) {
 			pr_info("%s(): sys power off ...\n", __func__);
 
-			if (get_force_shutdown_occured())
-				pr_warn("[SHTDWN] %s: Force shutdown occured\n",
+			if (get_force_shutdown_occured()) {
+				pr_warn("[SHTDWN] %s: Force shutdown occured, delaying ...\n",
 					__func__);
+				mdelay(FORCE_SHUTDOWN_DELAY_IN_MSEC);
+			}
 			else
 				pr_warn("[SHTDWN] %s, Not in force shutdown\n",
 					__func__);
