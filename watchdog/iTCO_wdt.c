@@ -186,17 +186,6 @@ module_param(turn_SMI_watchdog_clear_off, int, 0);
 MODULE_PARM_DESC(turn_SMI_watchdog_clear_off,
 	"Turn off SMI clearing watchdog (depends on TCO-version)(default=1)");
 
-/*
- * Some TCO specific functions
- */
-
-static inline unsigned int seconds_to_ticks(int seconds)
-{
-	/* the internal timer is stored as ticks which decrement
-	 * every 0.6 seconds */
-	return max(((seconds * 10) / 6),2);
-}
-
 static void iTCO_wdt_set_NO_REBOOT_bit(void)
 {
 	u32 val32;
@@ -301,26 +290,23 @@ static int iTCO_wdt_keepalive(void)
 static int iTCO_wdt_set_heartbeat(int t)
 {
 	unsigned int val16;
-	unsigned int tmrval;
-
-	tmrval = seconds_to_ticks(t);
 
 	/* For TCO v1 the timer counts down twice before rebooting */
 	/* from the specs: */
 	/* "Values of 0h-1h are ignored and should not be attempted" */
-	if (tmrval < 0x02)
+	if (t < 0x02)
 		return -EINVAL;
 
 	/* Write new heartbeat to watchdog */
 	spin_lock(&iTCO_wdt_private.io_lock);
 	val16 = inw(TCOv2_TMR);
 	val16 &= 0xfc00;
-	val16 |= tmrval;
+	val16 |= t;
 	outw(val16, TCOv2_TMR);
 	val16 = inw(TCOv2_TMR);
 	spin_unlock(&iTCO_wdt_private.io_lock);
 
-	if ((val16 & 0x3ff) != tmrval)
+	if ((val16 & 0x3ff) != t)
 		return -EINVAL;
 	heartbeat = t;
 	return 0;
@@ -347,7 +333,7 @@ static int iTCO_wdt_get_timeleft(int *time_left)
 	val16 &= 0x3ff;
 	spin_unlock(&iTCO_wdt_private.io_lock);
 
-	*time_left = (val16 * 6) / 10;
+	*time_left = val16;
 
 	return 0;
 }
