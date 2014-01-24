@@ -153,6 +153,9 @@ static struct {		/* this is private data for the iTCO_wdt device */
 	spinlock_t io_lock;
 	/* the PCI-device */
 	struct pci_dev *pdev;
+#ifdef CONFIG_DEBUG_FS
+	bool panic_reboot_notifier;
+#endif
 } iTCO_wdt_private;
 
 /* the watchdog platform device */
@@ -653,6 +656,12 @@ static int TCO_reboot_notifier(struct notifier_block *this,
 
 	iTCO_wdt_last_kick(5);
 
+#ifdef CONFIG_DEBUG_FS
+	if (iTCO_wdt_private.panic_reboot_notifier) {
+		BUG();
+	}
+#endif
+
 	return NOTIFY_DONE;
 }
 
@@ -868,6 +877,8 @@ static int iTCO_wdt_probe(struct platform_device *dev)
 					iTCO_debugfs_dir, NULL, &iTCO_wdt_reset_type_fops);
 			debugfs_create_file("trigger", S_IRUSR,
 					iTCO_debugfs_dir, NULL, &iTCO_wdt_trigger_fops);
+			debugfs_create_bool("panic_reboot_notifier", S_IRUSR,
+					    iTCO_debugfs_dir, &iTCO_wdt_private.panic_reboot_notifier);
 #endif /* CONFIG_DEBUG_FS */
 			if (!ret)
 				break;
