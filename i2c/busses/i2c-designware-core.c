@@ -393,7 +393,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.enable_stop = 1,
 		.scl_cfg = merr_i2c_scl_cfg,
 	},
-	[valleyview_1] = {
+	[valleyview_0] = {
 		.bus_num     = 1,
 		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
 		.tx_fifo_depth = 64,
@@ -404,7 +404,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.share_irq = 1,
 		.acpi_name = "\\_SB.I2C1"
 	},
-	[valleyview_2] = {
+	[valleyview_1] = {
 		.bus_num     = 2,
 		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
 		.tx_fifo_depth = 64,
@@ -415,7 +415,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.share_irq = 1,
 		.acpi_name = "\\_SB.I2C2"
 	},
-	[valleyview_3] = {
+	[valleyview_2] = {
 		.bus_num     = 3,
 		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
 		.tx_fifo_depth = 64,
@@ -426,7 +426,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.share_irq = 1,
 		.acpi_name = "\\_SB.I2C3"
 	},
-	[valleyview_4] = {
+	[valleyview_3] = {
 		.bus_num     = 4,
 		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
 		.tx_fifo_depth = 64,
@@ -437,7 +437,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.share_irq = 1,
 		.acpi_name = "\\_SB.I2C4"
 	},
-	[valleyview_5] = {
+	[valleyview_4] = {
 		.bus_num     = 5,
 		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
 		.tx_fifo_depth = 64,
@@ -448,7 +448,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.share_irq = 1,
 		.acpi_name = "\\_SB.I2C5"
 	},
-	[valleyview_6] = {
+	[valleyview_5] = {
 		.bus_num     = 6,
 		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
 		.tx_fifo_depth = 64,
@@ -459,7 +459,7 @@ static struct  dw_controller  dw_controllers[] = {
 		.share_irq = 1,
 		.acpi_name = "\\_SB.I2C6"
 	},
-	[valleyview_7] = {
+	[valleyview_6] = {
 		.bus_num     = 7,
 		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
 		.tx_fifo_depth = 64,
@@ -509,6 +509,7 @@ static u32 i2c_dw_get_clk_rate_khz(struct dw_i2c_dev *dev)
 	return dev->controller->clk_khz;
 }
 
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
 static ssize_t show_bus_num(struct device *dev, struct device_attribute *attr,
 							char *buf)
 {
@@ -608,6 +609,7 @@ static struct attribute_group i2c_dw_attr_group = {
 	.name = "i2c_dw_sysnode",
 	.attrs = i2c_dw_attrs,
 };
+#endif
 
 static ssize_t store_lock_xfer(struct device *dev,
 			  struct device_attribute *attr,
@@ -727,13 +729,14 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 		goto err_free_irq;
 	}
 
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
 	r = sysfs_create_group(&pdev->kobj, &i2c_dw_attr_group);
 	if (r) {
 		dev_err(pdev,
 			"Unable to export sysfs interface, error: %d\n", r);
 		goto err_del_adap;
 	}
-
+#endif
 	r = device_create_file(&adap->dev, &dev_attr_lock_xfer);
 	if (r < 0)
 		dev_err(&adap->dev,
@@ -741,8 +744,10 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 
 	return dev;
 
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
 err_del_adap:
 	i2c_del_adapter(&dev->adapter);
+#endif
 err_free_irq:
 	free_irq(irq, dev);
 err_kfree:
@@ -858,7 +863,9 @@ void i2c_dw_free(struct device *pdev, struct dw_i2c_dev *dev)
 	i2c_dw_disable(dev);
 
 	device_remove_file(&adap->dev, &dev_attr_lock_xfer);
+#ifdef CONFIG_I2C_DW_SPEED_MODE_DEBUG
 	sysfs_remove_group(&pdev->kobj, &i2c_dw_attr_group);
+#endif
 
 	i2c_del_adapter(&dev->adapter);
 	put_device(pdev);

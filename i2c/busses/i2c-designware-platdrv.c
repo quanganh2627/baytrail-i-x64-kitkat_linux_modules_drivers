@@ -110,23 +110,14 @@ static int __init dw_i2c_probe(struct platform_device *pdev)
 	const struct acpi_device_id *id;
 	unsigned long start, len;
 	int bus_idx = 0;
+	static int bus_num;
 	int irq;
 
 #ifdef CONFIG_ACPI
-	acpi_handle handle;
-	struct acpi_device *acpi_dev;
-	int bus_num;
-
-	handle = ACPI_HANDLE(&pdev->dev);
-	if (acpi_bus_get_device(handle, &acpi_dev))
-		return -ENODEV;
-
-	if (kstrtoint(acpi_dev->pnp.unique_id, 10, &bus_num))
-		return -EINVAL;
-
 	for (id = dw_i2c_acpi_ids; id->id[0]; id++)
 		if (!strncmp(id->id, dev_name(&pdev->dev), strlen(id->id))) {
 			bus_idx = id->driver_data + bus_num;
+			bus_num++;
 		}
 #else
 	bus_idx = pdev->id;
