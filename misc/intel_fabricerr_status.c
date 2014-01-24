@@ -955,6 +955,7 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 				FullChip_FlagStatusHi32_clv[error_index] :
 				FullChip_FlagStatusLow32_clv[error_index];
 		case INTEL_MID_CPU_CHIP_TANGIER:
+		case INTEL_MID_CPU_CHIP_ANNIEDALE:
 			return use_hidword ?
 				FullChip_FlagStatusHi32_tng[error_index] :
 				FullChip_FlagStatusLow32_tng[error_index];
@@ -970,6 +971,7 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 				Secondary_FlagStatusHi32[error_index] :
 				Secondary_FlagStatusLow32[error_index];
 		case INTEL_MID_CPU_CHIP_TANGIER:
+		case INTEL_MID_CPU_CHIP_ANNIEDALE:
 			return use_hidword ?
 				Secondary_FlagStatusHi32_tng[error_index] :
 				Secondary_FlagStatusLow32_tng[error_index];
@@ -988,6 +990,7 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 				Audio_FlagStatusHi32_clv[error_index] :
 				Audio_FlagStatusLow32[error_index];
 		case INTEL_MID_CPU_CHIP_TANGIER:
+		case INTEL_MID_CPU_CHIP_ANNIEDALE:
 			return use_hidword ?
 				Audio_FlagStatusHi32_tng[error_index] :
 				Audio_FlagStatusLow32_tng[error_index];
@@ -1003,6 +1006,7 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 				GP_FlagStatusHi32[error_index] :
 				GP_FlagStatusLow32[error_index];
 		case INTEL_MID_CPU_CHIP_TANGIER:
+		case INTEL_MID_CPU_CHIP_ANNIEDALE:
 			return use_hidword ?
 				GP_FlagStatusHi32_tng[error_index] :
 				GP_FlagStatusLow32_tng[error_index];
@@ -1021,6 +1025,7 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 				SC_FlagStatusHi32_clv[error_index] :
 				SC_FlagStatusLow32_clv[error_index];
 		case INTEL_MID_CPU_CHIP_TANGIER:
+		case INTEL_MID_CPU_CHIP_ANNIEDALE:
 			return use_hidword ?
 				SC_FlagStatusHi32_tng[error_index] :
 				SC_FlagStatusLow32_tng[error_index];
@@ -1031,6 +1036,7 @@ char *fabric_error_lookup(u32 fab_id, u32 error_index, int use_hidword)
 	case FAB_ID_SC1:
 		switch (intel_mid_identify_cpu()) {
 		case INTEL_MID_CPU_CHIP_TANGIER:
+		case INTEL_MID_CPU_CHIP_ANNIEDALE:
 			return use_hidword ?
 				NULL :
 				SC_FlagStatus1Low32_tng[error_index];

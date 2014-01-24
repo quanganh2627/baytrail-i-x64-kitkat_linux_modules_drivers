@@ -310,11 +310,14 @@ static void dlp_net_send_pdu(struct dlp_xfer_ctx *xfer_ctx,
 		/* Check no write is on going */
 		for (i = 0; i < pdu_data->packet_count; i++) {
 			if (pdu_data->packet_status[i]
-				!= EDLP_PACKET_COPIED)
-				break;
+				!= EDLP_PACKET_COPIED) {
+					spin_unlock_irqrestore(&ch_ctx->lock, flags);
+					return;
+			}
 		}
 
-		if ((i > 0) && (i == pdu_data->packet_count))
+		if ((i > 0) && (i == pdu_data->packet_count)
+				&& (pdu->status == HSI_STATUS_PENDING))
 			pdu->status = HSI_STATUS_COMPLETED;
 	}
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);

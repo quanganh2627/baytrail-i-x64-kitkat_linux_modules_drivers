@@ -87,7 +87,6 @@ static int byt_pwm_wait_update_complete(struct byt_pwm_chip *byt_pwm)
 		pr_err("PWM update failed, update bit is not cleared!");
 		return -EBUSY;
 	} else {
-		pr_info("PWM update succeeded with retry = %d \n", retry);
 		return 0;
 	}
 }
@@ -439,7 +438,7 @@ err_remove_chip:
 	pwmchip_remove(&byt_pwm->chip);
 err_kfree:
 	devm_kfree(dev, byt_pwm);
-	dev_info(dev, "PWM device probe failed!\n");
+	dev_err(dev, "PWM device probe failed!\n");
 	return r;
 }
 EXPORT_SYMBOL(pwm_byt_init);
@@ -469,7 +468,6 @@ static int pwm_byt_suspend(struct device *dev)
 	}
 
 	val = ioread32(PWMCR(byt_pwm));
-	dev_info(dev, "PWM suspend called! ctl_reg = %x\n", val);
 	r = (val & PWMCR_EN) ? -EAGAIN : 0;
 
 	mutex_unlock(&byt_pwm->lock);
@@ -480,7 +478,6 @@ static int pwm_byt_resume(struct device *dev)
 {
 	struct byt_pwm_chip *byt_pwm = dev_get_drvdata(dev);
 
-	dev_info(dev, "PWM resume called!\n");
 	if (!mutex_trylock(&byt_pwm->lock)) {
 		dev_err(dev, "Can't get lock\n");
 		return -EAGAIN;

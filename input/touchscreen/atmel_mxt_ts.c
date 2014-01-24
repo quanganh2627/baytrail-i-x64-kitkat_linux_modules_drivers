@@ -1772,12 +1772,8 @@ static int mxt_check_reg_init(struct mxt_data *data, bool force)
 
 	hardware_id = data->pdata->hardware_id;
 	if (hardware_id >= 0 && hardware_id < ARRAY_SIZE(supported_panels)) {
-		panel = &supported_panels[hardware_id];
-
-		if ((info_crc == data->info_crc &&
-					config_crc == data->config_crc) ||
-				(data->info_crc == panel->info_crc &&
-				 data->config_crc == panel->config_crc)) {
+		if (info_crc == data->info_crc &&
+					config_crc == data->config_crc) {
 			if (config_crc == 0 || data->config_crc == 0)
 				dev_info(dev, "CRC zero, attempting to apply config\n");
 			else {

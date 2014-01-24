@@ -47,6 +47,18 @@
 #define DRIVER_NAME "i2c-designware-pci"
 #define DW_I2C_STATIC_BUS_NUM	10
 
+struct dw_probe_info {
+	enum dw_ctl_id_t ctl_id;
+	bool need_func;
+};
+
+#define DW_INFO(_ctl_id, _need_func)			\
+	((kernel_ulong_t)&(struct dw_probe_info) {	\
+		.ctl_id = (_ctl_id),			\
+		.need_func = (_need_func)		\
+	 })
+
+
 static int i2c_dw_pci_suspend(struct device *dev)
 {
 	struct pci_dev *pdev = container_of(dev, struct pci_dev, dev);
@@ -122,6 +134,15 @@ const struct pci_device_id *id)
 	struct dw_i2c_dev *dev;
 	unsigned long start, len;
 	int r;
+	int bus_idx;
+	struct dw_probe_info *dw_info;
+
+	dw_info = (void *)id->driver_data;
+
+	bus_idx = dw_info->ctl_id;
+
+	if (dw_info->need_func)
+		bus_idx += PCI_FUNC(pdev->devfn);
 
 	r = pci_enable_device(pdev);
 	if (r) {
@@ -180,42 +201,42 @@ MODULE_ALIAS("i2c_designware-pci");
 
 DEFINE_PCI_DEVICE_TABLE(i2c_designware_pci_ids) = {
 	/* Moorestown */
-	{ PCI_VDEVICE(INTEL, 0x0802), moorestown_0 },
-	{ PCI_VDEVICE(INTEL, 0x0803), moorestown_1 },
-	{ PCI_VDEVICE(INTEL, 0x0804), moorestown_2 },
+	{ PCI_VDEVICE(INTEL, 0x0802), DW_INFO(moorestown_0, false) },
+	{ PCI_VDEVICE(INTEL, 0x0803), DW_INFO(moorestown_1, false) },
+	{ PCI_VDEVICE(INTEL, 0x0804), DW_INFO(moorestown_2, false) },
 	/* Medfield */
-	{ PCI_VDEVICE(INTEL, 0x0817), medfield_0 },
-	{ PCI_VDEVICE(INTEL, 0x0818), medfield_1 },
-	{ PCI_VDEVICE(INTEL, 0x0819), medfield_2 },
-	{ PCI_VDEVICE(INTEL, 0x082C), medfield_3 },
-	{ PCI_VDEVICE(INTEL, 0x082D), medfield_4 },
-	{ PCI_VDEVICE(INTEL, 0x082E), medfield_5 },
+	{ PCI_VDEVICE(INTEL, 0x0817), DW_INFO(medfield_0, false) },
+	{ PCI_VDEVICE(INTEL, 0x0818), DW_INFO(medfield_1, false) },
+	{ PCI_VDEVICE(INTEL, 0x0819), DW_INFO(medfield_2, false) },
+	{ PCI_VDEVICE(INTEL, 0x082C), DW_INFO(medfield_3, false) },
+	{ PCI_VDEVICE(INTEL, 0x082D), DW_INFO(medfield_4, false) },
+	{ PCI_VDEVICE(INTEL, 0x082E), DW_INFO(medfield_5, false) },
 	/* Cloverview */
-	{ PCI_VDEVICE(INTEL, 0x08E2), cloverview_0 },
-	{ PCI_VDEVICE(INTEL, 0x08E3), cloverview_1 },
-	{ PCI_VDEVICE(INTEL, 0x08E4), cloverview_2 },
-	{ PCI_VDEVICE(INTEL, 0x08F4), cloverview_3 },
-	{ PCI_VDEVICE(INTEL, 0x08F5), cloverview_4 },
-	{ PCI_VDEVICE(INTEL, 0x08F6), cloverview_5 },
+	{ PCI_VDEVICE(INTEL, 0x08E2), DW_INFO(cloverview_0, false) },
+	{ PCI_VDEVICE(INTEL, 0x08E3), DW_INFO(cloverview_1, false) },
+	{ PCI_VDEVICE(INTEL, 0x08E4), DW_INFO(cloverview_2, false) },
+	{ PCI_VDEVICE(INTEL, 0x08F4), DW_INFO(cloverview_3, false) },
+	{ PCI_VDEVICE(INTEL, 0x08F5), DW_INFO(cloverview_4, false) },
+	{ PCI_VDEVICE(INTEL, 0x08F6), DW_INFO(cloverview_5, false) },
 	/* Merrifield */
-	{ PCI_VDEVICE(INTEL, 0x1195), merrifield_0 },
-	{ PCI_VDEVICE(INTEL, 0x1196), merrifield_1 },
+	{ PCI_VDEVICE(INTEL, 0x1195), DW_INFO(merrifield_0, true) },
+	{ PCI_VDEVICE(INTEL, 0x1196), DW_INFO(merrifield_4, true) },
 	/* Valleyview 2 */
-	{ PCI_VDEVICE(INTEL, 0x0F41), valleyview_0 },
-	{ PCI_VDEVICE(INTEL, 0x0F42), valleyview_1 },
-	{ PCI_VDEVICE(INTEL, 0x0F43), valleyview_2 },
-	{ PCI_VDEVICE(INTEL, 0x0F44), valleyview_3 },
-	{ PCI_VDEVICE(INTEL, 0x0F45), valleyview_4 },
-	{ PCI_VDEVICE(INTEL, 0x0F46), valleyview_5 },
-	{ PCI_VDEVICE(INTEL, 0x0F47), valleyview_6 },
+	{ PCI_VDEVICE(INTEL, 0x0F41), DW_INFO(valleyview_1, false) },
+	{ PCI_VDEVICE(INTEL, 0x0F42), DW_INFO(valleyview_2, false) },
+	{ PCI_VDEVICE(INTEL, 0x0F43), DW_INFO(valleyview_3, false) },
+	{ PCI_VDEVICE(INTEL, 0x0F44), DW_INFO(valleyview_4, false) },
+	{ PCI_VDEVICE(INTEL, 0x0F45), DW_INFO(valleyview_5, false) },
+	{ PCI_VDEVICE(INTEL, 0x0F46), DW_INFO(valleyview_6, false) },
+	{ PCI_VDEVICE(INTEL, 0x0F47), DW_INFO(valleyview_7, false) },
 	/* Cherryview */
-	{ PCI_VDEVICE(INTEL, 0x22C1), cherryview_0 },
-	{ PCI_VDEVICE(INTEL, 0x22C2), cherryview_1 },
-	{ PCI_VDEVICE(INTEL, 0x22C3), cherryview_2 },
-	{ PCI_VDEVICE(INTEL, 0x22C4), cherryview_3 },
-	{ PCI_VDEVICE(INTEL, 0x22C5), cherryview_4 },
-	{ PCI_VDEVICE(INTEL, 0x22C6), cherryview_5 },
-	{ PCI_VDEVICE(INTEL, 0x22C7), cherryview_6 },
+	{ PCI_VDEVICE(INTEL, 0x22C1), DW_INFO(cherryview_1, false) },
+	{ PCI_VDEVICE(INTEL, 0x22C2), DW_INFO(cherryview_2, false) },
+	{ PCI_VDEVICE(INTEL, 0x22C3), DW_INFO(cherryview_3, false) },
+	{ PCI_VDEVICE(INTEL, 0x22C4), DW_INFO(cherryview_4, false) },
+	{ PCI_VDEVICE(INTEL, 0x22C5), DW_INFO(cherryview_5, false) },
+	{ PCI_VDEVICE(INTEL, 0x22C6), DW_INFO(cherryview_6, false) },
+	{ PCI_VDEVICE(INTEL, 0x22C7), DW_INFO(cherryview_7, false) },
 	{ 0,}
 };
 MODULE_DEVICE_TABLE(pci, i2c_designware_pci_ids);

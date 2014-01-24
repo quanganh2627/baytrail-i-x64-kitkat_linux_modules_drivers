@@ -42,6 +42,9 @@
 #include <linux/mutex.h>
 #include <linux/wait.h>
 #include <linux/delay.h>
+#ifdef CONFIG_HAS_WAKELOCK
+#include <linux/wakelock.h>
+#endif
 #include <linux/mdm_ctrl.h>
 #include <asm/intel-mid.h>
 #include <asm/intel_scu_pmic.h>
@@ -96,6 +99,9 @@ struct mdm_ctrl {
 
 	struct mutex lock;
 	atomic_t modem_state;
+#ifdef CONFIG_HAS_WAKELOCK
+	struct wake_lock	 stay_awake;
+#endif
 
 	struct work_struct change_state_work;
 
@@ -103,9 +109,6 @@ struct mdm_ctrl {
 	struct work_struct hangup_work;
 
 	struct timer_list flashing_timer;
-
-	/* Wait queue for WAIT_FOR_STATE ioctl */
-	wait_queue_head_t event;
 
 	bool is_mdm_ctrl_disabled;
 
