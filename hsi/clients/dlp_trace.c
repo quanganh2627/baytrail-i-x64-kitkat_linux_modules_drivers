@@ -262,7 +262,7 @@ push_again:
  */
 static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 {
-	int ret = 0, state, opened, count;
+	int ret = 0, state, count;
 	unsigned long flags;
 	struct dlp_channel *ch_ctx = DLP_CHANNEL_CTX(DLP_CHANNEL_TRACE);
 	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
@@ -272,8 +272,7 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 	if (state != DLP_CH_STATE_CLOSED) {
 		pr_err(DRVNAME ": Can't open CH%d (HSI CH%d) => invalid state: %d\n",
 				ch_ctx->ch_id, ch_ctx->hsi_channel, state);
-		ret = -EBUSY;
-		goto out;
+		return -EBUSY;
 	}
 
 	/* Update/Set the eDLP channel id */
@@ -284,9 +283,10 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 	if (trace_ctx->opened) {
 		spin_unlock_irqrestore(&ch_ctx->lock, flags);
 		pr_err(DRVNAME": Trace channel ALREADY opened");
-		ret = -EBUSY;
-		goto out;
+		return -EBUSY;
 	}
+	/* Set the open flag */
+	trace_ctx->opened = 1;
 	/* reset hangup flag */
 	trace_ctx->hangup = 0;
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
@@ -297,13 +297,12 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 	/* Disable the flow control */
 	ch_ctx->use_flow_ctrl = 1;
 
-	/* Configure the DLP channel */
-
 	/* Reply to any waiting OPEN_CONN command */
 	ret = dlp_ctrl_send_ack_nack(ch_ctx);
 	if (ret) {
-		pr_err(DRVNAME ": ch%d open failed !\n", ch_ctx->ch_id);
+		pr_err(DRVNAME ": ch%d open failed while sending ack_nack!\n", ch_ctx->ch_id);
 		ret = -EIO;
+		goto err;
 	}
 
 	if (dlp_drv.sys_info->mdm_ver == MODEM_7160) {
@@ -311,7 +310,7 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 		if (ret) {
 			pr_err(DRVNAME ": open channel(ch%d) failed :%d)\n",
 				   ch_ctx->hsi_channel, ret);
-			goto out;
+			goto err;
 		}
 	} else {
 		/* device opened => Set the channel state flag */
@@ -321,15 +320,23 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 	/* Set the open flag */
 	trace_ctx->opened = 1;
 
-
 	/* Push RX PDUs */
 	count = DLP_HSI_RX_WAIT_FIFO + HSI_TRACE_TEMP_BUFFERS;
 	for (ret = count; ret; ret--)
 		dlp_trace_push_rx_pdu(ch_ctx);
 
 	pr_debug(DRVNAME": Trace Channel opened");
+	return ret;
 
-out:
+err:
+	/* release trace channel */
+	spin_lock_irqsave(&ch_ctx->lock, flags);
+	/* set the hangup flag to make the poll function return an error*/
+	trace_ctx->hangup = 1;
+	/* Set the open flag */
+	trace_ctx->opened = 0;
+	spin_unlock_irqrestore(&ch_ctx->lock, flags);
+
 	return ret;
 }
 
@@ -428,7 +435,8 @@ static ssize_t dlp_trace_dev_read(struct file *filp,
 			/* Get the size & address */
 			ptr++;
 			more_packets = (*ptr) & DLP_HDR_MORE_DESC;
-			data_size = DLP_HDR_DATA_SIZE((*ptr)) - DLP_HDR_SPACE_AP;
+			data_size  = DLP_HDR_DATA_SIZE((*ptr));
+			data_size -= DLP_HDR_SPACE_AP;
 			data_addr = start_addr + offset + DLP_HDR_SPACE_AP;
 
 			/* Calculate the data size */
