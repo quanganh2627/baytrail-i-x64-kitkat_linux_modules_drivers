@@ -401,7 +401,11 @@ static int pmic_irq_init(void)
 	int ret;
 
 	pmic->irq_mask = 0xff;
-	intel_mid_pmic_writeb(MIRQLVL1, pmic->irq_mask);
+	ret = intel_mid_pmic_writeb(MIRQLVL1, pmic->irq_mask);
+	if (ret) {
+		dev_err(pmic->dev, "Failed to communicate with PMIC.");
+		return ret;
+	}
 	pmic->irq_mask = intel_mid_pmic_readb(MIRQLVL1);
 	pmic->irq_base = irq_alloc_descs(VV_PMIC_IRQBASE, 0, PMIC_IRQ_NUM, 0);
 	if (pmic->irq_base < 0) {
@@ -442,7 +446,7 @@ static int pmic_irq_init(void)
 static int pmic_i2c_probe(struct i2c_client *i2c,
 			    const struct i2c_device_id *id)
 {
-	int i;
+	int i, ret;
 	struct mfd_cell *cell_dev = crystal_cove_data;
 
 	mutex_init(&pmic->io_lock);
@@ -454,7 +458,10 @@ static int pmic_i2c_probe(struct i2c_client *i2c,
 	pmic->i2c = i2c;
 	pmic->dev = &i2c->dev;
 	pmic->irq = i2c->irq;
-	pmic_irq_init();
+	ret = pmic_irq_init();
+	if (ret)
+		return ret;
+
 	dev_info(&i2c->dev, "Crystal Cove: ID 0x%02X, VERSION 0x%02X\n",
 		intel_mid_pmic_readb(CHIPID), intel_mid_pmic_readb(CHIPVER));
 	for (i = 0; cell_dev[i].name != NULL; i++)
