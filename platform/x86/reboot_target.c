@@ -39,6 +39,7 @@ static const struct name2id NAME2ID[] = {
 	{ "fastboot",   0x0E },
 	{ "bootloader", 0x0E },
 	{ "factory",    0x12 },
+	{ "factory2",   0x13 },
 	{ "dnx",        0x14 },
 	{ "ramconsole", 0x16 },
 };
