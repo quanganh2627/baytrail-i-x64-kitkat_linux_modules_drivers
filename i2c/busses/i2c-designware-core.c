@@ -221,6 +221,22 @@ static int vlv2_i2c_scl_cfg(struct dw_i2c_dev *dev)
 	return 0;
 }
 
+static int chv_i2c_scl_cfg(struct dw_i2c_dev *dev)
+{
+	dw_writel(dev, CHV_SS_SCLK_HCNT, DW_IC_SS_SCL_HCNT);
+	dw_writel(dev, CHV_SS_SCLK_LCNT, DW_IC_SS_SCL_LCNT);
+
+	if (dev->fast_plus) {
+		dw_writel(dev, CHV_FS_P_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+		dw_writel(dev, CHV_FS_P_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+	} else {
+		dw_writel(dev, CHV_FS_SCLK_HCNT, DW_IC_FS_SCL_HCNT);
+		dw_writel(dev, CHV_FS_SCLK_LCNT, DW_IC_FS_SCL_LCNT);
+	}
+
+	return 0;
+}
+
 static struct  dw_controller  dw_controllers[] = {
 	[moorestown_0] = {
 		.bus_num     = 0,
@@ -459,6 +475,62 @@ static struct  dw_controller  dw_controllers[] = {
 		.reset = vlv2_reset,
 		.share_irq = 1,
 		.acpi_name = "\\_SB.I2C7"
+	},
+	[cherryview_1] = {
+		.bus_num     = 1,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.enable_stop = 1,
+		.scl_cfg = chv_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+	},
+	[cherryview_2] = {
+		.bus_num     = 2,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.enable_stop = 1,
+		.scl_cfg = chv_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+	},
+	[cherryview_3] = {
+		.bus_num     = 3,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.enable_stop = 1,
+		.scl_cfg = chv_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+	},
+	[cherryview_4] = {
+		.bus_num     = 4,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.enable_stop = 1,
+		.scl_cfg = chv_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+	},
+	[cherryview_5] = {
+		.bus_num     = 5,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.enable_stop = 1,
+		.scl_cfg = chv_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+	},
+	[cherryview_6] = {
+		.bus_num     = 6,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.enable_stop = 1,
+		.scl_cfg = chv_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
+	},
+	[cherryview_7] = {
+		.bus_num     = 7,
+		.bus_cfg   = INTEL_MID_STD_CFG | DW_IC_CON_SPEED_FAST,
+		.enable_stop = 1,
+		.scl_cfg = chv_i2c_scl_cfg,
+		.reset = vlv2_reset,
+		.share_irq = 1,
 	}
 };
 
@@ -796,8 +868,6 @@ static acpi_status acpi_i2c_find_device_speed(acpi_handle handle, u32 level,
 	struct dw_i2c_dev *i2c = data;
 	struct list_head resource_list;
 	struct acpi_device *adev;
-	acpi_status status;
-	unsigned long long sta = 0;
 	int ret;
 
 	if (acpi_bus_get_device(handle, &adev))
