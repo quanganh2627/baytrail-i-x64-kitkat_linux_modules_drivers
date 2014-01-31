@@ -3,14 +3,15 @@
 #ifndef _TP2E_PROBE_GENERIC_EVENT_
 #define _TP2E_PROBE_GENERIC_EVENT_
 
-/* Below is the name of the generic TP2E event defined
- * in include/trace/events/tp2e.h
+/* Below are the names of the system and event as they
+ * are defined in include/trace/events/tp2e.h
  */
-#define TP2E_GENERIC_EVENT_NAME "tp2e_generic_event"
+#define TRACE_SYSTEM tp2e
+#define TP2E_GENERIC_EVENT_NAME tp2e_generic_event
 
 static void tp2e_probe_generic_event(void *cb_data,
 				     enum tp2e_ev_type tp2e_ev_type,
-				     char *submitter_name,char *ev_name,
+				     char *submitter_name, char *ev_name,
 				     char *data0, char *data1, char *data2,
 				     char *data3, char *data4, char *data5)
 {

@@ -35,44 +35,26 @@
 	} while (0)
 
 
-struct tp_probe_ops {
-	char *name;
-	void *probe;
-};
-
-#define DEFINE_PROBE(event_name, probe_fn)
+#define DEFINE_PROBE(event, probe)
 
 #endif /* _TP2E_H_ */
 
-#ifdef DECLARE_PROBE
+#ifdef DECLARE_TP2E_ELT
 #undef DEFINE_PROBE
-#define DEFINE_PROBE(event_name, probe_fn)			   \
-	static struct tp_probe_ops tp_probe_ops_##event_name = {   \
-		.name =	event_name,				   \
-		.probe = (void*)probe_fn,			   \
-	}
-#endif /* DECLARE_PROBE */
+#define DEFINE_PROBE(event, probe)				\
+	static struct tp2e_element tp2e_##event = {			\
+		.system = __stringify(TRACE_SYSTEM),			\
+		.name = __stringify(event),				\
+		.probe_fn = (void *)probe,				\
+	};
+#endif /* DECLARE_TP2E_ELT */
 
-#ifdef REGISTER_PROBE
+#ifdef ADD_TP2E_ELT
 #undef DEFINE_PROBE
-#define DEFINE_PROBE(event_name, probe_fn)				\
+#define DEFINE_PROBE(event, probe)				\
 	do {								\
-		pr_debug("Registering probe for %s\n",			\
-			 tp_probe_ops_##event_name.name);		\
-		tracepoint_probe_register(tp_probe_ops_##event_name.name, \
-					  tp_probe_ops_##event_name.probe, \
-					  NULL);			\
+		INIT_LIST_HEAD(&tp2e_##event.list);			\
+		list_add_tail(&tp2e_##event.list, &tp2e_list);		\
 	} while (0)
-#endif /* REGISTER_PROBE */
+#endif /* ADD_TP2E_ELT */
 
-#ifdef UNREGISTER_PROBE
-#undef DEFINE_PROBE
-#define DEFINE_PROBE(event_name, probe_fn)				\
-	do {								\
-		pr_debug("Unregistering probe for %s\n",		\
-			 tp_probe_ops_##event_name.name);		\
-		tracepoint_probe_unregister(tp_probe_ops_##event_name.name, \
-					    tp_probe_ops_##event_name.probe, \
-					    NULL);			\
-	} while (0)
-#endif /* UNREGISTER_PROBE */
