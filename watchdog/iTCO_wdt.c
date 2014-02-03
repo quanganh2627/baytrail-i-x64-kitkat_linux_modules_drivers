@@ -484,12 +484,12 @@ static ssize_t iTCO_wdt_reset_type_read(struct file *file, char __user *buff,
 
 	switch(iTCO_wdt_private.iTCO_wdt_action) {
 	case TCO_POLICY_NORM:
-		len = ARRAY_SIZE(STRING_COLD_RESET)+1;
-		res = copy_to_user(buff, STRING_COLD_RESET "\n", len);
+		len = ARRAY_SIZE(STRING_COLD_RESET);
+		res = copy_to_user(buff, STRING_COLD_RESET "\n", len + 1);
 		break;
 	case TCO_POLICY_HALT:
-		len = ARRAY_SIZE(STRING_COLD_OFF)+1;
-		res = copy_to_user(buff, STRING_COLD_OFF "\n", len);
+		len = ARRAY_SIZE(STRING_COLD_OFF);
+		res = copy_to_user(buff, STRING_COLD_OFF "\n", len + 1);
 		break;
 	default:
 		return -EINVAL;
@@ -525,20 +525,19 @@ static ssize_t tl_read(struct file *file, char __user *buff,
 		return -EINVAL;
 
 	sprintf(str, "%d\n", timeleft);
-	if (strlen(str) + 1 > count)
+	if (strlen(str) > count)
 		return -EFAULT;
 
-	res = copy_to_user(buff, str,
-			strlen(str)+1);
+	res = copy_to_user(buff, str, strlen(str));
 	if (res) {
 		pr_err("%s: copy to user failed\n", __func__);
 		return -EINVAL;
 	}
 
-	len = strlen(str)+1;
+	len = strlen(str);
 
 	*ppos += len;
-	return len+1;
+	return len;
 }
 
 static const struct file_operations tl_fops = {
@@ -875,12 +874,13 @@ static int iTCO_wdt_probe(struct platform_device *dev)
 			iTCO_debugfs_dir = debugfs_create_dir("iTCO", NULL);
 			debugfs_create_file("timeleft", S_IRUSR,
 					iTCO_debugfs_dir, NULL, &tl_fops);
-			debugfs_create_file("reset_type", S_IRUSR,
+			debugfs_create_file("reset_type", S_IRUSR | S_IWUSR,
 					iTCO_debugfs_dir, NULL, &iTCO_wdt_reset_type_fops);
-			debugfs_create_file("trigger", S_IRUSR,
+			debugfs_create_file("trigger", S_IWUSR,
 					iTCO_debugfs_dir, NULL, &iTCO_wdt_trigger_fops);
-			debugfs_create_bool("panic_reboot_notifier", S_IRUSR,
-					    iTCO_debugfs_dir, &iTCO_wdt_private.panic_reboot_notifier);
+			debugfs_create_bool("panic_reboot_notifier", S_IRUSR | S_IWUSR,
+					    iTCO_debugfs_dir,
+					    (u32 *)&iTCO_wdt_private.panic_reboot_notifier);
 #endif /* CONFIG_DEBUG_FS */
 			if (!ret)
 				break;
