@@ -653,8 +653,6 @@ static int TCO_reboot_notifier(struct notifier_block *this,
 
 static irqreturn_t tco_irq_handler(int irq, void *arg)
 {
-	unsigned long val32;
-
 	pr_warn("[SHTDWN] %s, WATCHDOG TIMEOUT HANDLER!\n", __func__);
 
 	/* reduce the timeout to the minimum, but sufficient for tracing */
@@ -864,7 +862,8 @@ static int iTCO_wdt_probe(struct platform_device *dev)
 			debugfs_create_file("trigger", S_IRUSR,
 					iTCO_debugfs_dir, NULL, &iTCO_wdt_trigger_fops);
 			debugfs_create_bool("panic_reboot_notifier", S_IRUSR,
-					    iTCO_debugfs_dir, &iTCO_wdt_private.panic_reboot_notifier);
+					    iTCO_debugfs_dir,
+					    (u32 *)&iTCO_wdt_private.panic_reboot_notifier);
 #endif /* CONFIG_DEBUG_FS */
 			if (!ret)
 				break;
@@ -894,10 +893,8 @@ static ssize_t reboot_ongoing_store(struct device *dev,
 }
 
 /* Watchdog behavior depending on system phase */
-static DEVICE_ATTR(shutdown_ongoing, S_IWUSR | S_IRUGO,
-				NULL, shutdown_ongoing_store);
-static DEVICE_ATTR(reboot_ongoing, S_IWUSR | S_IRUGO,
-				NULL, reboot_ongoing_store);
+static DEVICE_ATTR(shutdown_ongoing, S_IWUSR, NULL, shutdown_ongoing_store);
+static DEVICE_ATTR(reboot_ongoing, S_IWUSR, NULL, reboot_ongoing_store);
 
 int create_watchdog_sysfs_files(void)
 {
