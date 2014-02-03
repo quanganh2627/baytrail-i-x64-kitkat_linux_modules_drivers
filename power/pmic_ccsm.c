@@ -142,6 +142,7 @@ u16 pmic_inlmt[][2] = {
 	{ 1500, CHGRCTRL1_FUSB_INLMT_1500},
 };
 
+
 static inline struct power_supply *get_psy_battery(void)
 {
 	struct class_dev_iter iter;
@@ -811,6 +812,32 @@ static inline int update_zone_temp(int zone, u16 adc_val)
 			offset_zone += 1;
 
 		addr_tzone = THRMZN4H_ADDR_SC - (2 * offset_zone);
+
+		/*
+		 * Override the adc values received from the LUT with the
+		 * values received from the PMIC hatdware team. SC pmic gets
+		 * 12-bit of ADC results however only 9-bits of the values can
+		 * be programmed into the temperature zone registers.
+		 */
+		switch (zone) {
+		case 0:
+			adc_val = THRMZN4_SC_ADCVAL;
+			break;
+		case 1:
+			adc_val = THRMZN3_SC_ADCVAL;
+			break;
+		case 2:
+			adc_val = THRMZN2_SC_ADCVAL;
+			break;
+		case 3:
+			adc_val = THRMZN1_SC_ADCVAL;
+			break;
+		case 4:
+			adc_val = THRMZN0_SC_ADCVAL;
+			break;
+		default:
+			dev_err(chc.dev, "no ADC default values\n");
+		}
 	} else {
 		dev_err(chc.dev, "%s: invalid vendor id %X\n", __func__, vendor_id);
 		return -EINVAL;
@@ -1327,15 +1354,12 @@ end:
 
 	return IRQ_HANDLED;
 }
-
 static int pmic_init(void)
 {
 	int ret = 0, i, temp_mon_ranges;
 	u16 adc_val;
 	u8 reg_val;
 	struct ps_pse_mod_prof *bcprof = chc.actual_bcprof;
-
-
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
 			BATT_TEMP_NR_RNG);
 	for (i = 0; i < temp_mon_ranges; ++i) {
@@ -1348,6 +1372,7 @@ static int pmic_init(void)
 				i);
 			return ret;
 		}
+
 		ret = update_zone_temp(i, adc_val);
 		if (unlikely(ret)) {
 			dev_err(chc.dev,
