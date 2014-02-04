@@ -356,6 +356,8 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 				acpi_get_gpio_by_index(&pdev->dev, 1, &info)
 				: -EINVAL;
 		}
+		pdata->gpio_hostwake = -EINVAL;
+
 		pr_info("%s enable: %d, reset: %d\n", __func__, pdata->gpio_enable, pdata->gpio_reset);
 		platform_set_drvdata(pdev, pdata);
 	} else {
