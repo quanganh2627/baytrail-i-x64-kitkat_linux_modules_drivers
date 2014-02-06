@@ -919,6 +919,18 @@ static int iTCO_wdt_suspend(struct platform_device *dev, pm_message_t state)
 
 static int iTCO_wdt_resume(struct platform_device *dev)
 {
+	/* Check that the heartbeat value is within it's range;
+	   if not reset to the default */
+	if (iTCO_wdt_set_heartbeat(heartbeat)) {
+		iTCO_wdt_set_heartbeat(WATCHDOG_HEARTBEAT);
+		pr_info("timeout value out of range, using %d\n", heartbeat);
+	}
+
+	/* Check chipset's NO_REBOOT bit */
+	if (iTCO_wdt_unset_NO_REBOOT_bit()) {
+		pr_err(" unable to reset NO_REBOOT flag, device disabled by hardware/BIOS\n");
+	}
+
 	return iTCO_wdt_start();
 }
 
