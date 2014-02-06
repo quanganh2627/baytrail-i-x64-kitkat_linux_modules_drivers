@@ -118,7 +118,6 @@
 #define FABRIC_ERR_SCU_VERSIONINFO	2
 #define FABRIC_ERR_ERRORTYPE		3
 #define FABRIC_ERR_MAXIMUM_TXT		2048
-#define FABRIC_ERR_ERRORTYPE_MASK	0xFFFF
 
 /* Timeout in ms we wait SCU to generate dump on panic */
 #define SCU_PANIC_DUMP_TOUT		1
@@ -198,6 +197,15 @@ union error_scu_version {
 	} fields;
 	u32 data;
 };
+
+union scu_error_type {
+	struct {
+		u32 postcode_err_type:16;
+		u32 protect_err_type:16;
+	} fields;
+	u32 data;
+};
+
 
 union reg_ids {
 	struct {
@@ -880,19 +888,19 @@ static int parse_fab_err_log(
 	u32 fabric_id;
 	union error_header err_header;
 	union error_scu_version err_scu_ver;
+	union scu_error_type scu_err_type;
 	int error_type, cmd_type, init_id, is_multi, is_secondary;
 	u16 scu_minor_ver, scu_major_ver;
-	u32 reg_ids = 0, error_typ = log_buffer[FABRIC_ERR_ERRORTYPE];
+	u32 reg_ids = 0;
 	int i, need_new_regid, num_flag_status,
 		num_err_logs, offset, total;
 
 	err_header.data = log_buffer[FABRIC_ERR_HEADER];
 	err_scu_ver.data = log_buffer[FABRIC_ERR_SCU_VERSIONINFO];
+	scu_err_type.data = log_buffer[FABRIC_ERR_ERRORTYPE];
 
 	scu_minor_ver = err_scu_ver.fields.scu_rt_minor_ver;
 	scu_major_ver = err_scu_ver.fields.scu_rt_major_ver;
-
-	error_typ &= FABRIC_ERR_ERRORTYPE_MASK;
 
 	num_flag_status = err_header.fields.num_flag_regs;
 	num_err_logs = err_header.fields.num_err_regs;
@@ -944,8 +952,12 @@ static int parse_fab_err_log(
 		err_header.fields.num_of_recv_err);
 	fab_err_snprintf(
 		*parsed_fab_err_log, *parsed_fab_err_log_sz,
-		"Fabric error type: %s\n\n",
-		get_errortype_str(error_typ));
+		"Fabric error type: %s\n",
+		get_errortype_str(scu_err_type.fields.postcode_err_type));
+	fab_err_snprintf(
+		*parsed_fab_err_log, *parsed_fab_err_log_sz,
+		"Protection violation type: %s\n\n",
+		get_errortype_str(scu_err_type.fields.protect_err_type));
 	fab_err_snprintf(
 		*parsed_fab_err_log, *parsed_fab_err_log_sz,
 		"Summary of Fabric Error detail:\n");
