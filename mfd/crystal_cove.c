@@ -186,6 +186,9 @@ int intel_scu_ipc_update_register(u16 addr, u8 data, u8 mask)
 {
 	int ret;
 
+	if (!pmic->i2c)
+		return -ENODEV;
+
 	mutex_lock(&pmic->io_lock);
 
 	ret = i2c_smbus_read_byte_data(pmic->i2c, addr);
@@ -244,6 +247,9 @@ int intel_mid_pmic_readb(int reg)
 {
 	int ret;
 
+	if (!pmic->i2c)
+		return -ENODEV;
+
 	mutex_lock(&pmic->io_lock);
 	ret = i2c_smbus_read_byte_data(pmic->i2c, reg);
 	mutex_unlock(&pmic->io_lock);
@@ -254,6 +260,9 @@ EXPORT_SYMBOL(intel_mid_pmic_readb);
 int intel_mid_pmic_writeb(int reg, u8 val)
 {
 	int ret;
+
+	if (!pmic->i2c)
+		return -ENODEV;
 
 	mutex_lock(&pmic->io_lock);
 	ret = i2c_smbus_write_byte_data(pmic->i2c, reg, val);
@@ -267,6 +276,9 @@ int intel_mid_pmic_setb(int reg, u8 mask)
 	int ret;
 	int val;
 
+	if (!pmic->i2c)
+		return -ENODEV;
+
 	mutex_lock(&pmic->io_lock);
 	val = i2c_smbus_read_byte_data(pmic->i2c, reg);
 	val |= mask;
@@ -279,6 +291,9 @@ int intel_mid_pmic_clearb(int reg, u8 mask)
 {
 	int ret;
 	int val;
+
+	if (!pmic->i2c)
+		return -ENODEV;
 
 	mutex_lock(&pmic->io_lock);
 	val = i2c_smbus_read_byte_data(pmic->i2c, reg);
