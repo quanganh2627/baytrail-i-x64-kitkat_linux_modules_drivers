@@ -398,8 +398,12 @@ static int __init intel_mid_ilb_osnib_init(void)
 	pr_info("%s: boot_mode = '%s'\n", __func__,
 		intel_mid_ilb_get_bootflow_value(osnib_buffer.bootflow.type));
 
-	pr_info("%s: wake_src  =  '%s'\n", __func__,
-		wake_srcs[osnib_buffer.fw_to_os.wake_src].name);
+	if (osnib_buffer.fw_to_os.wake_src < ARRAY_SIZE(wake_srcs))
+		pr_info("%s: wake_src  =  '%s'\n", __func__,
+				wake_srcs[osnib_buffer.fw_to_os.wake_src].name);
+	else
+		pr_info("%s: wake_src  =  'unlisted reason 0x%x'\n", __func__,
+				osnib_buffer.fw_to_os.wake_src);
 
 	osnib_kobj = kobject_create_and_add("osnib", firmware_kobj);
 	if (!osnib_kobj)
