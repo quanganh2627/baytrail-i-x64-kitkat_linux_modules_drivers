@@ -40,6 +40,8 @@
 #include <asm/intel_mid_rpmsg.h>
 #include <asm/intel-mid.h>
 
+#include "reboot_target.h"
+
 /* change to "loop0" and use losetup for safe testing */
 #define EMMC_OSIP_BLKDEVICE "mmcblk0"
 #define HDD_OSIP_BLKDEVICE "sda"
@@ -264,125 +266,78 @@ static int osip_restore(struct OSIP_header *osip, void *data)
 /* down for 8 seconds */
 #define FORCE_SHUTDOWN_DELAY_IN_MSEC 5000
 
-static int osip_reboot_notifier_call(struct notifier_block *notifier,
+static int osip_shutdown_notifier_call(struct notifier_block *notifier,
 				     unsigned long what, void *data)
 {
 	int ret = NOTIFY_DONE;
-	int ret_ipc;
 	char *cmd = (char *)data;
+
+	if (what == SYS_HALT || what == SYS_POWER_OFF) {
+		pr_info("%s: notified [%s] command\n", __func__, cmd);
+		pr_info("%s(): sys power off ...\n", __func__);
+
+		if (get_force_shutdown_occured()) {
+			pr_warn("[SHTDWN] %s: Force shutdown occured, delaying ...\n",
+				__func__);
+			mdelay(FORCE_SHUTDOWN_DELAY_IN_MSEC);
+		}
+		else
+			pr_warn("[SHTDWN] %s, Not in force shutdown\n",
+				__func__);
+		/*
+		* PNW and CLVP depend on watchdog driver to
+		* send COLD OFF message to SCU.
+		* TNG and ANN use COLD_OFF IPC message to shut
+		* down the system.
+		*/
+		if ((intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER) ||
+				(intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE)) {
+			pr_err("[SHTDWN] %s, executing COLD_OFF...\n", __func__);
+			ret = rpmsg_send_generic_simple_command(RP_COLD_OFF, 0);
+			if (ret)
+				pr_err("%s(): COLD_OFF ipc failed\n", __func__);
+		}
+	}
+	/* Reboot actions will be handled by osip_reboot_target_call */
+	return NOTIFY_DONE;
+}
+
+static int osip_reboot_target_call(const char *target, int id)
+{
+	int ret_ipc;
 #ifdef DEBUG
 	u8 rbt_reason;
 #endif
 
-	pr_info("%s: notified [%s] command\n", __func__, cmd);
+	pr_info("%s: notified [%s] target\n", __func__, target);
 
-	if (what != SYS_RESTART) {
-		if (what == SYS_HALT || what == SYS_POWER_OFF) {
-			pr_info("%s(): sys power off ...\n", __func__);
-
-			if (get_force_shutdown_occured()) {
-				pr_warn("[SHTDWN] %s: Force shutdown occured, delaying ...\n",
-					__func__);
-				mdelay(FORCE_SHUTDOWN_DELAY_IN_MSEC);
-			}
-			else
-				pr_warn("[SHTDWN] %s, Not in force shutdown\n",
-					__func__);
-			/*
-			* PNW and CLVP depend on watchdog driver to
-			* send COLD OFF message to SCU.
-			* TNG and ANN use COLD_OFF IPC message to shut
-			* down the system.
-			*/
-			if ((intel_mid_identify_cpu() ==
-					INTEL_MID_CPU_CHIP_TANGIER) ||
-					(intel_mid_identify_cpu() ==
-					INTEL_MID_CPU_CHIP_ANNIEDALE)) {
-				pr_err("[SHTDWN] %s, executing COLD_OFF...\n",
-								__func__);
-				ret = rpmsg_send_generic_simple_command(
-							RP_COLD_OFF, 0);
-				if (ret)
-					pr_err("%s(): COLD_OFF ipc failed\n",
-								__func__);
-			}
-		} else {
-			pr_warn("[SHTDWN] %s, invalid value\n", __func__);
-		}
-
-		return NOTIFY_DONE;
-	}
-
-	if (data && 0 == strncmp(cmd, "recovery", 9)) {
-		pr_warn("[SHTDWN] %s, invalidating osip and rebooting into "
-			"Recovery\n", __func__);
+	pr_warn("[REBOOT] %s, rebooting into %s\n", __func__, target);
 #ifdef DEBUG
+	if (id == SIGNED_RECOVERY_ATTR)
 		intel_scu_ipc_read_osnib_rr(&rbt_reason);
 #endif
-		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_RECOVERY_ATTR);
-		if (ret_ipc < 0)
-			pr_err("%s cannot write Recovery reboot reason in OSNIB\n",
-				__func__);
-		access_osip_record(osip_invalidate, (void *)0);
-		ret = NOTIFY_OK;
-	} else if (data && 0 == strncmp(cmd, "bootloader", 11)) {
-		pr_warn("[SHTDWN] %s, rebooting into Fastboot\n", __func__);
-		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_POS_ATTR);
-		if (ret_ipc < 0)
-			pr_err("%s cannot write Fastboot reboot reason in OSNIB\n",
-				__func__);
-		ret = NOTIFY_OK;
-	} else if (data && 0 == strncmp(cmd, "charging", 9)) {
-		pr_warn("[SHTDWN] %s: rebooting into Charging\n", __func__);
-		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_COS_ATTR);
-		if (ret_ipc < 0)
-			pr_err("%s cannot write Fastboot reboot reason in OSNIB\n",
-				__func__);
-		ret = NOTIFY_OK;
-	} else if (data && 0 == strncmp(cmd, "factory", 8)) {
-		pr_warn("[SHTDWN] %s: rebooting into Factory\n", __func__);
-		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_FACTORY_ATTR);
-		if (ret_ipc < 0)
-			pr_err("%s cannot write Fastboot reboot reason in OSNIB\n",
-				__func__);
-		ret = NOTIFY_OK;
-	} else {
-		/* By default, reboot to Android. */
-		pr_warn("[SHTDWN] %s, restoring OSIP and rebooting into "
-			"Android\n", __func__);
-		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_MOS_ATTR);
-		if (ret_ipc < 0)
-			pr_err("%s cannot write Android reboot reason in OSNIB\n",
-				 __func__);
+
+	ret_ipc = intel_scu_ipc_write_osnib_rr(id);
+	if (ret_ipc < 0)
+		pr_err("%s cannot write %s reboot reason in OSNIB\n",
+			__func__, target);
+	if (id == SIGNED_MOS_ATTR) {
+		pr_warn("[REBOOT] %s, restoring OSIP\n", __func__);
 		access_osip_record(osip_restore, (void *)0);
-		ret = NOTIFY_OK;
 	}
-	return ret;
-
+	if (id == SIGNED_RECOVERY_ATTR && ret_ipc >= 0) {
+		pr_warn("[REBOOT] %s, invalidating osip\n", __func__);
+		access_osip_record(osip_invalidate, (void *)0);
+	}
+	return NOTIFY_DONE;
 }
 
-#ifdef DEBUG
-/* to test without reboot...
-echo -n fastboot >/sys/module/intel_mid_osip/parameters/test
-*/
-static int osip_test_write(const char *val, struct kernel_param *kp)
-{
-	osip_reboot_notifier_call(NULL, SYS_RESTART, (void *)val);
-	return 0;
-}
+static struct notifier_block osip_shutdown_notifier = {
+	.notifier_call = osip_shutdown_notifier_call,
+};
 
-static int osip_test_read(char *buffer, struct kernel_param *kp)
-{
-	return 0;
-}
-
-module_param_call(test, osip_test_write,
-		osip_test_read, NULL, 0644);
-
-#endif
-
-static struct notifier_block osip_reboot_notifier = {
-	.notifier_call = osip_reboot_notifier_call,
+static struct reboot_target osip_reboot_target = {
+	.set_reboot_target = osip_reboot_target_call,
 };
 #endif
 
@@ -661,8 +616,11 @@ static void remove_debugfs_files(void)
 static int osip_init(void)
 {
 #ifdef CONFIG_INTEL_SCU_IPC
-	pr_info("%s: reboot_notifier registered\n", __func__);
-	if (register_reboot_notifier(&osip_reboot_notifier))
+	pr_info("%s: shutdown_notifier registered\n", __func__);
+	if (register_reboot_notifier(&osip_shutdown_notifier))
+		pr_warning("osip: unable to register shutdown notifier");
+	pr_info("%s: reboot_target registered\n", __func__);
+	if (reboot_target_register(&osip_reboot_target))
 		pr_warning("osip: unable to register reboot notifier");
 
 #endif
@@ -673,8 +631,10 @@ static int osip_init(void)
 static void osip_exit(void)
 {
 #ifdef CONFIG_INTEL_SCU_IPC
-	pr_info("%s: reboot_notifier unregistered\n", __func__);
-	unregister_reboot_notifier(&osip_reboot_notifier);
+	pr_info("%s: shutdown_notifier unregistered\n", __func__);
+	unregister_reboot_notifier(&osip_shutdown_notifier);
+	pr_info("%s: reboot_target unregistered\n", __func__);
+	reboot_target_unregister(&osip_reboot_target);
 
 #endif
 	remove_debugfs_files();
