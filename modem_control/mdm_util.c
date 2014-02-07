@@ -107,20 +107,14 @@ void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
  */
 void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 {
-	int modem_type = 0;
-	int cpu_type = 0;
+	int conf_type = 0;
 	int pmic_type = 0;
 
-	modem_type = drv->pdata->mdm_ver;
-	cpu_type = drv->pdata->cpu_ver;
+	conf_type = drv->pdata->conf_type;
 	pmic_type = drv->pdata->pmic_ver;
 
-	switch (modem_type) {
-	case MODEM_6260:
-	case MODEM_6268:
-	case MODEM_6360:
-	case MODEM_7160:
-	case MODEM_7260:
+	switch (conf_type) {
+	case XMM_CONF_GENERIC:
 		drv->pdata->mdm.init = mcd_mdm_init;
 		drv->pdata->mdm.power_on = mcd_mdm_cold_boot;
 		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
@@ -128,20 +122,6 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 		drv->pdata->mdm.cleanup = mcd_mdm_cleanup;
 		drv->pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
 		drv->pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
-		break;
-	default:
-		pr_info(DRVNAME ": Can't retrieve modem specific functions");
-		drv->is_mdm_ctrl_disabled = true;
-		break;
-	}
-
-	switch (cpu_type) {
-	case CPU_PWELL:
-	case CPU_CLVIEW:
-	case CPU_TANGIER:
-	case CPU_VVIEW2:
-	case CPU_ANNIEDALE:
-	case CPU_CHERRYVIEW:
 		drv->pdata->cpu.init = cpu_init_gpio;
 		drv->pdata->cpu.cleanup = cpu_cleanup_gpio;
 		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state;
@@ -150,8 +130,24 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 		drv->pdata->cpu.get_gpio_rst = get_gpio_rst;
 		drv->pdata->cpu.get_gpio_pwr = get_gpio_pwr;
 		break;
+	case XMM_CONF_M2:
+		drv->pdata->mdm.init = mcd_mdm_init;
+		drv->pdata->mdm.power_on = mcd_mdm_cold_boot_m2;
+		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
+		drv->pdata->mdm.power_off = mcd_mdm_power_off;
+		drv->pdata->mdm.cleanup = mcd_mdm_cleanup;
+		drv->pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
+		drv->pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
+		drv->pdata->cpu.init = cpu_init_gpio_m2;
+		drv->pdata->cpu.cleanup = cpu_cleanup_gpio_m2;
+		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state_m2;
+		drv->pdata->cpu.get_irq_cdump = get_gpio_irq_cdump_m2;
+		drv->pdata->cpu.get_irq_rst = get_gpio_irq_rst_m2;
+		drv->pdata->cpu.get_gpio_rst = get_gpio_rst;
+		drv->pdata->cpu.get_gpio_pwr = get_gpio_pwr;
+		break;
 	default:
-		pr_info(DRVNAME ": Can't retrieve cpu specific functions");
+		pr_info(DRVNAME ": Can't retrieve conf specific functions");
 		drv->is_mdm_ctrl_disabled = true;
 		break;
 	}

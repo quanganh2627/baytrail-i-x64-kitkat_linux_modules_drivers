@@ -7,5 +7,5 @@ obj-$(CONFIG_SENSORS_MID_VDD)		+= intel_mid_vdd.o
 obj-$(CONFIG_SENSORS_MRFL_OCD)		+= intel_mrfl_ocd.o
 obj-$(CONFIG_SENSORS_PSH_MRLD)		+= psh_ia_common.o psh.o
 obj-$(CONFIG_SENSORS_PSH_BYT)		+= psh_ia_common.o psh_byt.o
-obj-$(CONFIG_GENERAL_SENSOR)            += sensor_general.o
+obj-$(CONFIG_GENERAL_SENSOR)            += sensor_general.o sensor_rawdata_proc.o
 obj-$(CONFIG_PS_STM8T143)               += ps_stm8t143.o

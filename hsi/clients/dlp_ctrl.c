@@ -671,6 +671,7 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 		pr_err(DRVNAME ": hsi_ch:%d, cmd:0x%X => TX timeout\n",
 			dlp_cmd->params.channel, dlp_cmd->params.id);
 
+		tx_msg->context = NULL;
 		ret = -EIO;
 		/* free only the cmd, because
 		 * the message is already in the controller fifo.
@@ -685,6 +686,7 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 		pr_err(DRVNAME ": Failed to send cmd:0x%X\n",
 				dlp_cmd->params.id);
 
+		tx_msg->context = NULL;
 		ret = -EIO;
 		/* free only the command because
 		 * the message has been already freed by the complete_tx
@@ -711,6 +713,7 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 		pr_err(DRVNAME ": hsi_ch:%d, cmd:0x%X => RX timeout\n",
 			dlp_cmd->params.channel, dlp_cmd->params.id);
 
+		tx_msg->context = NULL;
 		ret = -EIO;
 		goto free_cmd;
 	}
@@ -743,6 +746,7 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 			(unsigned int)(*(u32 *)&ctrl_ctx->response.params),
 			(unsigned int)(*(u32 *)(&expected_resp)));
 
+		tx_msg->context = NULL;
 		ret = -EIO;
 		goto free_cmd;
 	}

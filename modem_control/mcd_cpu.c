@@ -174,3 +174,59 @@ int get_gpio_pwr(void *data)
 	struct mdm_ctrl_cpu_data *cpu_data = data;
 	return cpu_data->gpio_pwr_on;
 }
+
+int cpu_init_gpio_m2(void *data)
+{
+	struct mdm_ctrl_cpu_data *cpu_data = data;
+	int ret;
+
+	pr_debug("cpu_init");
+
+	/* Configure the RESET_BB gpio */
+	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_rst_bbn, 1, 0, "RST_BB");
+	if (ret)
+		goto out;
+
+	/* Configure the WWAN_DISABLE gpio */
+	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_wwan_disable, 1, 1,
+		"WWAN_DISABLE");
+
+	if (ret)
+		goto free_ctx1;
+
+	pr_info(DRVNAME ": GPIO (rst_bbn: %d, wwan_disable: %d,)\n",
+		cpu_data->gpio_rst_bbn, cpu_data->gpio_wwan_disable);
+
+	return 0;
+
+ free_ctx1:
+	gpio_free(cpu_data->gpio_rst_bbn);
+ out:
+	return -ENODEV;
+}
+
+int cpu_cleanup_gpio_m2(void *data)
+{
+	struct mdm_ctrl_cpu_data *cpu_data = data;
+
+	gpio_free(cpu_data->gpio_rst_out);
+	gpio_free(cpu_data->gpio_wwan_disable);
+
+	return 0;
+}
+
+int get_gpio_mdm_state_m2(void *data)
+{
+	return 0;
+}
+
+int get_gpio_irq_cdump_m2(void *data)
+{
+	return 0;
+}
+
+int get_gpio_irq_rst_m2(void *data)
+{
+	return 0;
+}
+
