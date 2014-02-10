@@ -42,6 +42,8 @@ static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
 	{ "SRCL0001" },
 	/* CHT SPI */
 	{ "8086228E" },
+	/* CHT PWM */
+	{ "80862288" },
 	{ }
 };
 
