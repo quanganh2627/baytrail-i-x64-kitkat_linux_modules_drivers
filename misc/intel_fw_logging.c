@@ -101,7 +101,7 @@
 #define FAB_ID_MASK			7
 #define MAX_AGENT_IDX			15
 
-#define MAX_INPUT_LENGTH		20
+#define MAX_INPUT_LENGTH		32
 #define DWORDS_PER_LINE			2
 
 /* Safety limits for SCU extra trace dump */
