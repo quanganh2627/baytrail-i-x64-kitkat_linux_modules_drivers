@@ -168,6 +168,7 @@
 
 #define BQ24192_SYSTEM_STAT_REG			0x8
 /* D6, D7 show VBUS status */
+#define SYSTEM_STAT_VBUS_BITS			(3 << 6)
 #define SYSTEM_STAT_VBUS_UNKNOWN		0
 #define SYSTEM_STAT_VBUS_HOST			(1 << 6)
 #define SYSTEM_STAT_VBUS_ADP			(2 << 6)
@@ -187,6 +188,7 @@
 #define FAULT_STAT_WDT_TMR_EXP			(1 << 7)
 #define FAULT_STAT_OTG_FLT			(1 << 6)
 /* D4, D5 show charger fault status */
+#define FAULT_STAT_CHRG_BITS			(3 << 4)
 #define FAULT_STAT_CHRG_NORMAL			(0 << 4)
 #define FAULT_STAT_CHRG_IN_FLT			(1 << 4)
 #define FAULT_STAT_CHRG_THRM_FLT		(2 << 4)
@@ -635,11 +637,7 @@ int bq24192_get_charger_health(void)
 			"read reg failed %s\n", __func__);
 		return POWER_SUPPLY_HEALTH_UNKNOWN;
 	}
-
-	if (ret_fault & FAULT_STAT_OTG_FLT)
-		return POWER_SUPPLY_HEALTH_OVERVOLTAGE;
-
-	/* Check if the WeakVIN condition occured */
+	/* Check if the error VIN condition occured */
 	ret_status = bq24192_read_reg(chip->client, BQ24192_SYSTEM_STAT_REG);
 	if (ret_status < 0) {
 		dev_warn(&chip->client->dev,
@@ -647,8 +645,12 @@ int bq24192_get_charger_health(void)
 		return POWER_SUPPLY_HEALTH_UNKNOWN;
 	}
 
-	if (!(ret_status & SYSTEM_STAT_PWR_GOOD) ||
-	((ret_fault & FAULT_STAT_CHRG_IN_FLT) == FAULT_STAT_CHRG_IN_FLT))
+	if (!(ret_status & SYSTEM_STAT_PWR_GOOD) &&
+	((ret_fault & FAULT_STAT_CHRG_BITS) == FAULT_STAT_CHRG_IN_FLT))
+		return POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+
+	if (!(ret_status & SYSTEM_STAT_PWR_GOOD) &&
+	((ret_status & SYSTEM_STAT_VBUS_BITS) == SYSTEM_STAT_VBUS_UNKNOWN))
 		return POWER_SUPPLY_HEALTH_DEAD;
 
 	return POWER_SUPPLY_HEALTH_GOOD;
