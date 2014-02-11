@@ -34,8 +34,7 @@ static void tp2e_probe_generic_event(void *cb_data,
 		ev_type = CT_EV_INFO;
 		break;
 	}
-	/* Need to update kct to support data3, data4, data5 */
-	kct_log(ev_type, submitter_name, ev_name, data0, data1, data2);
+	kct_log(ev_type, submitter_name, ev_name, 0, data0, data1, data2, data3, data4, data5);
 }
 
 #endif /* _TP2E_PROBE_GENERIC_EVENT_H_ */
