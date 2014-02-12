@@ -339,6 +339,13 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 			pr_err("%s cannot write Fastboot reboot reason in OSNIB\n",
 				__func__);
 		ret = NOTIFY_OK;
+	} else if (data && 0 == strncmp(cmd, "factory", 8)) {
+		pr_warn("[SHTDWN] %s: rebooting into Factory\n", __func__);
+		ret_ipc = intel_scu_ipc_write_osnib_rr(SIGNED_FACTORY_ATTR);
+		if (ret_ipc < 0)
+			pr_err("%s cannot write Fastboot reboot reason in OSNIB\n",
+				__func__);
+		ret = NOTIFY_OK;
 	} else {
 		/* By default, reboot to Android. */
 		pr_warn("[SHTDWN] %s, restoring OSIP and rebooting into "
