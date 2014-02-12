@@ -1573,8 +1573,10 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 
 	if (reg_status == SYSTEM_STAT_CHRG_DONE) {
 		dev_warn(&chip->client->dev, "HW termination happened\n");
+		mutex_lock(&chip->event_lock);
 		bq24192_enable_hw_term(chip, false);
 		bq24192_resume_charging(chip);
+		mutex_unlock(&chip->event_lock);
 		/* schedule the thread to let the framework know about FULL */
 		schedule_delayed_work(&chip->chrg_full_wrkr, 0);
 	}
@@ -1595,7 +1597,9 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 		if (chip->is_charging_enabled) {
 			program_timers(chip,
 					CHRG_TIMER_EXP_CNTL_WDT160SEC, true);
+			mutex_lock(&chip->event_lock);
 			bq24192_resume_charging(chip);
+			mutex_unlock(&chip->event_lock);
 		} else
 			dev_info(&chip->client->dev, "No charger connected\n");
 	}
@@ -1621,7 +1625,9 @@ static void bq24192_task_worker(struct work_struct *work)
 	dev_info(&chip->client->dev, "%s\n", __func__);
 
 	/* Reset the WDT */
+	mutex_lock(&chip->event_lock);
 	ret = reset_wdt_timer(chip);
+	mutex_unlock(&chip->event_lock);
 	if (ret < 0)
 		dev_warn(&chip->client->dev, "WDT reset failed:\n");
 
