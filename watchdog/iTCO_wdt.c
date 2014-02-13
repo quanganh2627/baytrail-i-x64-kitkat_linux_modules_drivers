@@ -284,6 +284,8 @@ static int iTCO_wdt_stop(void)
 
 static int iTCO_wdt_keepalive(void)
 {
+	pr_info("%s\n", __func__);
+
 	if (bypass_keepalive) {
 		pr_info("Reboot on going keep alive is bypassed\n");
 		return -EBUSY;
