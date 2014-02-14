@@ -1773,7 +1773,6 @@ static void intel_fw_logging_report_nc_pwr(u32 value, int reg_type)
 		ia_trace->ospm_pm_ssc[0] = value;
 		break;
 	default:
-		pr_err("Invalid reg type!\n");
 		break;
 	}
 }
