@@ -919,9 +919,9 @@ static ssize_t reboot_ongoing_store(struct device *dev,
 }
 
 /* Watchdog behavior depending on system phase */
-static DEVICE_ATTR(shutdown_ongoing, S_IWUSR | S_IRUGO,
+static DEVICE_ATTR(shutdown_ongoing, S_IWUSR,
 				NULL, shutdown_ongoing_store);
-static DEVICE_ATTR(reboot_ongoing, S_IWUSR | S_IRUGO,
+static DEVICE_ATTR(reboot_ongoing, S_IWUSR,
 				NULL, reboot_ongoing_store);
 
 int create_watchdog_sysfs_files(void)
