@@ -355,6 +355,11 @@ static int __init intel_mid_ilb_osnib_init(void)
 {
 	int retval;
 
+	if (efi_enabled(EFI_RUNTIME_SERVICES)) {
+		pr_err("OSNIB mechanism is not available on this platform\n");
+		return -1;
+	}
+
 	/*
 	 * FIXME: shouldn't be cpu based, ilb flag needed
 	 */
@@ -367,8 +372,7 @@ static int __init intel_mid_ilb_osnib_init(void)
 		return 0;
 	}
 
-	if (!efi_enabled(EFI_RUNTIME_SERVICES) &&
-	    reboot_target_register(&target_mode_osnib))
+	if (reboot_target_register(&target_mode_osnib))
 		pr_err("%s: can't register target mode accessor\n",
 		       __func__);
 
@@ -430,8 +434,7 @@ static void __exit intel_mid_ilb_osnib_exit(void)
 		return;
 	}
 
-	if (!efi_enabled(EFI_RUNTIME_SERVICES))
-		reboot_target_unregister(&target_mode_osnib);
+	reboot_target_unregister(&target_mode_osnib);
 
 	kobject_put(osnib_kobj);
 	platform_driver_unregister(&ilb_osnib_driver);
