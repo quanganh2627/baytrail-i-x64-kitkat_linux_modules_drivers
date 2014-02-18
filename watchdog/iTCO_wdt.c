@@ -414,6 +414,22 @@ static ssize_t iTCO_wdt_write(struct file *file, const char __user *data,
 	return len;
 }
 
+static unsigned int iTCO_wdt_get_current_ospolicy()
+{
+	unsigned int val;
+
+	spin_lock(&iTCO_wdt_private.io_lock);
+
+	val = inl(TCO1_CNT);
+
+	val &= (TCO_POLICY_MASK << TCO_POLICY_OFFSET);
+	val >>= TCO_POLICY_OFFSET;
+
+	spin_unlock(&iTCO_wdt_private.io_lock);
+
+	return val;
+}
+
 static void iTCO_wdt_set_reset_type(int reset_type)
 {
 	int val;
@@ -776,8 +792,8 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 		goto unreg_region;
 	}
 
-	pr_info("initialized. heartbeat=%d sec (nowayout=%d)\n",
-		heartbeat, nowayout);
+	pr_info("initialized. heartbeat=%d sec (nowayout=%d) policy=0x%x\n",
+		heartbeat, nowayout, iTCO_wdt_get_current_ospolicy());
 
 	/* Reset OS policy */
 	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
