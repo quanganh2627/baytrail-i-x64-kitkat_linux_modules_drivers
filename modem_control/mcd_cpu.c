@@ -55,7 +55,7 @@ static inline int mdm_ctrl_configure_gpio(int gpio,
 {
 	int ret;
 
-	ret = gpio_request(gpio, "ModemControl");
+	ret = gpio_request(gpio, desc);
 
 	if (direction)
 		ret += gpio_direction_output(gpio, value);
@@ -78,17 +78,17 @@ int cpu_init_gpio(void *data)
 	pr_debug("cpu_init");
 
 	/* Configure the RESET_BB gpio */
-	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_rst_bbn, 1, 0, "RST_BB");
+	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_rst_bbn, 1, 0, "ModemControl_RST_BB");
 	if (ret)
 		goto out;
 
 	/* Configure the ON gpio */
-	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_pwr_on, 1, 0, "ON");
+	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_pwr_on, 1, 0, "ModemControl_ON");
 	if (ret)
 		goto free_ctx5;
 
 	/* Configure the RESET_OUT gpio & irq */
-	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_rst_out, 0, 0, "RST_OUT");
+	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_rst_out, 0, 0, "ModemControl_RST_OUT");
 	if (ret)
 		goto free_ctx4;
 
@@ -98,7 +98,7 @@ int cpu_init_gpio(void *data)
 	}
 
 	/* Configure the CORE_DUMP gpio & irq */
-	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_cdump, 0, 0, "CORE_DUMP");
+	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_cdump, 0, 0, "ModemControl_CORE_DUMP");
 	if (ret)
 		goto free_ctx2;
 
