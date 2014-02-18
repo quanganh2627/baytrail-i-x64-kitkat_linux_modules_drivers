@@ -194,6 +194,7 @@
 #define FAULT_STAT_CHRG_THRM_FLT		(2 << 4)
 #define FAULT_STAT_CHRG_TMR_FLT			(3 << 4)
 #define FAULT_STAT_BATT_FLT			(1 << 3)
+#define FAULT_STAT_BATT_TEMP_BITS		(3 << 0)
 
 #define BQ24192_VENDER_REV_REG			0xA
 /* D3, D4, D5 indicates the chip model number */
@@ -212,6 +213,7 @@
 #define CHARGER_TASK_JIFFIES		(HZ * 150)/* 150sec */
 #define CHARGER_HOST_JIFFIES		(HZ * 60) /* 60sec */
 #define FULL_THREAD_JIFFIES		(HZ * 30) /* 30sec */
+#define TEMP_THREAD_JIFFIES		(HZ * 30) /* 30sec */
 
 #define BATT_TEMP_MAX_DEF	60	/* 60 degrees */
 #define BATT_TEMP_MIN_DEF	0
@@ -249,6 +251,7 @@ struct bq24192_chip {
 	struct power_supply usb;
 	struct delayed_work chrg_task_wrkr;
 	struct delayed_work chrg_full_wrkr;
+	struct delayed_work chrg_temp_wrkr;
 	struct work_struct otg_evt_work;
 	struct notifier_block	otg_nb;
 	struct list_head	otg_queue;
@@ -1236,6 +1239,12 @@ static inline int bq24192_enable_charging(
 	ret = bq24192_write_reg(chip->client, BQ24192_POWER_ON_CFG_REG, regval);
 	if (ret < 0)
 		dev_warn(&chip->client->dev, "charger enable/disable failed\n");
+	else {
+		if (val)
+			chip->online = true;
+		else
+			chip->online = false;
+	}
 
 	return ret;
 }
@@ -1610,6 +1619,12 @@ static irqreturn_t bq24192_irq_thread(int irq, void *devid)
 	if (reg_status != SYSTEM_STAT_CHRG_DONE)
 		power_supply_changed(&chip->usb);
 
+	if (reg_fault & FAULT_STAT_BATT_TEMP_BITS) {
+		dev_info(&chip->client->dev,
+			"%s:Battery over temp occured!!!!\n", __func__);
+		schedule_delayed_work(&chip->chrg_temp_wrkr, 0);
+	}
+
 	return IRQ_HANDLED;
 }
 
@@ -1739,6 +1754,73 @@ static void bq24192_otg_evt_worker(struct work_struct *work)
 
 	}
 	spin_unlock_irqrestore(&chip->otg_queue_lock, flags);
+}
+
+
+static void bq24192_temp_update_worker(struct work_struct *work)
+{
+	struct bq24192_chip *chip =
+	    container_of(work, struct bq24192_chip, chrg_temp_wrkr.work);
+	int fault_reg = 0, fg_temp = 0;
+	static bool is_otp_notified;
+
+	dev_info(&chip->client->dev, "%s\n", __func__);
+	/* Check if battery fault condition occured. Reading the register
+	   value two times to get reliable reg value, recommended by vendor*/
+	fault_reg = bq24192_read_reg(chip->client, BQ24192_FAULT_STAT_REG);
+	if (fault_reg < 0) {
+		dev_err(&chip->client->dev,
+			"Fault status read failed: %d\n", fault_reg);
+		goto temp_wrkr_error;
+	}
+	fault_reg = bq24192_read_reg(chip->client, BQ24192_FAULT_STAT_REG);
+	if (fault_reg < 0) {
+		dev_err(&chip->client->dev,
+			"Fault status read failed: %d\n", fault_reg);
+		goto temp_wrkr_error;
+	}
+
+	fg_temp = fg_chip_get_property(POWER_SUPPLY_PROP_TEMP);
+	if (fg_temp == -ENODEV || fg_temp == -EINVAL) {
+		dev_err(&chip->client->dev,
+			"Failed to read FG temperature\n");
+		/* If failed to read fg temperature, use charger fault
+		 * status to identify the recovery */
+		if (fault_reg & FAULT_STAT_BATT_TEMP_BITS) {
+			schedule_delayed_work(&chip->chrg_temp_wrkr,
+				TEMP_THREAD_JIFFIES);
+		} else {
+			power_supply_changed(&chip->usb);
+		}
+		goto temp_wrkr_error;
+	}
+	fg_temp = fg_temp/10;
+
+	if (fg_temp >= chip->pdata->max_temp
+		|| fg_temp <= chip->pdata->min_temp) {
+		if (!is_otp_notified) {
+			dev_info(&chip->client->dev,
+				"Battery over temp occurred!!!!\n");
+			power_supply_changed(&chip->usb);
+			is_otp_notified = true;
+		}
+	} else if (!(fault_reg & FAULT_STAT_BATT_TEMP_BITS)) {
+		/* over temperature is recovered if battery temp
+		 * is between min_temp to max_temp and charger
+		 * temperature fault bits are cleared */
+		is_otp_notified = false;
+		dev_info(&chip->client->dev,
+			"Battery over temp recovered!!!!\n");
+		power_supply_changed(&chip->usb);
+		/*Return without reschedule as over temp recovered*/
+		return;
+	}
+	schedule_delayed_work(&chip->chrg_temp_wrkr, TEMP_THREAD_JIFFIES);
+	return;
+
+temp_wrkr_error:
+	is_otp_notified = false;
+	return;
 }
 
 static int otg_handle_notification(struct notifier_block *nb,
@@ -1922,8 +2004,8 @@ static int bq24192_probe(struct i2c_client *client,
 	chip->irq = -1;
 
 	/*assigning default value for min and max temp*/
-	chip->min_temp = chip->pdata->max_temp;
-	chip->max_temp = chip->pdata->min_temp;
+	chip->max_temp = chip->pdata->max_temp;
+	chip->min_temp = chip->pdata->min_temp;
 	i2c_set_clientdata(client, chip);
 	bq24192_client = client;
 
@@ -1995,6 +2077,7 @@ static int bq24192_probe(struct i2c_client *client,
 
 	INIT_DELAYED_WORK(&chip->chrg_full_wrkr, bq24192_full_worker);
 	INIT_DELAYED_WORK(&chip->chrg_task_wrkr, bq24192_task_worker);
+	INIT_DELAYED_WORK(&chip->chrg_temp_wrkr, bq24192_temp_update_worker);
 	mutex_init(&chip->event_lock);
 
 	/* Initialize the wakelock */
