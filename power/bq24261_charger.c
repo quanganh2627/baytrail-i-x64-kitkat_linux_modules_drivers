@@ -1356,12 +1356,23 @@ static void handle_battery_over_voltage(struct bq24261_charger *chip)
 	/* Set Health to Over Voltage. Disable charger to discharge
 	*  battery to reduce the battery voltage.
 	*/
-	chip->bat_health = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
-	bq24261_enable_charger(chip, false);
-	chip->is_charger_enabled = false;
-	cancel_delayed_work_sync(&chip->exception_mon_work);
-	schedule_delayed_work(&chip->exception_mon_work,
+
+	if ((IS_BATTERY_OVER_VOLTAGE(chip))) {
+		dev_err(&chip->client->dev, "%s Battery over voltage.", __func__);
+		chip->bat_health = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+		bq24261_enable_charger(chip, false);
+		chip->is_charger_enabled = false;
+		power_supply_changed(&chip->psy_usb);
+		schedule_delayed_work(&chip->exception_mon_work,
 			EXCEPTION_MONITOR_DELAY);
+	} else {
+		dev_info(&chip->client->dev, "%s Battery over voltage recovered.", __func__);
+		chip->bat_health = POWER_SUPPLY_HEALTH_GOOD;
+		bq24261_enable_charger(chip, true);
+		chip->is_charger_enabled = true;
+		resume_charging(chip);
+		power_supply_changed(&chip->psy_usb);
+	}
 }
 
 static void bq24261_exception_mon_work(struct work_struct *work)
@@ -1370,15 +1381,10 @@ static void bq24261_exception_mon_work(struct work_struct *work)
 						    struct bq24261_charger,
 						    exception_mon_work.work);
 	/* Only overvoltage exception need to monitor.*/
-	if (IS_BATTERY_OVER_VOLTAGE_RECOVERED(chip)) {
-		dev_info(&chip->client->dev, "Over Voltage Exception Recovered\n");
-		chip->bat_health = POWER_SUPPLY_HEALTH_GOOD;
-		bq24261_enable_charger(chip, true);
-		chip->is_charger_enabled = true;
-		resume_charging(chip);
-	} else {
-		schedule_delayed_work(&chip->exception_mon_work,
-			      EXCEPTION_MONITOR_DELAY);
+
+	if (chip->bat_health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) {
+		dev_info(&chip->client->dev, "%s battery over voltage thread", __func__);
+		handle_battery_over_voltage(chip);
 	}
 }
 
@@ -1466,19 +1472,12 @@ static int bq24261_handle_irq(struct bq24261_charger *chip, u8 stat_reg)
 
 		case BQ24261_BATT_OVP:
 			notify = false;
-			if (chip->bat_health !=
-					POWER_SUPPLY_HEALTH_OVERVOLTAGE) {
-				if (!IS_BATTERY_OVER_VOLTAGE(chip)) {
-					chip->chrgr_stat =
-						BQ24261_CHRGR_STAT_UNKNOWN;
-					resume_charging(chip);
-				} else {
-					dev_err(&client->dev, "Battery Over Voltage Fault\n");
-					handle_battery_over_voltage(chip);
-					notify = true;
-				}
-			}
+			dev_err(&client->dev, "Charger batt ovp Fault\n");
+			chip->bat_health = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+			schedule_delayed_work(&chip->exception_mon_work,
+					EXCEPTION_MONITOR_DELAY);
 			break;
+
 		case BQ24261_NO_BATTERY:
 			dev_err(&client->dev, "No Battery Connected\n");
 			break;
