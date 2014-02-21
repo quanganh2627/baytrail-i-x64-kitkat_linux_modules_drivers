@@ -55,7 +55,6 @@ struct pn544_dev	{
 	unsigned int		firm_gpio;
 	unsigned int		irq_gpio;
 	enum polarity		nfc_en_polarity;
-	int			busy;
 	unsigned int		max_i2c_xfer_size;
 };
 
@@ -184,35 +183,11 @@ static ssize_t pn544_dev_read(struct file *filp, char __user *buf,
 		return -EFAULT;
 	}
 
-	/* Handle the corner case where read cycle is broken */
-	if (ret == 1 && pn544_dev->busy) {
-		pn544_dev->busy = 0;
-		wake_unlock(&pn544_dev->read_wake);
-		return ret;
-	}
-
-	/*
-	 * PN544 read cycle consists of reading 1 byte containing the size of
-	 * the data to be transferred then reading the requested data. During
-	 * a read cycle, the platform shall not enter in s2ram, otherwise,
-	 * the pn544 will wait forever for the data to be read and no interrupt
-	 * is generated to the host even when a new field is detected. To avoid
-	 * such situation, read_lock shall be held during a read_cycle and if
-	 * the suspend happens during this period, then abort the suspend.
+	/* Prevent the suspend after each read cycle for 1 sec
+	 * to allow propagation of the event to upper layers of NFC
+	 * stack
 	 */
-	if (ret == 1) {
-		wake_lock(&pn544_dev->read_wake);
-		pn544_dev->busy = 1;
-	} else {
-		wake_unlock(&pn544_dev->read_wake);
-		pn544_dev->busy = 0;
-
-		/* Prevent the suspend after each read cycle for 1 sec
-		 * to allow propagation of the event to upper layers of NFC
-		 * stack
-		 */
-		wake_lock_timeout(&pn544_dev->read_wake, 1*HZ);
-	}
+	wake_lock_timeout(&pn544_dev->read_wake, 1*HZ);
 
 	/* Return the number of bytes read */
 	pr_debug("%s : Bytes read = %d: ", __func__, ret);
@@ -421,7 +396,6 @@ static int pn544_probe(struct i2c_client *client,
 	pn544_dev->firm_gpio  = platform_data->firm_gpio;
 	pn544_dev->max_i2c_xfer_size = platform_data->max_i2c_xfer_size;
 	pn544_dev->client   = client;
-	pn544_dev->busy = 0;
 	pn544_dev->nfc_en_polarity = UNKNOWN;
 
 	pr_info("%s : irq gpio:      %d\n", __func__, pn544_dev->irq_gpio);
@@ -495,13 +469,6 @@ static int pn544_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct pn544_dev *pn544_dev = i2c_get_clientdata(client);
-
-#ifdef CONFIG_HAS_WAKELOCK
-	WARN_ON(pn544_dev->busy);
-#endif
-
-	if (pn544_dev->busy)
-		return -EBUSY;
 
 	disable_irq(client->irq);
 
