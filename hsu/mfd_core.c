@@ -2369,7 +2369,11 @@ struct uart_hsu_port *serial_hsu_port_setup(struct device *pdev, int port,
 		up->rxc = &phsu->chans[index * 2 + 1];
 		up->dma_ops = &intel_dma_ops;
 	} else {
+#ifdef CONFIG_LPSS_DMA
+		up->dma_ops = &lpss_dma_ops;
+#else
 		up->dma_ops = pdw_dma_ops;
+#endif
 	}
 
 	if (cfg->has_alt) {
@@ -2384,6 +2388,10 @@ struct uart_hsu_port *serial_hsu_port_setup(struct device *pdev, int port,
 	}
 
 	serial_port_setup(up, cfg);
+
+	if (up->dma_ops->setup)
+		up->dma_ops->setup(up);
+
 	phsu->port_num++;
 
 	return up;
@@ -2394,6 +2402,8 @@ void serial_hsu_port_free(struct uart_hsu_port *up)
 {
 	struct hsu_port_cfg *cfg = phsu->configs[up->index];
 
+	if (up->dma_ops->remove)
+		up->dma_ops->remove(up);
 	uart_remove_one_port(&serial_hsu_reg, &up->port);
 	free_irq(up->port.irq, up);
 	if (cfg->has_alt) {
