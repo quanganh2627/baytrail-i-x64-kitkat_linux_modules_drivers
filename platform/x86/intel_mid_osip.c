@@ -54,6 +54,13 @@
 
 #define DRV_VERSION	"1.00"
 
+/* OSIP entries */
+enum {
+	ANDROID_OS_NUM,
+	RECOVERY_OS_NUM,
+	FASTBOOT_OS_NUM
+};
+
 struct OSII {                   /* os image identifier */
 	uint16_t os_rev_minor;
 	uint16_t os_rev_major;
@@ -225,8 +232,6 @@ bd_put:
 	return 0;
 }
 
-
-#ifdef CONFIG_INTEL_SCU_IPC
 /*
    OSHOB - OS Handoff Buffer
    OSNIB - OS No Init Buffer
@@ -239,7 +244,9 @@ bd_put:
 
 static int osip_invalidate(struct OSIP_header *osip, void *data)
 {
-	unsigned int id = (unsigned int)(uintptr_t)data;
+	/* data is directly used as an unsigned int */
+	unsigned int id = (unsigned int)data;
+
 	osip->desc[id].ddr_load_address = 0;
 	osip->desc[id].entry_point = 0;
 	return 1;
@@ -247,7 +254,9 @@ static int osip_invalidate(struct OSIP_header *osip, void *data)
 
 static int osip_restore(struct OSIP_header *osip, void *data)
 {
-	unsigned int id = (unsigned int)(uintptr_t)data;
+	/* data is directly used as an unsigned int */
+	unsigned int id = (unsigned int)data;
+
 	/* hardcoding addresses. According to the FAS, this is how
 	   the OS image blob has to be loaded, and where is the
 	   bootstub entry point.
@@ -255,8 +264,21 @@ static int osip_restore(struct OSIP_header *osip, void *data)
 	osip->desc[id].ddr_load_address = 0x1100000;
 	osip->desc[id].entry_point = 0x1101000;
 	return 1;
-
 }
+
+int osip_invalidate_main(void)
+{
+	return access_osip_record(osip_invalidate, ANDROID_OS_NUM);
+}
+EXPORT_SYMBOL(osip_invalidate_main);
+
+int osip_restore_main(void)
+{
+	return access_osip_record(osip_restore, ANDROID_OS_NUM);
+}
+EXPORT_SYMBOL(osip_restore_main);
+
+#ifdef CONFIG_INTEL_SCU_IPC
 
 /* Cold off sequence is initiated 4 sec after power button long press starts.    */
 /* In case of force shutdown, we delay cold off IPC sending by 5 seconds to make */
@@ -323,7 +345,7 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 		if (ret_ipc < 0)
 			pr_err("%s cannot write Recovery reboot reason in OSNIB\n",
 				__func__);
-		access_osip_record(osip_invalidate, (void *)0);
+		osip_invalidate_main();
 		ret = NOTIFY_OK;
 	} else if (data && 0 == strncmp(cmd, "bootloader", 11)) {
 		pr_warn("[SHTDWN] %s, rebooting into Fastboot\n", __func__);
@@ -354,7 +376,7 @@ static int osip_reboot_notifier_call(struct notifier_block *notifier,
 		if (ret_ipc < 0)
 			pr_err("%s cannot write Android reboot reason in OSNIB\n",
 				 __func__);
-		access_osip_record(osip_restore, (void *)0);
+		osip_restore_main();
 		ret = NOTIFY_OK;
 	}
 	return ret;
