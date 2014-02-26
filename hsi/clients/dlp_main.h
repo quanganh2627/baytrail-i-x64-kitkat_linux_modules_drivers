@@ -61,6 +61,7 @@
 
 #define DLP_HSI_TX_WAIT_FIFO	15
 #define DLP_HSI_RX_WAIT_FIFO	8
+#define DLP_HSI_TRACE_WAIT_FIFO	36
 
 /* PDU size for TTY channel */
 #define DLP_TTY_TX_PDU_SIZE		4096	/* 4 KBytes */

@@ -69,22 +69,16 @@ struct dlp_trace_ctx {
 
 	/* RX msg queue */
 	struct list_head rx_msgs;
-	int rx_msgs_count;
+	atomic_t rx_msgs_count;
 
 	struct dlp_channel *ch_ctx;
 
-#ifdef DEBUG
-	unsigned long dropped_data_size;
-#endif
-
+	unsigned int proc_pkt;
+	unsigned long proc_byte;
+	unsigned int dropped_pkt;
+	unsigned long dropped_byte;
+	atomic_t rx_pdu_count;
 };
-
-
-#ifdef DEBUG
-/* Used to activate the dump of dropped packets */
-static unsigned int log_dropped_data;
-module_param_named(log_dropped_data, log_dropped_data, int, S_IRUGO | S_IWUSR);
-#endif
 
 
 /*
@@ -100,12 +94,18 @@ static void dlp_trace_complete_rx(struct hsi_msg *msg);
 */
 static inline void dlp_trace_msg_destruct(struct hsi_msg *msg)
 {
+	struct dlp_channel *ch_ctx = msg->context;
+	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
+
+	/* track total number of pdus */
+	atomic_dec(&trace_ctx->rx_pdu_count);
+
 	/* Delete the received msg */
 	dlp_pdu_free(msg, msg->channel);
 }
 
 /*
- * Push RX pdu on channel 0
+ * Push RX pdu on trace channel
  *
  */
 static int dlp_trace_push_rx_pdu(struct dlp_channel *ch_ctx)
@@ -146,35 +146,6 @@ out:
 	return ret;
 }
 
-/*
-* @brief Remove & return the first list item (return NULL if empty)
-*
-* @param ch_ctx
-* @param msg
-*/
-static struct hsi_msg *dlp_trace_peek_msg(struct dlp_channel *ch_ctx)
-{
-	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
-	struct hsi_msg *msg = NULL;
-	unsigned long flags;
-
-	spin_lock_irqsave(&ch_ctx->lock, flags);
-
-	if (!list_empty(&trace_ctx->rx_msgs)) {
-		/* Get the fist list item (head) */
-		msg = list_entry(trace_ctx->rx_msgs.next, struct hsi_msg, link);
-
-		/* Remove the item from the list */
-		list_del_init(&msg->link);
-
-		/* Update the counter */
-		trace_ctx->rx_msgs_count--;
-	}
-
-	spin_unlock_irqrestore(&ch_ctx->lock, flags);
-	return msg;
-}
-
 
 /*
 * @brief
@@ -187,9 +158,9 @@ static void dlp_trace_complete_rx(struct hsi_msg *msg)
 	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
 	u32 *header = sg_virt(msg->sgt.sgl);
 	unsigned long flags;
-	int ret;
+	int count, ret;
 
-	/* Check the link readiness (TTY still opened) */
+	/* Check link readiness, TTY and trace channel still opened */
 	if (!dlp_tty_is_link_valid()) {
 		pr_debug(DRVNAME ": TRACE: CH%d PDU ignored (close:%d, Time out: %d)\n",
 				ch_ctx->ch_id,
@@ -220,24 +191,31 @@ static void dlp_trace_complete_rx(struct hsi_msg *msg)
 
 	/* Still have space in the rx queue ? */
 	spin_lock_irqsave(&ch_ctx->lock, flags);
-	if (trace_ctx->rx_msgs_count >= DLP_HSI_RX_WAIT_FIFO) {
+	if (atomic_read(&trace_ctx->rx_msgs_count) >= DLP_HSI_TRACE_WAIT_FIFO) {
 		/* Just drop the msg */
-		spin_unlock_irqrestore(&ch_ctx->lock, flags);
+		trace_ctx->dropped_pkt += 1;
 
-#ifdef DEBUG
-		trace_ctx->dropped_data_size += msg->actual_len;
-		if (log_dropped_data)
-			pr_debug(DRVNAME ": Packet dropped (dropped data size: %lu Bytes)\n",
-					trace_ctx->dropped_data_size);
-#endif
+		/* extract net byte for statistics */
+		count = DLP_PACKET_IN_PDU_COUNT;
+		do {
+			/* Get the size value */
+			header += 2;
+			trace_ctx->dropped_byte +=
+				DLP_HDR_DATA_SIZE(*header) - DLP_HDR_SPACE_AP;
+		} while((*header & DLP_HDR_MORE_DESC) && (count-- > 0));
+		spin_unlock_irqrestore(&ch_ctx->lock, flags);
 		goto push_again;
 	}
 
-	/* Update the counter */
-	trace_ctx->rx_msgs_count++;
-
 	/* Queue the msg to the read queue */
 	list_add_tail(&msg->link, &trace_ctx->rx_msgs);
+
+	/* for SMP, because we check only rx_msgs_count */
+	barrier();
+
+	/* Update the counters */
+	atomic_inc(&trace_ctx->rx_msgs_count);
+	trace_ctx->proc_pkt++;
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 
 	/* Wakeup any waiting clients for read/poll */
@@ -262,7 +240,7 @@ push_again:
  */
 static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 {
-	int ret = 0, state, count;
+	int ret, state;
 	unsigned long flags;
 	struct dlp_channel *ch_ctx = DLP_CHANNEL_CTX(DLP_CHANNEL_TRACE);
 	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
@@ -289,13 +267,67 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 	trace_ctx->opened = 1;
 	/* reset hangup flag */
 	trace_ctx->hangup = 0;
+	/* reset statistics */
+	trace_ctx->proc_pkt = trace_ctx->proc_byte = 0;
+	trace_ctx->dropped_pkt = 0;
+	trace_ctx->dropped_byte = 0;
+
+	/* remove old data from wait queue */
+	while (atomic_read(&trace_ctx->rx_msgs_count) > 0) {
+		struct hsi_msg *msg;
+
+		/* sanity check. shall never fail */
+		if (list_empty(&trace_ctx->rx_msgs)) {
+			atomic_set(&trace_ctx->rx_msgs_count, 0);
+			pr_crit(DRVNAME": message list unexpected empty\n");
+			ret = -EIO;
+			goto cleanup_err;
+		}
+
+		msg = list_entry(trace_ctx->rx_msgs.next,
+			struct hsi_msg, link);
+
+		/* Update the counter */
+		atomic_dec(&trace_ctx->rx_msgs_count);
+
+		/* for SMP, because we check only rx_msgs_count */
+		barrier();
+
+		/* Remove the item from the list */
+		list_del_init(&msg->link);
+
+		/* Read done => Queue the RX msg again */
+		ret = hsi_async(msg->cl, msg);
+		if (ret) {
+			pr_err(DRVNAME": hsi_async failed (%d) FIFO "
+				"will be empty\n", ret);
+
+			/* Delete the received msg */
+			dlp_pdu_free(msg, msg->channel);
+			ret = -EIO;
+			goto cleanup_err;
+		}
+	}
+
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 
-	/* Save private data for futur use */
+	/* Save private data for future use */
 	filp->private_data = ch_ctx;
 
 	/* Disable the flow control */
 	ch_ctx->use_flow_ctrl = 1;
+
+	/* Push missing RX PDUs */
+	while (atomic_read(&trace_ctx->rx_pdu_count)
+	    < (DLP_HSI_TRACE_WAIT_FIFO + HSI_TRACE_TEMP_BUFFERS)) {
+		ret = dlp_trace_push_rx_pdu(ch_ctx);
+		if (ret) {
+			pr_err(DRVNAME ": ch%d open failed while pushing "
+				"RX-buffer to controller!\n", ch_ctx->ch_id);
+			goto err;
+		}
+		atomic_inc(&trace_ctx->rx_pdu_count);
+	}
 
 	/* Reply to any waiting OPEN_CONN command */
 	ret = dlp_ctrl_send_ack_nack(ch_ctx);
@@ -317,13 +349,6 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 		dlp_ctrl_set_channel_state(ch_ctx->hsi_channel,
 		DLP_CH_STATE_OPENED);
 	}
-	/* Set the open flag */
-	trace_ctx->opened = 1;
-
-	/* Push RX PDUs */
-	count = DLP_HSI_RX_WAIT_FIFO + HSI_TRACE_TEMP_BUFFERS;
-	for (ret = count; ret; ret--)
-		dlp_trace_push_rx_pdu(ch_ctx);
 
 	pr_debug(DRVNAME": Trace Channel opened");
 	return ret;
@@ -331,6 +356,7 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 err:
 	/* release trace channel */
 	spin_lock_irqsave(&ch_ctx->lock, flags);
+cleanup_err:
 	/* set the hangup flag to make the poll function return an error*/
 	trace_ctx->hangup = 1;
 	/* Set the open flag */
@@ -376,56 +402,54 @@ static int dlp_trace_dev_close(struct inode *inode, struct file *filp)
  */
 static ssize_t dlp_trace_dev_read(struct file *filp,
 			   char __user *data,
-			   size_t count,
+			   size_t available,
 			   loff_t *ppos)
 {
 	struct dlp_channel *ch_ctx = filp->private_data;
 	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
 	struct hsi_msg *msg;
-	int ret, to_copy, copied, available, more_packets;
+	int ret, to_copy, copied, more_packets, left, packets;
 	unsigned int data_size, offset;
 	unsigned char *data_addr, *start_addr;
 	unsigned int *ptr;
 	unsigned long flags;
 
-	/* Check the user buffer size */
-	if (count < DLP_TRACE_RX_PDU_SIZE) {
-		pr_err(DRVNAME": Too small read buffer size %d, should be >= %d\n",
-				count, DLP_TRACE_RX_PDU_SIZE);
-		return -EINVAL;
-	}
+	if (unlikely(available == 0))
+		return 0;
 
-	/* Have some data to read ? */
-	spin_lock_irqsave(&ch_ctx->lock, flags);
-	ret = list_empty(&trace_ctx->rx_msgs);
-	spin_unlock_irqrestore(&ch_ctx->lock, flags);
+	if (unlikely(available < 0))
+		return -EINVAL;
+
+	if (unlikely(!trace_ctx->opened))
+		return -EWOULDBLOCK;
 
 	/* List empty ? */
-	if (ret) {
+	if (atomic_read(&trace_ctx->rx_msgs_count) <= 0) {
 		/* Descriptor opened in Non-Blocking mode ? */
 		if (filp->f_flags & O_NONBLOCK) {
-			copied = -EWOULDBLOCK;
-			goto out;
+			return -EWOULDBLOCK;
 		} else {
-			ret = wait_event_interruptible(trace_ctx->read_wq, 0);
+			ret = wait_event_interruptible(trace_ctx->read_wq,
+				   (atomic_read(&trace_ctx->rx_msgs_count) > 0)
+				|| (!trace_ctx->opened));
 			if (ret) {
-				copied = -EINTR;
-				goto out;
+				return -EINTR;
 			}
+			if (!trace_ctx->opened)
+				return -EBADF;
 		}
 	}
 
-	copied = 0;
-	available = count;
+	left = copied = 0;
 
 	/* Parse RX msgs queue */
-	while (available) {
-		msg = dlp_trace_peek_msg(ch_ctx);
-		if (!msg)
-			break;
+	do {
+		msg = list_entry(trace_ctx->rx_msgs.next,
+			struct hsi_msg, link);
 
 		ptr = sg_virt(msg->sgt.sgl);
 		start_addr = (unsigned char *)ptr;
+		packets = DLP_PACKET_IN_PDU_COUNT;
 
 		do {
 			/* Get the start offset */
@@ -439,36 +463,94 @@ static ssize_t dlp_trace_dev_read(struct file *filp,
 			data_size -= DLP_HDR_SPACE_AP;
 			data_addr = start_addr + offset + DLP_HDR_SPACE_AP;
 
+			/* CP data PDU header sanity check for max number
+			   of packets per PDU and receive buffer overflow */
+			if (--packets <= 0) {
+				pr_err(DRVNAME ": number of trace package "
+					"exceeded!\n");
+				more_packets = 0; /* recycle rest of PDU */
+				break;
+			}
+			if ((offset + DLP_HDR_SPACE_AP + data_size)
+			    > DLP_TRACE_RX_PDU_SIZE) {
+				pr_err(DRVNAME ": trace buffer overflow!\n");
+				more_packets = 0; /* recycle rest of PDU */
+				break;
+			}
+
+			/* short cut, when we have to process multi
+			   pack trace messages the 2nd time */
+			if (unlikely(data_size == 0))
+				continue;
+
 			/* Calculate the data size */
-			to_copy = MIN(data_size, available);
+			if (available >= data_size) {
+				to_copy = data_size;
+
+				/* write back we have complete processed */
+				if (more_packets) {
+					*ptr = DLP_HDR_MORE_DESC
+					     | DLP_HDR_SPACE_AP;
+				}
+			} else {
+				/* Note, a left > 0 will later result in
+				   available == 0, so we will leave the loop */
+				to_copy = available;
+				left = data_size - available;
+
+				/* write back left size */
+				*ptr-- = more_packets
+				       | (left + DLP_HDR_SPACE_AP);
+
+				/* write back new offset */
+				*ptr++ = offset + to_copy;
+			}
+
 
 			/* Copy data to the user buffer */
 			ret = copy_to_user(data+copied, data_addr, to_copy);
 			if (ret) {
 				/* Stop copying */
-				pr_err(DRVNAME": Unable to copy data to the user buffer\n");
+				pr_err(DRVNAME": Unable to copy data to user "
+						"buffer\n");
 				break;
 			}
 
 			copied += to_copy;
 			available -= to_copy;
-		} while ((more_packets) && (available));
+			trace_ctx->proc_byte += to_copy;
+		} while ((more_packets) && (available > 0));
 
-		/* Read done => Queue the RX msg again */
-		ret = hsi_async(msg->cl, msg);
-		if (ret) {
-			pr_err(DRVNAME": hsi_async failed (%d) FIFO will be empty\n",
-					ret);
+		if (!left && !more_packets) {
+			spin_lock_irqsave(&ch_ctx->lock, flags);
 
-			/* Delete the received msg */
-			dlp_pdu_free(msg, msg->channel);
+			/* Update the counter */
+			atomic_dec(&trace_ctx->rx_msgs_count);
+
+			/* for SMP, because we check only rx_msgs_count */
+			barrier();
+
+			/* Remove the item from the list */
+			list_del_init(&msg->link);
+
+			spin_unlock_irqrestore(&ch_ctx->lock, flags);
+
+			/* Read done => Queue the RX msg again */
+			ret = hsi_async(msg->cl, msg);
+			if (ret) {
+				pr_err(DRVNAME": hsi_async failed (%d) FIFO "
+					"will be empty\n", ret);
+
+				/* Delete the received msg */
+				dlp_pdu_free(msg, msg->channel);
+			}
 		}
-	}
+
+	} while ((available > 0) && (atomic_read(&trace_ctx->rx_msgs_count) > 0));
 
 	/* Update the position */
 	(*ppos) += copied;
 
-out:
 	return copied;
 }
 
@@ -517,7 +599,7 @@ static unsigned int dlp_trace_dev_poll(struct file *filp,
 	if (trace_ctx->hangup) {
 		/* The close function has been executed <=> hangup */
 		ret = POLLHUP;
-	} else if (!list_empty(&trace_ctx->rx_msgs)) {
+	} else if (atomic_read(&trace_ctx->rx_msgs_count) > 0) {
 		ret = POLLIN | POLLRDNORM;
 	}
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
@@ -599,6 +681,8 @@ struct dlp_channel *dlp_trace_ctx_create(unsigned int ch_id,
 	spin_lock_init(&ch_ctx->lock);
 	init_waitqueue_head(&trace_ctx->read_wq);
 	INIT_LIST_HEAD(&trace_ctx->rx_msgs);
+	atomic_set(&trace_ctx->rx_msgs_count, 0);
+	atomic_set(&trace_ctx->rx_pdu_count, 0);
 
 	/* Register debug, cleanup CBs */
 	ch_ctx->dump_state = dlp_dump_channel_state;
