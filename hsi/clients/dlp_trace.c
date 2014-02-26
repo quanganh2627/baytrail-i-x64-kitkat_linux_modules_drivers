@@ -70,6 +70,7 @@ struct dlp_trace_ctx {
 	/* RX msg queue */
 	struct list_head rx_msgs;
 	atomic_t rx_msgs_count;
+	unsigned int rx_msgs_count_max;
 
 	struct dlp_channel *ch_ctx;
 
@@ -215,6 +216,8 @@ static void dlp_trace_complete_rx(struct hsi_msg *msg)
 
 	/* Update the counters */
 	atomic_inc(&trace_ctx->rx_msgs_count);
+	if (atomic_read(&trace_ctx->rx_msgs_count) > trace_ctx->rx_msgs_count_max)
+		trace_ctx->rx_msgs_count_max = atomic_read(&trace_ctx->rx_msgs_count);
 	trace_ctx->proc_pkt++;
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 
@@ -271,6 +274,7 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 	trace_ctx->proc_pkt = trace_ctx->proc_byte = 0;
 	trace_ctx->dropped_pkt = 0;
 	trace_ctx->dropped_byte = 0;
+	trace_ctx->rx_msgs_count_max = 0;
 
 	/* remove old data from wait queue */
 	while (atomic_read(&trace_ctx->rx_msgs_count) > 0) {
@@ -627,6 +631,98 @@ static void dlp_trace_dev_tx_timeout_cb(struct dlp_channel *ch_ctx)
 
 
 /*
+ * PDU Header analyzer
+ * Count all trace payload bytes in the PDU and Trace packages
+ * print output into a string vaiable
+ *
+ * @param *str : pointer to string, used as sprintf write buffer
+ * @param *format : const format string, used to format the sprintf
+ * @param *pdu : pointer to PDU messages buffer
+ * @return: adjusted pointer to string
+ *
+ * Context: Any
+ * Notes: Take care to prepare enough space in str buffer
+ *        Fkt doesn't check PDU header or sequence validity!
+ */
+static char *pdu_to_hd_ana(char *str, const char *format, struct hsi_msg *pdu) {
+	u32 *ptr;
+	bool more_packets;
+	unsigned int size=0, packages=0;
+
+	/* Start Address & Size */
+	ptr = sg_virt(pdu->sgt.sgl);
+	ptr+=2;
+
+	do {
+		more_packets = ((*ptr) & DLP_HDR_MORE_DESC);
+
+		/* Read the size (mask the N/P fields) */
+		size += DLP_HDR_DATA_SIZE((*ptr)) - DLP_HDR_SPACE_AP;
+
+		/* Go to the next packet desc */
+		ptr += 2;
+		packages++;
+
+	} while ((more_packets) && (packages < DLP_PACKET_IN_PDU_COUNT));
+
+	str += sprintf(str, format, packages, size);
+	return str;
+}
+
+
+
+/*
+* @brief Dump information about the trace channel state
+*
+* @param ch_ctx : channel context to consider
+* @param m : seq file to consider
+*
+*/
+static void dlp_trace_dump_channel_state(struct dlp_channel *ch_ctx, struct seq_file *m)
+{
+	unsigned long flags;
+	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
+
+	struct list_head *curr;
+	struct hsi_msg *pdu;
+	int i;
+	char s[20];
+
+	seq_printf(m, "\nChannel: %d\n", ch_ctx->hsi_channel);
+	seq_printf(m, "-------------\n");
+	seq_printf(m, " state    : %d\n",
+			dlp_drv.channels_hsi[ch_ctx->hsi_channel].state);
+	seq_printf(m, " credits  : %d\n", ch_ctx->credits);
+	seq_printf(m, " flow ctrl: %d\n", ch_ctx->use_flow_ctrl);
+	seq_printf(m, " hangup: %d\n", trace_ctx->hangup);
+	seq_printf(m, " opened: %d\n", trace_ctx->opened);
+
+	/* Dump the RX context info */
+	seq_printf(m, "\n RX ctx:\n");
+	spin_lock_irqsave(&ch_ctx->lock, flags);
+	seq_printf(m, "   wait_max    : %d\n", DLP_HSI_TRACE_WAIT_FIFO);
+	seq_printf(m, "   ctrl_max    : %d\n", DLP_HSI_TRACE_WAIT_FIFO + HSI_TRACE_TEMP_BUFFERS);
+	seq_printf(m, "   wait_len    : %d\n", atomic_read(&trace_ctx->rx_msgs_count));
+	seq_printf(m, "   wait_len_max: %d\n", trace_ctx->rx_msgs_count_max);
+	seq_printf(m, "   total_len   : %d\n", atomic_read(&trace_ctx->rx_pdu_count));
+	seq_printf(m, "   proc_pkt    : %u\n", trace_ctx->proc_pkt);
+	seq_printf(m, "   proc_net    : %lu Byte\n", trace_ctx->proc_byte);
+	seq_printf(m, "   drop_pkt    : %d\n", trace_ctx->dropped_pkt);
+	seq_printf(m, "   drop_net    : %lu Byte\n", trace_ctx->dropped_byte);
+	seq_printf(m, "   pdu_size    : %d\n", ch_ctx->rx.pdu_size);
+
+	seq_printf(m, "   Waiting PDUs:\n");
+	i = 0;
+	list_for_each(curr, &trace_ctx->rx_msgs) {
+		pdu = list_entry(curr, struct hsi_msg, link);
+		pdu_to_hd_ana(s, "%2d Pack : %d", pdu);
+		seq_printf(m, "      %02d: %s Byte\n", ++i, s);
+	}
+	spin_unlock_irqrestore(&ch_ctx->lock, flags);
+}
+
+
+/*
 * Device driver file operations
 */
 static const struct file_operations dlp_trace_ops = {
@@ -685,7 +781,7 @@ struct dlp_channel *dlp_trace_ctx_create(unsigned int ch_id,
 	atomic_set(&trace_ctx->rx_pdu_count, 0);
 
 	/* Register debug, cleanup CBs */
-	ch_ctx->dump_state = dlp_dump_channel_state;
+	ch_ctx->dump_state = dlp_trace_dump_channel_state;
 	ch_ctx->cleanup = dlp_trace_ctx_cleanup;
 
 	/* Hangup context */
