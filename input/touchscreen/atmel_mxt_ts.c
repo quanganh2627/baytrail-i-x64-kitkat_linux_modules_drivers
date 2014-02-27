@@ -328,7 +328,6 @@ struct mxt_panel_info {
 	u8 build;
 	u32 info_crc;
 	u32 config_crc;
-	int gpio_switch;
 };
 
 struct mxt_panel_info supported_panels[] = {
@@ -340,7 +339,6 @@ struct mxt_panel_info supported_panels[] = {
 		.build = 0xAB,
 		.info_crc = 0x969531,
 		.config_crc = 0x96CB66,
-		.gpio_switch = 211,
 	},
 	/* 1664S 10 inch panel */
 	{
@@ -350,7 +348,6 @@ struct mxt_panel_info supported_panels[] = {
 		.build = 0xAA,
 		.info_crc = 0xD4BF1D,
 		.config_crc = 0x808EEC,
-		.gpio_switch = 211,
 	},
 	/* 3432S 17 inch panel */
 	{
@@ -360,7 +357,6 @@ struct mxt_panel_info supported_panels[] = {
 		.build = 0xAB,
 		.info_crc = 0xB86FA4,
 		.config_crc = 0xB85700,
-		.gpio_switch = -1,
 	},
 };
 
@@ -882,7 +878,6 @@ static bool supported_firmware(struct mxt_data *data, struct mxt_info *info)
 				panel->variant_id == info->variant_id &&
 				panel->version == info->version &&
 				panel->build == info->build) {
-			data->pdata->gpio_switch = panel->gpio_switch;
 			data->pdata->hardware_id = i;
 			dev_info(&client->dev, "%s: Supported panel: %u %u %02X %02X\n",
 					__func__,
@@ -3382,9 +3377,13 @@ static int mxt_probe(struct i2c_client *client,
 	pdata->irqflags = IRQF_TRIGGER_LOW | IRQF_TRIGGER_FALLING;
 	pdata->cfg_name = MXT_CFG_NAME;
 	pdata->hardware_id = MXT_UNKNOWN_VALUE;
-	pdata->gpio_switch = MXT_UNKNOWN_VALUE;
+
 	pdata->gpio_reset =
 		acpi_get_gpio_by_index(&client->dev, 0, &gpio_info);
+	pdata->gpio_switch =
+		acpi_get_gpio_by_index(&client->dev, 1, &gpio_info);
+	dev_info(&client->dev, "gpio_reset=%d, gpio_switch=%d\n",
+				pdata->gpio_reset, pdata->gpio_switch);
 
 	data->pdata = pdata;
 	data->fw_name = MXT_FW_NAME;
