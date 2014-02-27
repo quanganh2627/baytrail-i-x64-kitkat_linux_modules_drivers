@@ -153,7 +153,7 @@ static void vibra_drv2605_enable(struct vibra_info *info)
 	pm_runtime_get_sync(info->dev);
 
 	/* Enable the EN line */
-	gpio_set_value(info->gpio_en, 1);
+	vibra_gpio_set_value(info, 1);
 
 	/* Wait for 850us per spec, give 100us buffer */
 	usleep_range(950, 1000);
@@ -170,7 +170,7 @@ static void vibra_disable(struct vibra_info *info)
 	pr_debug("%s: Disable", __func__);
 	trace_vibrator(0);
 	mutex_lock(&info->lock);
-	gpio_set_value_cansleep(info->gpio_en, 0);
+	vibra_gpio_set_value_cansleep(info, 0);
 	info->enabled = false;
 	info->pwm_configure(info, false);
 	pm_runtime_put(info->dev);
@@ -184,7 +184,7 @@ static void vibra_drv8601_enable(struct vibra_info *info)
 	mutex_lock(&info->lock);
 	pm_runtime_get_sync(info->dev);
 	info->pwm_configure(info, true);
-	gpio_set_value_cansleep(info->gpio_en, 1);
+	vibra_gpio_set_value_cansleep(info, 1);
 	info->enabled = true;
 	mutex_unlock(&info->lock);
 }
@@ -311,7 +311,7 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 	}
 
 	/* enable gpio first */
-	gpio_set_value(info->gpio_en, 1);
+	vibra_gpio_set_value(info, 1);
 	/* wait for gpio to settle and drv to accept i2c */
 	usleep_range(1000, 1100);
 
@@ -332,7 +332,7 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 
 			if (!((INTEL_MID_BOARD(1, PHONE, MOFD)) ||
 					(INTEL_MID_BOARD(1, TABLET, MOFD)))) {
-				gpio_set_value(info->gpio_en, 0);
+				vibra_gpio_set_value(info, 0);
 				pr_debug("Do Nothing -  Device Calibrated\n");
 				return 0;
 			}
@@ -353,7 +353,7 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 	msleep(1000);
 	/* set the driver in pwm mode */
 	vibra_driver_write(adap, DRV2605_I2C_ADDR, DRV2605_MODE, DRV2605_PWM);
-	gpio_set_value(info->gpio_en, 0);
+	vibra_gpio_set_value(info, 0);
 
 	return 0;
 }
@@ -376,6 +376,7 @@ struct vibra_info *mid_vibra_setup(struct device *dev, struct mid_vibra_pdata *d
 	info->gpio_en = data->gpio_en;
 	info->gpio_pwm = data->gpio_pwm;
 	info->name = data->name;
+	info->use_gpio_en = data->use_gpio_en;
 
 	info->dev = dev;
 	mutex_init(&info->lock);
@@ -427,11 +428,16 @@ static int intel_mid_vibra_probe(struct pci_dev *pci,
 	info->max_base_unit = INTEL_VIBRA_MAX_BASEUNIT;
 	info->max_duty_cycle = INTEL_VIBRA_MAX_TIMEDIVISOR;
 
-	pr_debug("using gpios en: %d, pwm %d", info->gpio_en, info->gpio_pwm);
-	ret = gpio_request_one(info->gpio_en, GPIOF_DIR_OUT, "VIBRA ENABLE");
-	if (ret != 0) {
-		pr_err("gpio_request(%d) fails:%d\n", info->gpio_en, ret);
-		goto out;
+	if (info->use_gpio_en) {
+		pr_debug("using gpios en: %d, pwm %d",
+				info->gpio_en, info->gpio_pwm);
+		ret = gpio_request_one(info->gpio_en, GPIOF_DIR_OUT,
+				"VIBRA ENABLE");
+		if (ret != 0) {
+			pr_err("gpio_request(%d) fails:%d\n",
+					info->gpio_en, ret);
+			goto out;
+		}
 	}
 
 	/* Init the device */
@@ -474,7 +480,7 @@ do_release_regions:
 do_disable_device:
 	pci_disable_device(pci);
 do_freegpio_vibra_enable:
-	gpio_free(info->gpio_en);
+	vibra_gpio_free(info);
 out:
 	return ret;
 }
@@ -482,7 +488,7 @@ out:
 static void intel_mid_vibra_remove(struct pci_dev *pci)
 {
 	struct vibra_info *info = pci_get_drvdata(pci);
-	gpio_free(info->gpio_en);
+	vibra_gpio_free(info);
 	sysfs_remove_group(&info->dev->kobj, info->vibra_attr_group);
 	iounmap(info->shim);
 	pci_release_regions(pci);
