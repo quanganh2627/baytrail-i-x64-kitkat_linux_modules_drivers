@@ -1573,6 +1573,19 @@ union sysfsapi_action sysfsapi_table[SENSOR_ACTION_RESERVE] = {
 	 { .store = attr_set_selftest },
 };
 
+static struct device general_sensor_device;
+static void sysfs_interfaces_link(struct device *dev)
+{
+	static int general_sensor_num = 0;
+	int ret = 0;
+	char name[8] = {0};
+
+	sprintf(name, "sensor%d", general_sensor_num++);
+	ret = sysfs_create_link(&general_sensor_device.kobj, &dev->kobj, name);
+	if (ret) {
+		dev_warn(dev, "Fail to link  %s\n", dev_name(dev));
+	}
+}
 static int create_sysfs_interfaces(struct sensor_data *data)
 {
 	int ret = 0;
@@ -1597,6 +1610,8 @@ static int create_sysfs_interfaces(struct sensor_data *data)
 		dev_err(data->attr_dev, "sysfs can not create group\n");
 		return ret;
 	}
+
+	sysfs_interfaces_link(data->attr_dev);
 
 	/*developer defined */
 	if (!data->config->sysfs_entries)
@@ -2134,7 +2149,6 @@ static int sensor_parse_config(int num, struct sensor_config *configs)
 	return 0;
 }
 
-static struct device general_sensor_device;
 static struct sensor_config_image *sensor_image;
 static int sensor_general_start(int start)
 {
