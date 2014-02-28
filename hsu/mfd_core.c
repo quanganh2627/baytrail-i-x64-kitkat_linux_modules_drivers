@@ -1525,7 +1525,7 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 	 * MSI by default
 	 */
 	up->ier &= ~UART_IER_MSI;
-	if (UART_ENABLE_MS(&up->port, termios->c_cflag))
+	if (!cfg->hw_ctrl_cts && UART_ENABLE_MS(&up->port, termios->c_cflag))
 		up->ier |= UART_IER_MSI;
 
 	serial_out(up, UART_IER, up->ier);
