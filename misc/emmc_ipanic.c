@@ -50,9 +50,7 @@
 #include <linux/panic_gbuffer.h>
 #include "emmc_ipanic.h"
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
 #include <linux/kmsg_dump.h>
-#endif
 
 static char *part_label = "";
 module_param(part_label, charp, 0);
@@ -87,9 +85,7 @@ static int last_chunk_buf_len;
 static DEFINE_MUTEX(drv_mutex);
 static void (*func_stream_emmc) (void);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
 static struct kmsg_dumper ipanic_dumper;
-#endif
 
 static void emmc_panic_erase(unsigned char *buffer, Sector *sect)
 {
@@ -160,10 +156,6 @@ static int emmc_read(struct mmc_emergency_info *emmc, void *holder,
 		return 0;
 	}
 
-	/* WE only support reading a maximum of a flash page */
-	if (count > SECTOR_SIZE)
-		count = SECTOR_SIZE;
-
 	sector_no = offset >> SECTOR_SIZE_SHIFT;
 	sector_offset = offset & (SECTOR_SIZE - 1);
 	if (sector_no >= emmc->block_count) {
@@ -184,11 +176,12 @@ static int emmc_read(struct mmc_emergency_info *emmc, void *holder,
 		put_dev_sector(sect);
 		return -EINVAL;
 	}
+	/* count and read_ptr are updated to match flash page size */
+	if (count + sector_offset > SECTOR_SIZE)
+		count = SECTOR_SIZE - sector_offset;
 
-	if (sector_offset) {
-		count -= sector_offset;
+	if (sector_offset)
 		read_ptr += sector_offset;
-	}
 
 	if (to_user) {
 		if (copy_to_user(buffer, read_ptr, count)) {
@@ -210,7 +203,7 @@ static ssize_t emmc_ipanic_gbuffer_proc_read(struct file *file, char __user *buf
 {
 	struct emmc_ipanic_data *ctx = &drv_ctx;
 	size_t log_len, log_head;
-	off_t log_off, proc_offset;
+	off_t log_off;
 	int rc;
 
 	if (!ctx) {
@@ -226,7 +219,6 @@ static ssize_t emmc_ipanic_gbuffer_proc_read(struct file *file, char __user *buf
 	log_off = ctx->curr.log_offset[IPANIC_LOG_GBUFFER];
 	log_len = ctx->curr.log_length[IPANIC_LOG_GBUFFER];
 	log_head = ctx->curr.log_head[IPANIC_LOG_GBUFFER];
-	proc_offset = *ppos;
 
 	if (*ppos >= log_len) {
 		mutex_unlock(&drv_mutex);
@@ -265,65 +257,11 @@ static ssize_t emmc_ipanic_gbuffer_proc_read(struct file *file, char __user *buf
 		return rc;
 	}
 
-	/* See fs/proc/generic.c:read_proc:75 case 1)
-	 *
-	 * Requested data (offset) is put at *buffer
-	 * *start contains written data count */
 	*ppos += rc;
-	if ((proc_offset + rc) == ctx->curr.log_length[IPANIC_LOG_GBUFFER]) {
-		mutex_unlock(&drv_mutex);
-		return 0;
-	}
 
 	mutex_unlock(&drv_mutex);
 
 	return rc;
-}
-
-static ssize_t emmc_ipanic_proc_read_hdr(struct file *file, char __user *buffer,
-			     size_t count, loff_t *ppos)
-{
-	struct emmc_ipanic_data *ctx = &drv_ctx;
-	struct panic_header *hdr;
-	int read_count;          /* reading from memory */
-
-	if (!ctx) {
-		pr_err("%s:invalid panic handler\n", __func__);
-		return 0;
-	}
-
-	if (!count)
-		return 0;
-
-	if (*ppos >= SECTOR_SIZE)
-		return 0;
-
-	if (*ppos + count > SECTOR_SIZE)
-		count = SECTOR_SIZE - *ppos;
-
-	mutex_lock(&drv_mutex);
-
-	read_count = emmc_read(ctx->emmc, emmc_ipanic_proc_read_hdr,
-					last_chunk_buf, *ppos, count, false);
-	if (read_count <= 0) {
-		mutex_unlock(&drv_mutex);
-		pr_err("%s: emmc_read: invalid args: offset:0x%08llx, count:%zd",
-			__func__, (u64)(*ppos), count);
-		return read_count;
-	}
-
-	*ppos += read_count;
-
-	mutex_unlock(&drv_mutex);
-
-	hdr = (struct panic_header *)last_chunk_buf;
-	if (copy_to_user(buffer, hdr->panic,
-		SECTOR_SIZE - offsetof(struct panic_header, panic))) {
-		pr_err( "%s: Failed to copy buffer to User\n", __func__);
-		return 0;
-	}
-
-	return SECTOR_SIZE - offsetof(struct panic_header, panic);
 }
 
 static ssize_t emmc_ipanic_proc_read_by_log(struct file *file, char __user *buffer,
@@ -332,6 +270,7 @@ static ssize_t emmc_ipanic_proc_read_by_log(struct file *file, char __user *buff
 	struct emmc_ipanic_data *ctx = &drv_ctx;
 	size_t file_length;
 	off_t file_offset;
+	int rc;
 
 	if (!ctx) {
 		pr_err("%s:invalid panic handler\n", __func__);
@@ -341,15 +280,21 @@ static ssize_t emmc_ipanic_proc_read_by_log(struct file *file, char __user *buff
 	if (!count)
 		return 0;
 
-	if (log < 0 || log >= IPANIC_LOG_MAX) {
+	if (log < 0 || log > IPANIC_LOG_MAX) {
 		pr_err("%s: Bad log number (%d)\n", __func__, log);
 		return -EINVAL;
 	}
 
 	mutex_lock(&drv_mutex);
 
-	file_length = ctx->curr.log_length[log];
-	file_offset = ctx->curr.log_offset[log];
+	if (log == IPANIC_LOG_HEADER) {
+		file_length = ctx->hdr.log_size;
+		file_offset = offsetof(struct panic_header, panic);
+	}
+	else {
+		file_length = ctx->curr.log_length[log];
+		file_offset = ctx->curr.log_offset[log];
+	}
 
 	if (*ppos >= file_length) {
 		mutex_unlock(&drv_mutex);
@@ -359,38 +304,39 @@ static ssize_t emmc_ipanic_proc_read_by_log(struct file *file, char __user *buff
 	if ((*ppos + count) > file_length)
 		count = file_length - *ppos;
 
-	count = emmc_read(ctx->emmc, emmc_ipanic_proc_read_by_log,
+	rc= emmc_read(ctx->emmc, emmc_ipanic_proc_read_by_log,
 		       buffer, file_offset + *ppos, count, true);
-	if (count <= 0) {
+	if (rc <= 0) {
 		mutex_unlock(&drv_mutex);
-		return count;
+		pr_err("%s: emmc_read: invalid args: offset:0x%08llx, count:%zd",
+		       __func__, (u64)(file_offset + *ppos), count);
+		return rc;
 	}
-	*ppos += count;
 
-	if ((*ppos + count) == file_length) {
-		mutex_unlock(&drv_mutex);
-		return 0;
-	}
+	*ppos += rc;
 
 	mutex_unlock(&drv_mutex);
 
-	return count;
+	return rc;
+}
+
+static ssize_t emmc_ipanic_proc_read_hdr(struct file *file, char __user *buffer,
+			     size_t count, loff_t *ppos)
+{
+	return emmc_ipanic_proc_read_by_log(file, buffer, count, ppos, IPANIC_LOG_HEADER);
 }
 
 static ssize_t emmc_ipanic_proc_read0(struct file *file, char __user *buffer,
 			     size_t count, loff_t *ppos)
 {
-	return emmc_ipanic_proc_read_by_log(file, buffer, count, ppos, 0);
+	return emmc_ipanic_proc_read_by_log(file, buffer, count, ppos, IPANIC_LOG_CONSOLE);
 }
 
 static ssize_t emmc_ipanic_proc_read1(struct file *file, char __user *buffer,
 			     size_t count, loff_t *ppos)
 {
-	return emmc_ipanic_proc_read_by_log(file, buffer, count, ppos, 1);
+	return emmc_ipanic_proc_read_by_log(file, buffer, count, ppos, IPANIC_LOG_THREADS);
 }
-
-
-
 
 static void emmc_ipanic_remove_proc_work(struct work_struct *work)
 {
@@ -619,7 +565,6 @@ static int emmc_ipanic_writeflashpage(struct mmc_emergency_info *emmc,
  * Writes the contents of the console to the specified offset in flash.
  * Returns number of bytes written
  */
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
 static int emmc_ipanic_write_console(struct mmc_emergency_info *emmc,
 				     unsigned int off, int *actual_size)
 {
@@ -689,68 +634,6 @@ static int emmc_ipanic_write_console(struct mmc_emergency_info *emmc,
 
 	return block_shift;
 }
-#else
-static int emmc_ipanic_write_console(struct mmc_emergency_info *emmc,
-				     unsigned int off, int *actual_size)
-{
-	struct emmc_ipanic_data *ctx = &drv_ctx;
-	int saved_oip;
-	int idx = 0;
-	int rc, rc1, rc2;
-	int block_shift = 0;
-
-	*actual_size = 0;
-	while (1) {
-		saved_oip = oops_in_progress;
-		oops_in_progress = 1;
-
-		if (last_chunk_buf_len) {
-			memcpy(ctx->bounce, last_chunk_buf, last_chunk_buf_len);
-			rc1 =
-			    log_buf_copy(ctx->bounce + last_chunk_buf_len, idx,
-					 SECTOR_SIZE - last_chunk_buf_len);
-		} else
-			rc1 = log_buf_copy(ctx->bounce, idx, SECTOR_SIZE);
-
-		oops_in_progress = saved_oip;
-
-		if (rc1 < 0)	/* nothing copied */
-			break;
-
-		if (last_chunk_buf_len)
-			rc = rc1 + last_chunk_buf_len;
-		else
-			rc = rc1;
-
-		/* If it is the last chunk, just copy it to
-		   last chunk buffer and exit loop. */
-		if (rc != SECTOR_SIZE) {
-			/*Leave the last chunk for next writting */
-			memcpy(last_chunk_buf, ctx->bounce, rc);
-			last_chunk_buf_len = rc;
-			break;
-		}
-
-		rc2 = emmc_ipanic_writeflashpage(emmc, off + block_shift,
-						 ctx->bounce);
-		if (rc2 <= 0) {
-			pr_emerg("%s: Flash write failed (%d)\n",
-				__func__, rc2);
-			return idx;
-		}
-
-		idx += rc1;
-		block_shift++;
-
-		if (last_chunk_buf_len) {
-			*actual_size += last_chunk_buf_len;
-			last_chunk_buf_len = 0;
-		}
-	}
-	*actual_size += idx;
-	return block_shift;
-}
-#endif
 
 static void emmc_ipanic_flush_lastchunk_emmc(loff_t to,
 					     int *size_written,
@@ -800,9 +683,7 @@ static void emmc_ipanic_write_thread_func(void)
 
 	/*reset the log buffer */
 	log_buf_clear();
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
 	kmsg_dump_rewind(&ipanic_dumper);
-#endif
 }
 
 static void emmc_ipanic_write_logbuf(struct mmc_emergency_info *emmc, int log)
@@ -836,9 +717,7 @@ static void emmc_ipanic_write_calltrace(struct mmc_emergency_info *emmc,
 	 * stream thread call trace.
 	 */
 	log_buf_clear();
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
 	kmsg_dump_rewind(&ipanic_dumper);
-#endif
 	func_stream_emmc = emmc_ipanic_write_thread_func;
 	show_state_filter(0);
 
@@ -948,7 +827,7 @@ static void emmc_ipanic_write_pageheader(struct mmc_emergency_info *emmc)
 	struct emmc_ipanic_data *ctx = &drv_ctx;
 	struct panic_header *hdr = (struct panic_header *)ctx->bounce;
 	int wc;
-	size_t len, total;
+	size_t len, total, max;
 
 	memset(ctx->bounce, 0, SECTOR_SIZE);
 	hdr->magic = PANIC_MAGIC;
@@ -956,13 +835,14 @@ static void emmc_ipanic_write_pageheader(struct mmc_emergency_info *emmc)
 
 	total = snprintf(hdr->panic, SECTOR_SIZE,
 			"###Kernel panic###\n");
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
-	kmsg_dump_get_buffer(&ipanic_dumper, false,  last_chunk_buf, SECTOR_SIZE, &len);
+
+	max =  SECTOR_SIZE - offsetof(struct panic_header, panic) - total;
+	kmsg_dump_get_buffer(&ipanic_dumper, false,  last_chunk_buf, max, &len);
 	kmsg_dump_rewind(&ipanic_dumper);
 
-	len = min(SECTOR_SIZE - offsetof(struct panic_header, panic) - total, len);
 	memcpy(hdr->panic + total, last_chunk_buf, len);
-#endif
+	hdr->log_size = len + total;
+
 	/* Write header block */
 	wc = emmc_ipanic_writeflashpage(emmc, emmc->start_block, ctx->bounce);
 	if (wc <= 0) {
@@ -971,12 +851,37 @@ static void emmc_ipanic_write_pageheader(struct mmc_emergency_info *emmc)
 	}
 }
 
-static void emmc_ipanic_write_loginfo(struct mmc_emergency_info *emmc)
+static void emmc_ipanic_clean_loginfo(struct mmc_emergency_info *emmc)
+{
+	struct emmc_ipanic_data *ctx = &drv_ctx;
+	int rc;
+
+	memset(log_offset, 0, IPANIC_LOG_MAX * sizeof(int));
+	memset(log_len, 0, IPANIC_LOG_MAX * sizeof(int));
+	memset(log_size, 0, IPANIC_LOG_MAX * sizeof(int));
+
+	memset(ctx->bounce, 0, SECTOR_SIZE);
+
+	rc = emmc_ipanic_writeflashpage(emmc, emmc->start_block+1, ctx->bounce);
+	if (rc <= 0) {
+		pr_emerg("emmc_ipanic: Header write failed (%d)\n",
+			rc);
+		return;
+	}
+}
+
+static void emmc_ipanic_write_loginfo(struct mmc_emergency_info *emmc, int newlog)
 {
 	struct emmc_ipanic_data *ctx = &drv_ctx;
 	struct log_info *info = (struct log_info *)ctx->bounce;
 	int log = IPANIC_LOG_CONSOLE;
 	int rc;
+
+	if ((newlog < 0) || (newlog >= IPANIC_LOG_MAX))
+		return;
+
+	if (log_size[newlog] == 0)
+		return;
 
 	memset(ctx->bounce, 0, SECTOR_SIZE);
 	/*Fill up log offset and size */
@@ -1037,18 +942,15 @@ static int emmc_ipanic(struct notifier_block *this, unsigned long event,
 		goto out;
 	}
 
-	memset(log_offset, 0, IPANIC_LOG_MAX * sizeof(int));
-	memset(log_len, 0, IPANIC_LOG_MAX * sizeof(int));
-	memset(log_size, 0, IPANIC_LOG_MAX * sizeof(int));
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
 	/* Prepare kmsg dumper */
 	ipanic_dumper.active = 1;
 	/* Rewind kmsg dumper */
 	kmsg_dump_rewind(&ipanic_dumper);
-#endif
+
 	/* Write emmc ipanic partition header */
 	emmc_ipanic_write_pageheader(emmc);
+	/* Clean emmc ipanic sections offsets */
+	emmc_ipanic_clean_loginfo(emmc);
 
 	/*Write all buffer into emmc */
 	log = IPANIC_LOG_CONSOLE;
@@ -1069,15 +971,13 @@ static int emmc_ipanic(struct notifier_block *this, unsigned long event,
 		default:
 			break;
 		}
+		/* Update emmc ipanic sections offsets */
+		emmc_ipanic_write_loginfo(emmc, log);
 		log++;
 	}
-	/* Write emmc ipanic sections offsets */
-	emmc_ipanic_write_loginfo(emmc);
 	pr_info("Panic log data written done!\n");
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0))
 	ipanic_dumper.active = 0;
-#endif
 
 out:
 #ifdef CONFIG_PREEMPT

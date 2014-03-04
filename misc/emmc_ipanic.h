@@ -45,6 +45,8 @@ extern void log_buf_clear(void);
 #define IPANIC_LOG_THREADS       1
 #define IPANIC_LOG_GBUFFER       2
 #define IPANIC_LOG_MAX           3
+#define IPANIC_LOG_HEADER        IPANIC_LOG_MAX
+
 
 struct mmc_emergency_info {
 #define DISK_NAME_LENGTH 20
@@ -71,6 +73,7 @@ struct panic_header {
 
 	u32 version;
 #define PHDR_VERSION   0x01
+	u32 log_size;
 
 	char panic[SECTOR_SIZE];
 };
