@@ -47,7 +47,7 @@ static struct adapter_attr notify = {
 
 static struct adapter_attr handshake = {
 	.attr.name="handshake",
-	.attr.mode = 0666,
+	.attr.mode = 0664,
 	.value = 0,
 };
 
