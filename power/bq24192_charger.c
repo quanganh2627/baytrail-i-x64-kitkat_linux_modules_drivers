@@ -536,7 +536,6 @@ static int bq24192_clear_hiz(struct bq24192_chip *chip)
 #endif
 			/* Clear the Charger from Hi-Z mode */
 			ret &= ~INPUT_SRC_CNTL_EN_HIZ;
-			ret |= chip->inlmt;
 
 			/* Write the values back */
 			ret = bq24192_write_reg(chip->client,
@@ -1921,7 +1920,7 @@ int bq24192_slave_mode_enable_charging(int volt, int cur, int ilim)
 	int ret;
 
 	mutex_lock(&chip->event_lock);
-	chip->inlmt = chrg_ilim_to_reg(ilim);
+	chip->inlmt = ilim;
 	if (chip->inlmt >= 0)
 		bq24192_set_inlmt(chip, chip->inlmt);
 	mutex_unlock(&chip->event_lock);
