@@ -285,6 +285,7 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 #define DRV2605_GO		0x0c
 #define DRV2605_VOLTAGE		0x16
 #define DRV2605_CLAMP		0x17
+#define DRV2605_AUTO_CAL_COMP	0x18
 #define DRV2605_FB_CONTROL	0x1a
 
 #define DRV2605_AUTO_CALIB	0x07
@@ -296,8 +297,12 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 #define DRV2605_STANDBY_BIT         6
 #define DRV2605_DIAG_RESULT_BIT     3
 
+/* default value of the register 0x18 */
+#define DRV2605_AUTO_CAL_COMP_VALUE	0x0D
+
 	struct i2c_adapter *adap;
 	u8 status = 0, mode = 0;
+	u8 reg_val = DRV2605_AUTO_CAL_COMP_VALUE;
 
 	adap = i2c_get_adapter(MRFLD_VIBRA_BUS);
 	if (!adap) {
@@ -305,26 +310,36 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 		return -EIO;
 	}
 
+	/* enable gpio first */
+	gpio_set_value(info->gpio_en, 1);
+	/* wait for gpio to settle and drv to accept i2c */
+	usleep_range(1000, 1100);
+
+	/* get the device out of standby */
+	vibra_driver_write(adap, DRV2605_I2C_ADDR, DRV2605_MODE, DRV2605_PWM);
+
 	vibra_driver_read(adap, DRV2605_I2C_ADDR, DRV2605_MODE, &mode);
 	/* Is Device Ready?? */
 	if (!((mode >> DRV2605_STANDBY_BIT) & 0x1)) {
+
 		vibra_driver_read(adap, DRV2605_I2C_ADDR, DRV2605_STATUS, &status);
+		vibra_driver_read(adap, DRV2605_I2C_ADDR, DRV2605_AUTO_CAL_COMP, &reg_val);
+
 		/* Is it Auto Calibrated?? */
-		if (!((status >> DRV2605_DIAG_RESULT_BIT) & 0x1)) {
+		/* Check the diag result bit & default value of auto calib comp register */
+		if (!((status >> DRV2605_DIAG_RESULT_BIT) & 0x1) &&
+			(reg_val != DRV2605_AUTO_CAL_COMP_VALUE)) {
+
 			if (!((INTEL_MID_BOARD(1, PHONE, MOFD)) ||
 					(INTEL_MID_BOARD(1, TABLET, MOFD)))) {
+				gpio_set_value(info->gpio_en, 0);
 				pr_debug("Do Nothing -  Device Calibrated\n");
 				return 0;
 			}
 		}
-			pr_debug("Re-calibrate the vibra for moorefield");
 	}
 
-	/*enable gpio first */
-	gpio_set_value(info->gpio_en, 1);
-	/* wait for gpio to settle and drv to accept i2c*/
-	usleep_range(1000, 1100);
-
+	pr_warn("Calibrating the vibra..\n");
 	/*put device in auto calibrate mode*/
 	vibra_driver_write(adap, DRV2605_I2C_ADDR, DRV2605_MODE, DRV2605_AUTO_CALIB);
 	vibra_driver_write(adap, DRV2605_I2C_ADDR, DRV2605_FB_CONTROL, DRV2605_LRA);
