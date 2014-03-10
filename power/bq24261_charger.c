@@ -1722,6 +1722,7 @@ static int bq24261_probe(struct i2c_client *client,
 	chip->psy_usb.num_throttle_states = chip->pdata->num_throttle_states;
 	chip->psy_usb.supported_cables = POWER_SUPPLY_CHARGER_TYPE_USB;
 	chip->max_cc = 1500;
+	chip->max_cv = 4350;
 	chip->chrgr_stat = BQ24261_CHRGR_STAT_UNKNOWN;
 	chip->chrgr_health = POWER_SUPPLY_HEALTH_UNKNOWN;
 	chip->revision = bq2426x_rev;
