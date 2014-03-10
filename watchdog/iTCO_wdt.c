@@ -150,6 +150,8 @@ static struct {		/* this is private data for the iTCO_wdt device */
 #ifdef CONFIG_DEBUG_FS
 	bool panic_reboot_notifier;
 #endif
+	/* TCO enable bit */
+	bool enable;
 } iTCO_wdt_private;
 
 /* the watchdog platform device */
@@ -238,6 +240,9 @@ static int iTCO_wdt_unset_NO_REBOOT_bit(void)
 static int iTCO_wdt_start(void)
 {
 	unsigned int val;
+
+	if (iTCO_wdt_private.enable == false)
+		return 0;
 
 	spin_lock(&iTCO_wdt_private.io_lock);
 
@@ -692,13 +697,15 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 	pmc_base_address &= 0xFFFFFE00;
 
 	/*
-	 * Disable reboot at watchdog timeout on
-	 * command-line demand
+	 * Disable watchdog on command-line demand
 	 */
-	if (strstr(saved_command_line, "enable_tco=0")) {
+	if (strstr(saved_command_line, "disable_kernel_watchdog=1")) {
+		pr_warn("disable_kernel_watchdog=1 watchdog will not be started\n");
+		iTCO_wdt_private.enable = false;
 		/* Set the NO_REBOOT bit to prevent later reboots */
 		iTCO_wdt_set_NO_REBOOT_bit();
 	} else {
+		iTCO_wdt_private.enable = true;
 		/* Check chipset's NO_REBOOT bit */
 		if (iTCO_wdt_unset_NO_REBOOT_bit()) {
 			pr_err("unable to reset NO_REBOOT flag, device disabled by hardware/BIOS\n");

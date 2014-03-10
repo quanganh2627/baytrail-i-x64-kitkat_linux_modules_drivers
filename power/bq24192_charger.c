@@ -535,7 +535,8 @@ static int bq24192_clear_hiz(struct bq24192_chip *chip)
 			bq24192_dump_registers(chip);
 #endif
 			/* Clear the Charger from Hi-Z mode */
-			ret = (chip->inlmt & ~INPUT_SRC_CNTL_EN_HIZ);
+			ret &= ~INPUT_SRC_CNTL_EN_HIZ;
+			ret |= chip->inlmt;
 
 			/* Write the values back */
 			ret = bq24192_write_reg(chip->client,
@@ -717,13 +718,24 @@ EXPORT_SYMBOL(bq24192_get_battery_health);
  * into equivalent register setting.
  * Note: ilim must be in mA.
  */
-static u8 chrg_ilim_to_reg(int ilim)
+static int chrg_ilim_to_reg(int ilim)
 {
-	u8 reg;
+	int reg;
+	struct bq24192_chip *chip;
 
-	/* set voltage to 5V */
-	reg = INPUT_SRC_VOLT_LMT_DEF;
+	if (!bq24192_client)
+		return -ENODEV;
 
+	chip = i2c_get_clientdata(bq24192_client);
+
+	reg = bq24192_read_reg(chip->client, BQ24192_INPUT_SRC_CNTL_REG);
+
+	if (reg < 0) {
+		dev_info(&chip->client->dev, "read failed %d", reg);
+		return reg;
+	}
+
+	reg &= ~INPUT_SRC_CUR_LMT7;
 
 	/* Set the input source current limit
 	 * between 100 to 1500mA */
@@ -737,9 +749,14 @@ static u8 chrg_ilim_to_reg(int ilim)
 		reg |= INPUT_SRC_CUR_LMT3;
 	else if (ilim <= 1200)
 		reg |= INPUT_SRC_CUR_LMT4;
-	else
+	else if (ilim <= 1500)
 		reg |= INPUT_SRC_CUR_LMT5;
-
+	else if (ilim <= 2000)
+		reg |= INPUT_SRC_CUR_LMT6;
+	else if (ilim <= 3000)
+		reg |= INPUT_SRC_CUR_LMT7;
+	else /* defaulting to 500MA*/
+		reg |= INPUT_SRC_CUR_LMT2;
 	return reg;
 }
 
@@ -911,7 +928,7 @@ static int bq24192_modify_vindpm(u8 vindpm)
 	}
 
 	/* Assign the return value of REG00 to vindpm_prev */
-	vindpm_prev = ret & INPUT_SRC_VINDPM_MASK;
+	vindpm_prev = (ret & INPUT_SRC_VINDPM_MASK);
 	ret &= ~INPUT_SRC_VINDPM_MASK;
 
 	/*
@@ -1132,8 +1149,7 @@ static inline void bq24192_remove_debugfs(struct bq24192_chip *chip)
 static inline int bq24192_enable_charging(
 			struct bq24192_chip *chip, bool val)
 {
-	int ret;
-	u8 regval;
+	int ret, regval;
 
 	dev_warn(&chip->client->dev, "%s:%d %d\n", __func__, __LINE__, val);
 
@@ -1152,11 +1168,17 @@ static inline int bq24192_enable_charging(
 	 */
 	regval = chrg_ilim_to_reg(chip->inlmt);
 
-	ret = bq24192_reg_read_modify(chip->client, BQ24192_INPUT_SRC_CNTL_REG,
-				regval, true);
+	if (regval < 0) {
+		dev_err(&chip->client->dev,
+			"read ilim failed: %d\n", regval);
+		return regval;
+	}
+
+	ret = bq24192_write_reg(chip->client, BQ24192_INPUT_SRC_CNTL_REG,
+				regval);
 	if (ret < 0) {
 		dev_err(&chip->client->dev,
-				"inlmt programming failed: %d\n", ret);
+			"inlmt programming failed: %d\n", ret);
 		return ret;
 	}
 
@@ -1294,11 +1316,14 @@ static inline int bq24192_set_cv(struct bq24192_chip *chip, int cv)
 
 static inline int bq24192_set_inlmt(struct bq24192_chip *chip, int inlmt)
 {
-	u8 regval;
+	int regval;
 
 	dev_warn(&chip->client->dev, "%s:%d %d\n", __func__, __LINE__, inlmt);
 	chip->inlmt = inlmt;
 	regval = chrg_ilim_to_reg(inlmt);
+
+	if (regval < 0)
+		return regval;
 
 	return bq24192_write_reg(chip->client, BQ24192_INPUT_SRC_CNTL_REG,
 				regval);
@@ -1893,12 +1918,16 @@ int bq24192_slave_mode_enable_charging(int volt, int cur, int ilim)
 	struct bq24192_chip *chip = i2c_get_clientdata(bq24192_client);
 	int ret;
 
+	mutex_lock(&chip->event_lock);
 	chip->inlmt = chrg_ilim_to_reg(ilim);
-	if (chip->inlmt)
+	if (chip->inlmt >= 0)
 		bq24192_set_inlmt(chip, chip->inlmt);
+	mutex_unlock(&chip->event_lock);
+
 	chip->cc = chrg_cur_to_reg(cur);
 	if (chip->cc)
 		bq24192_set_cc(chip, chip->cc);
+
 	chip->cv = chrg_volt_to_reg(volt);
 	if (chip->cv)
 		bq24192_set_cv(chip, chip->cv);

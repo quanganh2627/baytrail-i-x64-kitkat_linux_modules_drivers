@@ -275,7 +275,7 @@ struct bq24261_otg_event {
 
 struct bq24261_charger {
 
-	struct mutex lock;
+	struct mutex stat_lock;
 	struct i2c_client *client;
 	struct bq24261_plat_data *pdata;
 	struct power_supply psy_usb;
@@ -623,7 +623,6 @@ static inline int bq24261_enable_charging(
 	is_ready =  (ret & BQ24261_STAT_MASK) != BQ24261_STAT_FAULT;
 
 	/* If status is fault, wait for READY before enabling the charging */
-
 	if (!is_ready) {
 		ret = wait_event_timeout(chip->wait_ready,
 			(chip->chrgr_stat != BQ24261_CHRGR_STAT_READY),
@@ -961,7 +960,7 @@ static int bq24261_usb_set_property(struct power_supply *psy,
 	int ret = 0;
 
 
-	mutex_lock(&chip->lock);
+	mutex_lock(&chip->stat_lock);
 
 
 	switch (psp) {
@@ -1085,7 +1084,7 @@ static int bq24261_usb_set_property(struct power_supply *psy,
 		ret = -ENODATA;
 	}
 
-	mutex_unlock(&chip->lock);
+	mutex_unlock(&chip->stat_lock);
 	return ret;
 }
 
@@ -1097,7 +1096,7 @@ static int bq24261_usb_get_property(struct power_supply *psy,
 						    struct bq24261_charger,
 						    psy_usb);
 
-	mutex_lock(&chip->lock);
+	mutex_lock(&chip->stat_lock);
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PRESENT:
@@ -1136,7 +1135,6 @@ static int bq24261_usb_get_property(struct power_supply *psy,
 		else
 			val->intval = (chip->is_charging_enabled &&
 			(chip->chrgr_stat == BQ24261_CHRGR_STAT_CHARGING));
-
 		break;
 	case POWER_SUPPLY_PROP_ENABLE_CHARGER:
 		val->intval = bq24261_is_online(chip);
@@ -1160,11 +1158,11 @@ static int bq24261_usb_get_property(struct power_supply *psy,
 		val->intval = chip->min_temp;
 		break;
 	default:
-		mutex_unlock(&chip->lock);
+		mutex_unlock(&chip->stat_lock);
 		return -EINVAL;
 	}
 
-	mutex_unlock(&chip->lock);
+	mutex_unlock(&chip->stat_lock);
 	return 0;
 }
 
@@ -1292,6 +1290,8 @@ static void bq24261_low_supply_fault_work(struct work_struct *work)
 		dev_err(&chip->client->dev, "Low Supply Fault detected!!\n");
 		chip->chrgr_health = POWER_SUPPLY_HEALTH_DEAD;
 		power_supply_changed(&chip->psy_usb);
+		schedule_delayed_work(&chip->exception_mon_work,
+					EXCEPTION_MONITOR_DELAY);
 		bq24261_dump_regs(true);
 	}
 	return;
@@ -1367,18 +1367,40 @@ static void handle_battery_over_voltage(struct bq24261_charger *chip)
 static void bq24261_exception_mon_work(struct work_struct *work)
 {
 	struct bq24261_charger *chip = container_of(work,
-						    struct bq24261_charger,
-						    exception_mon_work.work);
-	/* Only overvoltage exception need to monitor.*/
-	if (IS_BATTERY_OVER_VOLTAGE_RECOVERED(chip)) {
-		dev_info(&chip->client->dev, "Over Voltage Exception Recovered\n");
-		chip->bat_health = POWER_SUPPLY_HEALTH_GOOD;
-		bq24261_enable_charger(chip, true);
-		chip->is_charger_enabled = true;
-		resume_charging(chip);
-	} else {
-		schedule_delayed_work(&chip->exception_mon_work,
-			      EXCEPTION_MONITOR_DELAY);
+			struct bq24261_charger,
+			exception_mon_work.work);
+	int ret;
+
+	if (chip->bat_health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) {
+		if (IS_BATTERY_OVER_VOLTAGE_RECOVERED(chip)) {
+			dev_info(&chip->client->dev,
+					"Battery OVP Exception Recovered\n");
+			chip->bat_health = POWER_SUPPLY_HEALTH_GOOD;
+			bq24261_enable_charger(chip, true);
+			chip->is_charger_enabled = true;
+			power_supply_changed(&chip->psy_usb);
+		} else {
+			schedule_delayed_work(&chip->exception_mon_work,
+					EXCEPTION_MONITOR_DELAY);
+		}
+	}
+
+	if ((chip->chrgr_health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) ||
+		(chip->chrgr_health == POWER_SUPPLY_HEALTH_DEAD)) {
+		ret = bq24261_read_reg(chip->client, BQ24261_STAT_CTRL0_ADDR);
+		if (ret < 0) {
+			dev_err(&chip->client->dev, "Error reading reg %x\n",
+					BQ24261_STAT_CTRL0_ADDR);
+		} else {
+			mutex_lock(&chip->stat_lock);
+			bq24261_handle_irq(chip, ret);
+			mutex_unlock(&chip->stat_lock);
+			if ((ret & BQ24261_STAT_MASK) == BQ24261_STAT_READY) {
+				dev_info(&chip->client->dev,
+				"Charger OVP/Low Supply Exception recovered\n");
+				power_supply_changed(&chip->psy_usb);
+			}
+		}
 	}
 }
 
@@ -1429,6 +1451,8 @@ static int bq24261_handle_irq(struct bq24261_charger *chip, u8 stat_reg)
 		switch (stat_reg & BQ24261_FAULT_MASK) {
 		case BQ24261_VOVP:
 			chip->chrgr_health = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+			schedule_delayed_work(&chip->exception_mon_work,
+					EXCEPTION_MONITOR_DELAY);
 			dev_err(&client->dev, "Charger OVP Fault\n");
 			break;
 
@@ -1510,7 +1534,7 @@ static void bq24261_irq_worker(struct work_struct *work)
 	* fault interrupts or fault recovery cannot be handlled propely
 	*/
 
-	mutex_lock(&chip->lock);
+	mutex_lock(&chip->stat_lock);
 
 	dev_dbg(&chip->client->dev, "%s\n", __func__);
 
@@ -1521,7 +1545,7 @@ static void bq24261_irq_worker(struct work_struct *work)
 	else
 		bq24261_handle_irq(chip, ret);
 
-	mutex_unlock(&chip->lock);
+	mutex_unlock(&chip->stat_lock);
 }
 
 static irqreturn_t bq24261_thread_handler(int id, void *data)
@@ -1563,13 +1587,13 @@ static void bq24261_boostmode_worker(struct work_struct *work)
 		dev_info(&chip->client->dev,
 			"%s:%d state=%d\n", __FILE__, __LINE__,
 				evt->is_enable);
-		mutex_lock(&chip->lock);
+		mutex_lock(&chip->stat_lock);
 		if (evt->is_enable)
 			bq24261_enable_boost_mode(chip, 1);
 		else
 			bq24261_enable_boost_mode(chip, 0);
 
-		mutex_unlock(&chip->lock);
+		mutex_unlock(&chip->stat_lock);
 		spin_lock_irqsave(&chip->otg_queue_lock, flags);
 		kfree(evt);
 
@@ -1733,7 +1757,7 @@ static int bq24261_probe(struct i2c_client *client,
 	strncpy(chip->manufacturer, DEV_MANUFACTURER,
 		DEV_MANUFACTURER_NAME_SIZE);
 
-	mutex_init(&chip->lock);
+	mutex_init(&chip->stat_lock);
 	wake_lock_init(&chip->chrgr_en_wakelock,
 			WAKE_LOCK_SUSPEND, "chrgr_en_wakelock");
 	ret = power_supply_register(&client->dev, &chip->psy_usb);

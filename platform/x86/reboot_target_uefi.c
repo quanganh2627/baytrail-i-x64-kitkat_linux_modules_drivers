@@ -64,8 +64,12 @@ static int uefi_set_loader_entry_one_shot(const char *name)
 
 static const char RESCUE_MODE_TARGET[]		     = "dnx";
 static const char OS_INDICATIONS_SUPPORTED_VARNAME[] = "OsIndicationsSupported";
-static const char OS_INDICATIONS_VARNAME[] 	     = "OsIndications";
-static const u64  EFI_OS_INDICATION_RESCUE_MODE      = 1 << 5;
+static const char OS_INDICATIONS_VARNAME[]	     = "OsIndications";
+
+enum os_indication_option {
+	RESCUE_MODE_OPT	       = 5,
+	OS_INITIATED_RESET_OPT = 6
+};
 
 static int uefi_read_u64_entry(struct efivar_entry *entry, u64 *value,
 			       u32 *attributes)
@@ -84,7 +88,7 @@ static int uefi_read_u64_entry(struct efivar_entry *entry, u64 *value,
 	return 0;
 }
 
-static bool uefi_is_os_indication_supported(const u64 os_indication)
+static bool uefi_is_os_indication_supported(enum os_indication_option option)
 {
 	wchar_t varname[sizeof(OS_INDICATIONS_SUPPORTED_VARNAME)];
 	struct efivar_entry *entry;
@@ -108,22 +112,22 @@ static bool uefi_is_os_indication_supported(const u64 os_indication)
 		pr_err("%s: Failed to read %s EFI variable, return=%d\n",
 		       __func__, OS_INDICATIONS_SUPPORTED_VARNAME, ret);
 
-	return ret ? false : !!(value & os_indication);
+	return ret ? false : !!(value & (1 << option));
 }
 
-static int uefi_ask_for_rescue_mode(void)
+static int uefi_set_os_indication_option(enum os_indication_option option)
 {
 	wchar_t varname[sizeof(OS_INDICATIONS_VARNAME)];
 	struct efivar_entry *entry;
-	u64 value = EFI_OS_INDICATION_RESCUE_MODE;
+	u64 value = 1 << option;
 	u32 attributes = EFI_VARIABLE_NON_VOLATILE
 		| EFI_VARIABLE_BOOTSERVICE_ACCESS
 		| EFI_VARIABLE_RUNTIME_ACCESS;
 	int ret;
 
-	if (!uefi_is_os_indication_supported(EFI_OS_INDICATION_RESCUE_MODE)) {
-		pr_err("%s: Rescue mode OS indication is not supported\n",
-		       __func__);
+	if (!uefi_is_os_indication_supported(option)) {
+		pr_err("%s: OS indication option #%d is not supported\n",
+		       __func__, option);
 		return -ENODEV;
 	}
 
@@ -143,16 +147,16 @@ static int uefi_ask_for_rescue_mode(void)
 		return ret;
 	}
 
-	value |= EFI_OS_INDICATION_RESCUE_MODE;
+	value |= 1 << option;
 	return efivar_entry_set(entry, attributes, sizeof(u64), &value, NULL);
 }
 
-static const u16 ANDROID_LOAD_OPTION_MASK = 1 << 8;
-
 static int uefi_set_reboot_target(const char *name, const int id)
 {
+	uefi_set_os_indication_option(OS_INITIATED_RESET_OPT);
+
 	if (strcmp(name, RESCUE_MODE_TARGET) == 0)
-		return uefi_ask_for_rescue_mode();
+		return uefi_set_os_indication_option(RESCUE_MODE_OPT);
 
 	return uefi_set_loader_entry_one_shot(name);
 }
