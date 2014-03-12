@@ -53,6 +53,7 @@ irqreturn_t i2c_dw_isr(int this_irq, void *dev_id);
 void i2c_dw_disable_int(struct dw_i2c_dev *dev);
 void i2c_dw_clear_int(struct dw_i2c_dev *dev);
 static void dw_i2c_acpi_setup(struct device *pdev, struct dw_i2c_dev *dev);
+u32 i2c_dw_read_comp_param(struct dw_i2c_dev *dev);
 
 static char *abort_sources[] = {
 	[ABRT_7B_ADDR_NOACK] =
@@ -652,6 +653,7 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 	struct  dw_controller *controller;
 	int r;
 	void *handle_save = ACPI_HANDLE(pdev);
+	u32 param1;
 
 	if (bus_idx >= ARRAY_SIZE(dw_controllers)) {
 		dev_err(pdev, "invalid bus index %d\n",
@@ -704,6 +706,12 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 	dev->fast_plus = controller->fast_plus;
 	dev_set_drvdata(pdev, dev);
 	dw_i2c_acpi_setup(pdev, dev);
+
+	if (!dev->tx_fifo_depth || !dev->rx_fifo_depth) {
+		param1 = i2c_dw_read_comp_param(dev);
+		dev->tx_fifo_depth = ((param1 >> 16) & 0xff) + 1;
+		dev->rx_fifo_depth = ((param1 >> 8)  & 0xff) + 1;
+	}
 
 	r = i2c_dw_init(dev);
 	if (r)
