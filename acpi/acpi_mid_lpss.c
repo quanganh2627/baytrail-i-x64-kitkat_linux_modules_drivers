@@ -27,6 +27,8 @@ static const struct acpi_device_id acpi_mid_lpss_device_ids[] = {
 	{ "80860F41" },
 	/* BYT HSU */
 	{ "80860F0A" },
+	/* BYT SPI */
+	{ "80860F0E" },
 	/* CHT I2C */
 	{ "808622C1" },
 	/* CHT HSU */
