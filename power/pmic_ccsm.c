@@ -1082,7 +1082,7 @@ static void handle_internal_usbphy_notifications(int mask)
 	if (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_SDP)
 		cap.ma = 0;
 	else if ((cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_DCP)
-			|| (cap.chrg_type == POWER_SUPPLY_TYPE_USB_CDP)
+			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_CDP)
 			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_SE1))
 		cap.ma = 1500;
 
