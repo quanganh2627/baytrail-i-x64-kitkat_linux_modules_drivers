@@ -690,12 +690,11 @@ static int sensor_disable(struct sensor_data *data)
 
 static int sensor_suspend(struct device *dev)
 {
-	int ret = 0;
 	int i;
 	struct i2c_client *client = to_i2c_client(dev);
 	struct sensor_data *data = i2c_get_clientdata(client);
 	struct mutex *lock = data->lock;
-	int num;
+	int num = data->config->shared_nums;
 
 	SENSOR_DBG(DBG_LEVEL1, data->dbg_on, "%s", data->config->input_name);
 
@@ -706,9 +705,9 @@ static int sensor_suspend(struct device *dev)
 
 	mutex_lock(lock);
 
-	num = data->config->shared_nums;
 	for (i = 0; i < num; i++, data++) {
-		ret |= sensor_disable(data);
+		data->state_suspend = data->state;
+		sensor_disable(data);
 		data->state = STATE_SUS;
 	}
 
@@ -719,14 +718,24 @@ static int sensor_suspend(struct device *dev)
 
 static int sensor_resume(struct device *dev)
 {
-	int ret = 0;
 	int i;
 	struct i2c_client *client = to_i2c_client(dev);
 	struct sensor_data *data = i2c_get_clientdata(client);
 	struct mutex *lock = data->lock;
-	int num;
+	int num = data->config->shared_nums;
 
 	SENSOR_DBG(DBG_LEVEL1, data->dbg_on, "%s", data->config->input_name);
+
+	/*check if any devices are enabled before suspend*/
+	for (i = 0; i < num; i++, data++) {
+		if (data->state_suspend == STATE_EN)
+			break;
+	}
+
+	if (i >= num)
+		return 0;
+
+	data = i2c_get_clientdata(client);
 
 	if (INT == data->config->method) {
 		int irq = gpio_to_irq(data->gpio);
@@ -735,9 +744,10 @@ static int sensor_resume(struct device *dev)
 
 	mutex_lock(lock);
 
-	num = data->config->shared_nums;
-	for (i = 0; i < num; i++, data++)
-		ret |= sensor_enable(data);
+	for (i = 0; i < num; i++, data++) {
+		if (data->state_suspend == STATE_EN)
+			sensor_enable(data);
+	}
 
 	mutex_unlock(lock);
 
@@ -1745,6 +1755,7 @@ static int sensor_data_init(struct i2c_client *client,
 		data->regbuf = regbuf;
 		data->client = client;
 		data->state = STATE_DIS;
+		data->state_suspend = STATE_DIS;
 		data->launched = 0;
 		data->poll_interval = data->config->default_poll_interval;
 		data->range = data->config->default_range;

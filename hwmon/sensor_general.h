@@ -52,6 +52,7 @@ struct sensor_data {
 	enum sensor_state {
 		STATE_DIS,  STATE_EN, STATE_SUS,
 	} state;
+	enum sensor_state state_suspend; /*state before suspend*/
 	int poll_interval;
 	int range;
 	/*remain report count for poll + interrupt mode*/
