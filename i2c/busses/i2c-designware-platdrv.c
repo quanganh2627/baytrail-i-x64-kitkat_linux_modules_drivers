@@ -161,15 +161,11 @@ static int __init dw_i2c_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	if (dev->shared_host) {
-		pm_runtime_forbid(&pdev->dev);
-	} else {
-		pm_runtime_set_active(&pdev->dev);
-		pm_runtime_enable(&pdev->dev);
-		pm_runtime_allow(&pdev->dev);
-		pm_runtime_use_autosuspend(&pdev->dev);
-		pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
-	}
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_allow(&pdev->dev);
+	pm_runtime_use_autosuspend(&pdev->dev);
+	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
 
 	return 0;
 }

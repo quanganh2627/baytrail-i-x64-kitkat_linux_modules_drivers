@@ -178,10 +178,7 @@ const struct pci_device_id *id)
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_put_noidle(&pdev->dev);
-	if (dev->shared_host)
-		pm_runtime_forbid(&pdev->dev);
-	else
-		pm_runtime_allow(&pdev->dev);
+	pm_runtime_allow(&pdev->dev);
 
 	return 0;
 }
