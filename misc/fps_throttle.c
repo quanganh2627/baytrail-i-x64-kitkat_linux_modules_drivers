@@ -30,6 +30,7 @@
 #define STATE_NUM 4
 #define HANDSHAKE_TIMEOUT 500
 
+wait_queue_head_t wait;
 static unsigned int cur_state = 0;
 static int state_list[STATE_NUM] = {100, 75, 50, 25};
 static struct kobject *adapter_kobj;
@@ -81,11 +82,13 @@ static ssize_t store(struct kobject *kobj, struct attribute *attr, const char *b
 	struct adapter_attr *a = container_of(attr, struct adapter_attr, attr);
 	sscanf(buf, "%d", &a->value);
 
-	if(strcmp(a->attr.name, notify.attr.name) == 0)
+	if (strcmp(a->attr.name, notify.attr.name) == 0) {
 		set_fps_scaling(a->value);
-	else
+	} else {
 		handshake.value = a->value;
-
+		if (handshake.value == FPS_THROTTLE_SUCCESS)
+			wake_up(&wait);
+	}
 	return len;
 }
 
@@ -113,7 +116,7 @@ static int thermal_get_cur_state(struct thermal_cooling_device *tcd, unsigned
 	if (handshake.value == FPS_THROTTLE_DISABLE)
 		return -EPERM;
 
-	for(i=0; i < 4; i++) {
+	for (i=0; i < 4; i++) {
 		if (notify.value == state_list[i]){
 			*pcs = i;
 			break;
@@ -127,7 +130,6 @@ static int thermal_set_cur_state(struct thermal_cooling_device *tcd, unsigned
 		long pcs)
 {
 	int ret;
-	wait_queue_head_t wait;
 
 	if (pcs >= STATE_NUM || pcs < 0)
 		return -EINVAL;
@@ -139,7 +141,6 @@ static int thermal_set_cur_state(struct thermal_cooling_device *tcd, unsigned
 
 	set_fps_scaling(state_list[(int)pcs]);
 	//Wait the fps seting by HAL.
-	init_waitqueue_head (&wait);
 	ret = wait_event_interruptible_timeout(wait,
 					(handshake.value == FPS_THROTTLE_SUCCESS), HANDSHAKE_TIMEOUT);
 	if (ret > 0) {
@@ -205,6 +206,8 @@ static int thermal_adapter_init(void)
 		err = PTR_ERR(tcd_fps);
 		goto thermal_failed;
 	}
+
+	init_waitqueue_head (&wait);
 	return err;
 
 thermal_failed:
