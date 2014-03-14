@@ -213,12 +213,6 @@ struct t9_range {
 #define MXT_FRAME_TRY		10
 #define MXT_UNKNOWN_VALUE	-1
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-static void mxt_early_suspend(struct early_suspend *es);
-static void mxt_late_resume(struct early_suspend *es);
-#endif
-static int mxt_load_fw(struct device *dev);
-
 struct mxt_info {
 	u8 family_id;
 	u8 variant_id;
@@ -330,6 +324,13 @@ struct mxt_panel_info {
 	u32 config_crc;
 };
 
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static void mxt_early_suspend(struct early_suspend *es);
+static void mxt_late_resume(struct early_suspend *es);
+#endif
+static int mxt_load_fw(struct device *dev);
+static void mxt_reset_slots(struct mxt_data *data);
+
 struct mxt_panel_info supported_panels[] = {
 	/* 1664S 8 inch panel */
 	{
@@ -337,7 +338,7 @@ struct mxt_panel_info supported_panels[] = {
 		.variant_id = 0,
 		.version = 0x20,
 		.build = 0xAB,
-		.info_crc = 0x969531,
+		.info_crc = 0x96CB66,
 		.config_crc = 0x96CB66,
 	},
 	/* 1664S 10 inch panel */
@@ -906,39 +907,6 @@ mxt_get_object(struct mxt_data *data, u8 type)
 	return NULL;
 }
 
-static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
-{
-	struct device *dev = &data->client->dev;
-	u8 status = msg[1];
-	u32 crc = msg[2] | (msg[3] << 8) | (msg[4] << 16);
-
-	if (crc != data->config_crc) {
-		data->config_crc = crc;
-		dev_dbg(dev, "T6 Config Checksum: 0x%06X\n", crc);
-		complete(&data->crc_completion);
-	}
-
-	/* Detect transition out of reset */
-	if ((data->t6_status & MXT_T6_STATUS_RESET) &&
-	    !(status & MXT_T6_STATUS_RESET))
-		complete(&data->reset_completion);
-
-	/* Output debug if status has changed */
-	if (status != data->t6_status)
-		dev_dbg(dev, "T6 Status 0x%02X%s%s%s%s%s%s%s\n",
-			status,
-			(status == 0) ? " OK" : "",
-			(status & MXT_T6_STATUS_RESET) ? " RESET" : "",
-			(status & MXT_T6_STATUS_OFL) ? " OFL" : "",
-			(status & MXT_T6_STATUS_SIGERR) ? " SIGERR" : "",
-			(status & MXT_T6_STATUS_CAL) ? " CAL" : "",
-			(status & MXT_T6_STATUS_CFGERR) ? " CFGERR" : "",
-			(status & MXT_T6_STATUS_COMSERR) ? " COMSERR" : "");
-
-	/* Save current status */
-	data->t6_status = status;
-}
-
 static void mxt_input_button(struct mxt_data *data, u8 *message)
 {
 	struct input_dev *input = data->input_dev;
@@ -961,8 +929,88 @@ static void mxt_input_button(struct mxt_data *data, u8 *message)
 
 static void mxt_input_sync(struct input_dev *input_dev)
 {
+	if (!input_dev)
+		return;
 	input_mt_report_pointer_emulation(input_dev, false);
 	input_sync(input_dev);
+}
+
+static int mxt_t6_command(struct mxt_data *data, u16 cmd_offset,
+			  u8 value, bool wait)
+{
+	u16 reg;
+	u8 command_register = 0;
+	int timeout_counter = 0;
+	int ret;
+
+	reg = data->T6_address + cmd_offset;
+
+	ret = mxt_write_reg(data->client, reg, value);
+	if (ret)
+		return ret;
+
+	if (!wait)
+		return 0;
+
+	do {
+		msleep(20);
+		ret = __mxt_read_reg(data->client, reg, 1, &command_register);
+		if (ret) {
+			dev_err(&data->client->dev, "%s: T6 command failed! (%d)\n",
+					__func__, ret);
+			return ret;
+		}
+	} while ((command_register != 0) && (timeout_counter++ <= 100));
+
+	if (timeout_counter > 100) {
+		dev_err(&data->client->dev, "%s: Command failed!\n", __func__);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static void mxt_proc_t6_messages(struct mxt_data *data, u8 *msg)
+{
+	struct device *dev = &data->client->dev;
+	u8 status = msg[1];
+	u32 crc = msg[2] | (msg[3] << 8) | (msg[4] << 16);
+
+	if (crc != data->config_crc) {
+		data->config_crc = crc;
+		dev_dbg(dev, "T6 Config Checksum: 0x%06X\n", crc);
+		complete(&data->crc_completion);
+	}
+
+	/* Detect transition out of reset */
+	if ((data->t6_status & MXT_T6_STATUS_RESET) &&
+	    !(status & MXT_T6_STATUS_RESET))
+		complete(&data->reset_completion);
+
+	/* Output debug if status has changed */
+	if (status != data->t6_status) {
+		dev_dbg(dev, "T6 Status 0x%02X%s%s%s%s%s%s%s\n",
+			status,
+			(status == 0) ? " OK" : "",
+			(status & MXT_T6_STATUS_RESET) ? " RESET" : "",
+			(status & MXT_T6_STATUS_OFL) ? " OFL" : "",
+			(status & MXT_T6_STATUS_SIGERR) ? " SIGERR" : "",
+			(status & MXT_T6_STATUS_CAL) ? " CAL" : "",
+			(status & MXT_T6_STATUS_CFGERR) ? " CFGERR" : "",
+			(status & MXT_T6_STATUS_COMSERR) ? " COMSERR" : "");
+		mxt_reset_slots(data);
+	}
+
+	/* Save current status */
+	data->t6_status = status;
+
+	/* Recalibrate if the acquisistion and processing cycle length
+	   has overflowed the desired power mode interval */
+	if ((status & MXT_T6_STATUS_OFL) && !(status & MXT_T6_STATUS_CAL)) {
+		dev_info(dev, "%s: OFL, recalibrate chip\n", __func__);
+		mxt_reset_slots(data);
+		mxt_t6_command(data, MXT_COMMAND_CALIBRATE, 1, true);
+	}
 }
 
 static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
@@ -980,6 +1028,12 @@ static void mxt_proc_t9_message(struct mxt_data *data, u8 *message)
 
 	/* do not report events if input device not yet registered */
 	if (!data->enable_reporting)
+		return;
+	/* Do not report events if touch chip is during calibration or
+	   the acquisition and processing cycle length is overflowed the
+	   desired power mode interval */
+	if (data->t6_status & MXT_T6_STATUS_CAL ||
+			data->t6_status & MXT_T6_STATUS_OFL)
 		return;
 
 	id = message[0] - data->T9_reportid_min;
@@ -1452,41 +1506,6 @@ static irqreturn_t mxt_interrupt(int irq, void *dev_id)
 		return mxt_process_messages_t44(data);
 	else
 		return mxt_process_messages(data);
-}
-
-static int mxt_t6_command(struct mxt_data *data, u16 cmd_offset,
-			  u8 value, bool wait)
-{
-	u16 reg;
-	u8 command_register = 0;
-	int timeout_counter = 0;
-	int ret;
-
-	reg = data->T6_address + cmd_offset;
-
-	ret = mxt_write_reg(data->client, reg, value);
-	if (ret)
-		return ret;
-
-	if (!wait)
-		return 0;
-
-	do {
-		msleep(20);
-		ret = __mxt_read_reg(data->client, reg, 1, &command_register);
-		if (ret) {
-			dev_err(&data->client->dev, "%s: T6 command failed! (%d)\n",
-					__func__, ret);
-			return ret;
-		}
-	} while ((command_register != 0) && (timeout_counter++ <= 100));
-
-	if (timeout_counter > 100) {
-		dev_err(&data->client->dev, "%s: Command failed!\n", __func__);
-		return -EIO;
-	}
-
-	return 0;
 }
 
 static int mxt_soft_reset(struct mxt_data *data, u8 value)
@@ -2560,7 +2579,7 @@ err_free_mem:
 static int mxt_initialize_t9_input_device(struct mxt_data *data);
 static int mxt_configure_objects(struct mxt_data *data, bool force);
 
-static void mxt_check_firmware(struct mxt_data *data)
+static int mxt_check_firmware(struct mxt_data *data)
 {
 	int error = 0;
 	bool retry = false;
@@ -2573,7 +2592,7 @@ read_info:
 		if (retry) {
 			dev_err(&client->dev, "%s: check firmware error!\n",
 					__func__);
-			return;
+			return -1;
 		}
 
 		if (error) {
@@ -2597,6 +2616,8 @@ read_info:
 		retry = true;
 		goto read_info;
 	}
+
+	return 0;
 }
 
 static int mxt_initialize(struct mxt_data *data)
@@ -2606,7 +2627,9 @@ static int mxt_initialize(struct mxt_data *data)
 	bool alt_bootloader_addr = false;
 	bool retry = false;
 
-	mxt_check_firmware(data);
+	error = mxt_check_firmware(data);
+	if (error < 0)
+		return error;
 
 retry_info:
 	error = mxt_read_info_block(data);
@@ -3140,6 +3163,8 @@ static void mxt_reset_slots(struct mxt_data *data)
 	unsigned int num_mt_slots;
 	int id;
 
+	if (!data->input_dev)
+		return;
 	num_mt_slots = data->num_touchids + data->num_stylusids;
 
 	for (id = 0; id < num_mt_slots; id++) {
@@ -3195,6 +3220,8 @@ static void mxt_suspend(struct mxt_data *data)
 	struct input_dev *input_dev;
 
 	input_dev = data->input_dev;
+	if (!input_dev)
+		return;
 
 	mutex_lock(&input_dev->mutex);
 	if (input_dev->users)
@@ -3210,6 +3237,8 @@ static void mxt_resume(struct mxt_data *data)
 	struct input_dev *input_dev;
 
 	input_dev = data->input_dev;
+	if (!input_dev)
+		return;
 
 	if (data->pdata->gpio_switch >= 0)
 		gpio_set_value_cansleep(data->pdata->gpio_switch, 1);
