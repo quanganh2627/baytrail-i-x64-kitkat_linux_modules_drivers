@@ -72,31 +72,6 @@
 #include <linux/acpi.h>
 #include <linux/nmi.h>
 
-/* TCO related info */
-enum iTCO_chipsets {
-	VLV_PCU,	/* Baytrail TCO */
-};
-
-static struct {
-	char *name;
-	unsigned int iTCO_version;
-} iTCO_chipset_info[] = {
-	{"Baytrail TCO", 3},
-	{NULL, 0}
-};
-
-/*
- * This data only exists for exporting the supported PCI ids
- * via MODULE_DEVICE_TABLE.  We do not actually register a
- * pci_driver, because the I/O Controller Hub has also other
- * functions that probably will be registered by other drivers.
- */
-static DEFINE_PCI_DEVICE_TABLE(iTCO_wdt_pci_tbl) = {
-	{ PCI_VDEVICE(INTEL, 0x0f1c), VLV_PCU},
-	{ 0, },			/* End of list */
-};
-MODULE_DEVICE_TABLE(pci, iTCO_wdt_pci_tbl);
-
 /* Address definitions for the TCO */
 /* TCO base address */
 #define TCOBASE		(iTCO_wdt_private.ACPIBASE + 0x60)
@@ -143,25 +118,16 @@ static char expect_release;
 static struct {		/* this is private data for the iTCO_wdt device */
 	/* TCO watchdog action */
 	unsigned int iTCO_wdt_action;
-	/* TCO version/generation */
-	unsigned int iTCO_version;
 	/* The device's ACPIBASE address (TCOBASE = ACPIBASE+0x60) */
 	unsigned long ACPIBASE;
-	/* NO_REBOOT flag is Memory-Mapped GCS register bit 5 (TCO version 2)*/
-	unsigned long __iomem *gcs;
 	/* the lock for io operations */
 	spinlock_t io_lock;
-	/* the PCI-device */
-	struct pci_dev *pdev;
 #ifdef CONFIG_DEBUG_FS
 	bool panic_reboot_notifier;
 #endif
 	/* TCO enable bit */
 	bool enable;
 } iTCO_wdt_private;
-
-/* the watchdog platform device */
-static struct platform_device *iTCO_wdt_platform_device;
 
 /* the watchdog reboot notifier */
 static struct notifier_block reboot_notifier;
@@ -178,15 +144,10 @@ MODULE_PARM_DESC(heartbeat, "Watchdog timeout in seconds. "
 		 __MODULE_STRING(WATCHDOG_HEARTBEAT) ")");
 
 static bool nowayout = WATCHDOG_NOWAYOUT;
-module_param(nowayout, bool, 0);
+module_param(nowayout, bool, false);
 MODULE_PARM_DESC(nowayout,
 		 "Watchdog cannot be stopped once started (default="
 		 __MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
-
-static int turn_SMI_watchdog_clear_off = 1;
-module_param(turn_SMI_watchdog_clear_off, int, 0);
-MODULE_PARM_DESC(turn_SMI_watchdog_clear_off,
-	"Turn off SMI clearing watchdog (depends on TCO-version)(default=1)");
 
 /*
  * Some TCO specific functions
@@ -421,7 +382,7 @@ static ssize_t iTCO_wdt_write(struct file *file, const char __user *data,
 	return len;
 }
 
-static unsigned int iTCO_wdt_get_current_ospolicy()
+static unsigned int iTCO_wdt_get_current_ospolicy(void)
 {
 	unsigned int val;
 
@@ -703,35 +664,89 @@ static irqreturn_t tco_irq_handler(int irq, void *arg)
 	return IRQ_HANDLED;
 }
 
+
+static ssize_t shutdown_ongoing_store(struct device *dev,
+			struct device_attribute *attr, const char *buf, size_t size)
+{
+	iTCO_wdt_set_reset_type(TCO_POLICY_HALT);
+	return size;
+}
+
+
+static ssize_t reboot_ongoing_store(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t size)
+{
+	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
+	return size;
+}
+
+/* Watchdog behavior depending on system phase */
+static DEVICE_ATTR(shutdown_ongoing, S_IWUSR, NULL, shutdown_ongoing_store);
+static DEVICE_ATTR(reboot_ongoing, S_IWUSR, NULL, reboot_ongoing_store);
+
+static int create_watchdog_sysfs_files(void)
+{
+	int ret;
+
+	ret = device_create_file(iTCO_wdt_miscdev.this_device,
+			&dev_attr_shutdown_ongoing);
+	if (ret) {
+		pr_warn("cant register dev file for shutdown_ongoing\n");
+		return ret;
+	}
+
+	ret = device_create_file(iTCO_wdt_miscdev.this_device,
+			&dev_attr_reboot_ongoing);
+	if (ret) {
+		pr_warn("cant register dev file for reboot_ongoing\n");
+		return ret;
+	}
+	return 0;
+}
+
+static int remove_watchdog_sysfs_files(void)
+{
+	device_remove_file(iTCO_wdt_miscdev.this_device,
+		&dev_attr_shutdown_ongoing);
+	device_remove_file(iTCO_wdt_miscdev.this_device,
+		&dev_attr_reboot_ongoing);
+	return 0;
+}
+
 /*
  *	Init & exit routines
  */
 
-static int iTCO_wdt_init(struct pci_dev *pdev,
-		const struct pci_device_id *ent, struct platform_device *dev)
+static int iTCO_wdt_init(struct platform_device *pdev)
 {
 	int ret;
 	u32 base_address;
 	unsigned long val32;
+	struct pci_dev *parent;
+
+	if (!pdev->dev.parent || !dev_is_pci(pdev->dev.parent)) {
+		pr_err("Unqualified parent device.\n");
+		return -EINVAL;
+	}
+
+	parent = to_pci_dev(pdev->dev.parent);
 
 	/*
 	 *      Find the ACPI/PM base I/O address which is the base
 	 *      for the TCO registers (TCOBASE=ACPIBASE + 0x60)
 	 *      ACPIBASE is bits [15:7] from 0x40-0x43
 	 */
-	pci_read_config_dword(pdev, 0x40, &base_address);
+	pci_read_config_dword(parent, 0x40, &base_address);
 	base_address &= 0x0000ff80;
 	if (base_address == 0x00000000) {
 		/* Something's wrong here, ACPIBASE has to be set */
 		pr_err("failed to get TCOBASE address, device disabled by hardware/BIOS\n");
 		return -ENODEV;
 	}
-	iTCO_wdt_private.iTCO_version =
-			iTCO_chipset_info[ent->driver_data].iTCO_version;
 	iTCO_wdt_private.ACPIBASE = base_address;
-	iTCO_wdt_private.pdev = pdev;
 
-	pci_read_config_dword(pdev, 0x44, &pmc_base_address);
+	pci_read_config_dword(parent, 0x44, &pmc_base_address);
 	pmc_base_address &= 0xFFFFFE00;
 
 	/*
@@ -768,13 +783,6 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 		goto unreg_smi_sts;
 	}
 
-	if (turn_SMI_watchdog_clear_off >= iTCO_wdt_private.iTCO_version) {
-		/* Bit 13: TCO_EN -> 0 = Disables TCO logic generating an SMI# */
-		val32 = inl(SMI_EN);
-		val32 &= ~TCO_EN_BIT;	/* Turn off TCO watchdog timer */
-		outl(val32, SMI_EN);
-	}
-
 	/* The TCO I/O registers reside in a 32-byte range pointed to
 	   by the TCOBASE value */
 	if (!request_region(TCOBASE, 0x20, "iTCO_wdt")) {
@@ -784,10 +792,7 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 		goto unreg_smi_en;
 	}
 
-	pr_info("Found a %s TCO device (Version=%d, TCOBASE=0x%04lx)\n",
-		iTCO_chipset_info[ent->driver_data].name,
-		iTCO_chipset_info[ent->driver_data].iTCO_version,
-		TCOBASE);
+	pr_info("Found a TCO device (TCOBASE=0x%04lx)\n", TCOBASE);
 
 	/* Check that the heartbeat value is within it's range;
 	   if not reset to the default */
@@ -872,104 +877,46 @@ static void iTCO_wdt_cleanup(void)
 	release_region(SMI_EN, 4);
 	release_region(SMI_STS, 4);
 	unregister_reboot_notifier(&reboot_notifier);
-	pci_dev_put(iTCO_wdt_private.pdev);
 	iTCO_wdt_private.ACPIBASE = 0;
 #ifdef CONFIG_DEBUG_FS
 	debugfs_remove_recursive(iTCO_debugfs_dir);
 #endif /* CONFIG_DEBUG_FS */
 }
 
-static int iTCO_wdt_probe(struct platform_device *dev)
+static int iTCO_wdt_probe(struct platform_device *pdev)
 {
-	int ret = -ENODEV;
-	int found = 0;
-	struct pci_dev *pdev = NULL;
-	const struct pci_device_id *ent;
+	int ret = 0;
 
 	spin_lock_init(&iTCO_wdt_private.io_lock);
 
-	for_each_pci_dev(pdev) {
-		ent = pci_match_id(iTCO_wdt_pci_tbl, pdev);
-		if (ent) {
-			found++;
-			ret = iTCO_wdt_init(pdev, ent, dev);
-#ifdef CONFIG_DEBUG_FS
-			iTCO_debugfs_dir = debugfs_create_dir("iTCO", NULL);
-			debugfs_create_file("timeleft", S_IRUSR,
-					iTCO_debugfs_dir, NULL, &tl_fops);
-			debugfs_create_file("reset_type", S_IRUSR | S_IWUSR,
-					iTCO_debugfs_dir, NULL, &iTCO_wdt_reset_type_fops);
-			debugfs_create_file("trigger", S_IWUSR,
-					iTCO_debugfs_dir, NULL, &iTCO_wdt_trigger_fops);
-			debugfs_create_bool("panic_reboot_notifier", S_IRUSR | S_IWUSR,
-					    iTCO_debugfs_dir,
-					    (u32 *)&iTCO_wdt_private.panic_reboot_notifier);
-#endif /* CONFIG_DEBUG_FS */
-			if (!ret)
-				break;
-		}
-	}
+	ret = iTCO_wdt_init(pdev);
+	if (ret)
+		return ret;
 
-	if (!found)
-		pr_info("No device detected\n");
+#ifdef CONFIG_DEBUG_FS
+	iTCO_debugfs_dir = debugfs_create_dir("iTCO", NULL);
+	debugfs_create_file("timeleft", S_IRUSR,
+			    iTCO_debugfs_dir, NULL, &tl_fops);
+	debugfs_create_file("reset_type", S_IRUSR | S_IWUSR,
+			    iTCO_debugfs_dir, NULL, &iTCO_wdt_reset_type_fops);
+	debugfs_create_file("trigger", S_IWUSR,
+			    iTCO_debugfs_dir, NULL, &iTCO_wdt_trigger_fops);
+	debugfs_create_bool("panic_reboot_notifier", S_IRUSR | S_IWUSR,
+			    iTCO_debugfs_dir,
+			    (u32 *)&iTCO_wdt_private.panic_reboot_notifier);
+#endif /* CONFIG_DEBUG_FS */
+
+	create_watchdog_sysfs_files();
 
 	return ret;
 }
-
-static ssize_t shutdown_ongoing_store(struct device *dev,
-			struct device_attribute *attr, const char *buf, size_t size)
-{
-	iTCO_wdt_set_reset_type(TCO_POLICY_HALT);
-	return size;
-}
-
-
-static ssize_t reboot_ongoing_store(struct device *dev,
-			struct device_attribute *attr,
-			const char *buf, size_t size)
-{
-	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
-	return size;
-}
-
-/* Watchdog behavior depending on system phase */
-static DEVICE_ATTR(shutdown_ongoing, S_IWUSR, NULL, shutdown_ongoing_store);
-static DEVICE_ATTR(reboot_ongoing, S_IWUSR, NULL, reboot_ongoing_store);
-
-int create_watchdog_sysfs_files(void)
-{
-	int ret;
-
-	ret = device_create_file(iTCO_wdt_miscdev.this_device,
-			&dev_attr_shutdown_ongoing);
-	if (ret) {
-		pr_warn("cant register dev file for shutdown_ongoing\n");
-		return ret;
-	}
-
-	ret = device_create_file(iTCO_wdt_miscdev.this_device,
-			&dev_attr_reboot_ongoing);
-	if (ret) {
-		pr_warn("cant register dev file for reboot_ongoing\n");
-		return ret;
-	}
-	return 0;
-}
-
-int remove_watchdog_sysfs_files(void)
-{
-	device_remove_file(iTCO_wdt_miscdev.this_device,
-		&dev_attr_shutdown_ongoing);
-	device_remove_file(iTCO_wdt_miscdev.this_device,
-		&dev_attr_reboot_ongoing);
-	return 0;
-}
-
 
 static int iTCO_wdt_remove(struct platform_device *dev)
 {
 	if (iTCO_wdt_private.ACPIBASE)
 		iTCO_wdt_cleanup();
+
+	remove_watchdog_sysfs_files();
 
 	return 0;
 }
@@ -1003,40 +950,14 @@ static struct platform_driver iTCO_wdt_driver = {
 
 static int __init iTCO_wdt_init_module(void)
 {
-	int err;
-
 	pr_info("Intel TCO WatchDog Timer Driver v%s\n", DRV_VERSION);
-
-	err = platform_driver_register(&iTCO_wdt_driver);
-	if (err)
-		return err;
-
-	iTCO_wdt_platform_device = platform_device_register_simple(DRV_NAME,
-								-1, NULL, 0);
-	if (IS_ERR(iTCO_wdt_platform_device)) {
-		err = PTR_ERR(iTCO_wdt_platform_device);
-		goto unreg_platform_driver;
-	}
-
-	err = create_watchdog_sysfs_files();
-	if (err) {
-		pr_err("%s: Error creating debugfs entries\n", __func__);
-		goto unreg_platform_driver;
-	}
-
-	return 0;
-
-unreg_platform_driver:
-	platform_driver_unregister(&iTCO_wdt_driver);
-	return err;
+	return platform_driver_register(&iTCO_wdt_driver);
 }
 
 static void __exit iTCO_wdt_cleanup_module(void)
 {
-	remove_watchdog_sysfs_files();
-	platform_device_unregister(iTCO_wdt_platform_device);
 	platform_driver_unregister(&iTCO_wdt_driver);
-	pr_info("Watchdog Module Unloaded\n");
+	pr_info("Intel TCO WatchDog Timer Driver unloaded\n");
 }
 
 module_init(iTCO_wdt_init_module);
