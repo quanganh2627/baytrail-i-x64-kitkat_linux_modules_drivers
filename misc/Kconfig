@@ -52,6 +52,7 @@ config KCT_DAEMON
 	 Driver that enables the kct daemon to handle Intel crashtool events.
 
 source "drivers/external_drivers/drivers/misc/bcm-lpm/Kconfig"
+source "drivers/external_drivers/drivers/misc/intel_ld/Kconfig"
 source "drivers/external_drivers/drivers/misc/ti-st/Kconfig"
 source "drivers/external_drivers/drivers/misc/tp2l/Kconfig"
 source "drivers/external_drivers/drivers/misc/iqvandroid/Kconfig"
