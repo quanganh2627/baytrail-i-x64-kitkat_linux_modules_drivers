@@ -991,19 +991,13 @@ static struct notifier_block panic_blk = {
 	.priority = 100,
 };
 
-static int panic_dbg_get(void *data, u64 *val)
-{
-	emmc_ipanic(NULL, 0, NULL);
-	return 0;
-}
-
 static int panic_dbg_set(void *data, u64 val)
 {
 	BUG();
 	return -1;
 }
 
-DEFINE_SIMPLE_ATTRIBUTE(panic_dbg_fops, panic_dbg_get, panic_dbg_set, "%llu\n");
+DEFINE_SIMPLE_ATTRIBUTE(panic_dbg_fops, NULL, panic_dbg_set, "%llu\n");
 
 static int match_dev_panic_part(struct device *dev, const void *data)
 {
