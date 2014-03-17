@@ -17,3 +17,4 @@ obj-y               		+= mfd/
 obj-$(CONFIG_WATCHDOG)		+= watchdog/
 obj-$(CONFIG_ACPI)		+= acpi/
 obj-$(CONFIG_PWM)		+= pwm/
+obj-$(CONFIG_RMNET)             += rmnet/

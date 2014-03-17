@@ -744,7 +744,8 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 		mdm_ctrl_power_off(mdm_drv);
 
 	/* Modem cold boot sequence */
-	if (mdm_drv->pdata->pmic.get_early_pwr_on(mdm_drv->pdata->pmic_data))
+    // fix me after power on, as condition is not true+
+    // if (mdm_drv->pdata->pmic.get_early_pwr_on(mdm_drv->pdata->pmic_data))
 		mdm_ctrl_cold_boot(mdm_drv);
 
 	return 0;

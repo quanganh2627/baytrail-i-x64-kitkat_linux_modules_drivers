@@ -44,6 +44,7 @@
 #include <linux/delay.h>
 #include <asm/intel_scu_pmic.h>
 #include <linux/mdm_ctrl_board.h>
+#define POWER_OFF 100
 
 int pmic_io_init(void *data)
 {
@@ -59,6 +60,30 @@ int pmic_io_power_on_ctp_mdm(void *data)
 
 int pmic_io_power_on_mdm(void *data)
 {
+#if 1
+    int retval = 0;
+    pr_info("DRVNAME: kz IRQ request for GPIO (POWER_OFF: %d)", POWER_OFF);
+    retval = gpio_request(POWER_OFF, "power_off");
+    if (retval < 0)
+    {
+        pr_info("DRVNAME: IRQ request failed for GPIO (POWER_OFF)");
+        retval = -ENODEV;
+        return retval;
+    }
+
+    retval = gpio_get_value(POWER_OFF);
+    pr_info("DRVNAME: POWER_OFF default value:  %d)", retval);
+
+    gpio_direction_output(POWER_OFF, 1);
+    usleep_range(200, 500);
+    pr_info("DRVNAME: (POWER_OFF) Assert");
+    gpio_set_value(POWER_OFF, 1);
+
+    retval = gpio_get_value(POWER_OFF);
+    pr_info("DRVNAME: set POWER_OFF to 1, actual result:  %d)", retval);
+
+    return 0;
+#endif
 	struct mdm_ctrl_pmic_data *pmic_data = data;
 	int ret = 0;
 	u16 addr = pmic_data->chipctrl;
