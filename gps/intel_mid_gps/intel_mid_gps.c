@@ -30,7 +30,9 @@
 
 #define DRIVER_NAME "intel_mid_gps"
 
-#define ACPI_DEVICE_ID_BCM4752 "BCM4752"
+#define ACPI_DEVICE_ID_BCM4752  "BCM4752"
+#define ACPI_DEVICE_ID_BCM47521 "BCM47521"
+#define ACPI_DEVICE_ID_BCM47531 "BCM47531"
 
 struct device *tty_dev = NULL;
 struct wake_lock hostwake_lock;
@@ -397,7 +399,9 @@ static void intel_mid_gps_shutdown(struct platform_device *pdev)
 #ifdef CONFIG_ACPI
 static struct acpi_device_id acpi_gps_id_table[] = {
 	/* ACPI IDs here */
-	{ACPI_DEVICE_ID_BCM4752},
+	{ ACPI_DEVICE_ID_BCM4752,  0 },
+	{ ACPI_DEVICE_ID_BCM47521, 0 },
+	{ ACPI_DEVICE_ID_BCM47531, 0 },
 	{ }
 };
 
