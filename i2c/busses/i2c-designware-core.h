@@ -218,7 +218,6 @@ struct dw_controller;
  * @adapter: i2c subsystem adapter node
  * @tx_fifo_depth: depth of the hardware tx fifo
  * @rx_fifo_depth: depth of the hardware rx fifo
- * @shared_host: if this host is shared by other units on the SoC
  */
 struct dw_i2c_dev {
 	struct device		*dev;
@@ -233,9 +232,6 @@ struct dw_i2c_dev {
 	struct dw_controller 	*controller;
 	int			enable_stop;
 	int			share_irq;
-	int			shared_host;
-	int			(*acquire_ownership) (void);
-	int			(*release_ownership) (void);
 	int			cmd_err;
 	struct i2c_msg		*msgs;
 	int			msgs_num;
@@ -330,5 +326,4 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 void i2c_dw_free(struct device *pdev, struct dw_i2c_dev *dev);
 int i2c_dw_suspend(struct dw_i2c_dev *dev, bool runtime);
 int i2c_dw_resume(struct dw_i2c_dev *dev, bool runtime);
-extern int intel_mid_dw_i2c_acquire_ownership(void);
-extern int intel_mid_dw_i2c_release_ownership(void);
+void i2c_acpi_devices_setup(struct device *pdev, struct dw_i2c_dev *dev);

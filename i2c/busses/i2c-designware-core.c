@@ -41,8 +41,6 @@
 #include <linux/fs.h>
 #include <linux/acpi.h>
 #include "i2c-designware-core.h"
-#include <linux/intel_mid_pm.h>
-
 
 int i2c_dw_init(struct dw_i2c_dev *dev);
 int i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num);
@@ -52,7 +50,6 @@ void i2c_dw_disable(struct dw_i2c_dev *dev);
 irqreturn_t i2c_dw_isr(int this_irq, void *dev_id);
 void i2c_dw_disable_int(struct dw_i2c_dev *dev);
 void i2c_dw_clear_int(struct dw_i2c_dev *dev);
-static void dw_i2c_acpi_setup(struct device *pdev, struct dw_i2c_dev *dev);
 
 static char *abort_sources[] = {
 	[ABRT_7B_ADDR_NOACK] =
@@ -482,13 +479,14 @@ static struct i2c_algorithm i2c_dw_algo = {
 
 int i2c_dw_suspend(struct dw_i2c_dev *dev, bool runtime)
 {
-	if (!runtime) {
+	if (runtime)
+		i2c_dw_disable(dev);
+	else {
 		if (down_trylock(&dev->lock))
 			return -EBUSY;
+		i2c_dw_disable(dev);
 		dev->status &= ~STATUS_POWERON;
 	}
-	if (!dev->shared_host)
-		i2c_dw_disable(dev);
 
 	return 0;
 }
@@ -496,8 +494,7 @@ EXPORT_SYMBOL(i2c_dw_suspend);
 
 int i2c_dw_resume(struct dw_i2c_dev *dev, bool runtime)
 {
-	if (!dev->shared_host)
-		i2c_dw_init(dev);
+	i2c_dw_init(dev);
 	if (!runtime) {
 		dev->status |= STATUS_POWERON;
 		up(&dev->lock);
@@ -651,7 +648,6 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 	void __iomem *base;
 	struct  dw_controller *controller;
 	int r;
-	void *handle_save = ACPI_HANDLE(pdev);
 
 	if (bus_idx >= ARRAY_SIZE(dw_controllers)) {
 		dev_err(pdev, "invalid bus index %d\n",
@@ -702,8 +698,6 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 	dev->tx_fifo_depth = controller->tx_fifo_depth;
 	dev->rx_fifo_depth = controller->rx_fifo_depth;
 	dev->fast_plus = controller->fast_plus;
-	dev_set_drvdata(pdev, dev);
-	dw_i2c_acpi_setup(pdev, dev);
 
 	r = i2c_dw_init(dev);
 	if (r)
@@ -745,9 +739,6 @@ struct dw_i2c_dev *i2c_dw_setup(struct device *pdev, int bus_idx,
 		dev_err(&adap->dev,
 			"Failed to add lock_xfer sysfs files: %d\n", r);
 
-	acpi_i2c_register_devices(adap);
-	ACPI_HANDLE_SET(pdev, handle_save);
-
 	return dev;
 
 err_del_adap:
@@ -765,7 +756,7 @@ exit:
 EXPORT_SYMBOL(i2c_dw_setup);
 
 #ifdef CONFIG_ACPI
-static int dw_i2c_acpi_get_freq(struct acpi_resource *ares,
+static int acpi_i2c_get_freq(struct acpi_resource *ares,
 					void *data)
 {
 	struct dw_i2c_dev *i2c = data;
@@ -813,7 +804,7 @@ static acpi_status acpi_i2c_find_device_speed(acpi_handle handle, u32 level,
 
 	INIT_LIST_HEAD(&resource_list);
 	ret = acpi_dev_get_resources(adev, &resource_list,
-				     dw_i2c_acpi_get_freq, i2c);
+				     acpi_i2c_get_freq, i2c);
 	acpi_dev_free_resource_list(&resource_list);
 
 	if (ret < 0)
@@ -825,12 +816,11 @@ static acpi_status acpi_i2c_find_device_speed(acpi_handle handle, u32 level,
 	return AE_OK;
 }
 
-static void dw_i2c_acpi_setup(struct device *pdev, struct dw_i2c_dev *dev)
+void i2c_acpi_devices_setup(struct device *pdev, struct dw_i2c_dev *dev)
 {
 	acpi_handle pdev_handle = ACPI_HANDLE(pdev);
 	acpi_handle handle = NULL;
 	acpi_status status;
-	unsigned long long shared_host;
 
 	if (pdev_handle) {
 		handle = pdev_handle;
@@ -844,16 +834,7 @@ static void dw_i2c_acpi_setup(struct device *pdev, struct dw_i2c_dev *dev)
 	if (handle == NULL)
 		return;
 
-	status = acpi_evaluate_integer(handle, "_SEM", NULL, &shared_host);
-	if (ACPI_SUCCESS(status)) {
-		dev_info(pdev, "_SEM=%ld\n", shared_host);
-		if (shared_host != 0) {
-			dev_info(pdev, "Share controller with PUNIT\n");
-			dev->shared_host = 1;
-			dev->acquire_ownership = intel_mid_dw_i2c_acquire_ownership;
-			dev->release_ownership = intel_mid_dw_i2c_release_ownership;
-		}
-	}
+	acpi_i2c_register_devices(&dev->adapter);
 
 	/* Find I2C adapter bus frequency */
 	status = acpi_walk_namespace(ACPI_TYPE_DEVICE, handle, 1,
@@ -861,10 +842,14 @@ static void dw_i2c_acpi_setup(struct device *pdev, struct dw_i2c_dev *dev)
 				     dev, NULL);
 	if (ACPI_FAILURE(status))
 		dev_warn(pdev, "failed to get I2C bus freq\n");
+
+	/* Set the handle back to its raw value */
+	ACPI_HANDLE_SET(pdev, pdev_handle);
 }
 #else
-void dw_i2c_acpi_setup(struct device *pdev, struct dw_i2c_dev *dev) { }
+void i2c_acpi_devices_setup(struct device *pdev, struct dw_i2c_dev *dev) { }
 #endif
+EXPORT_SYMBOL(i2c_acpi_devices_setup);
 
 void i2c_dw_free(struct device *pdev, struct dw_i2c_dev *dev)
 {
@@ -1063,6 +1048,7 @@ static void i2c_dw_xfer_init(struct dw_i2c_dev *dev)
 	i2c_dw_clear_int(dev);
 	dw_writel(dev, DW_IC_INTR_DEFAULT_MASK, DW_IC_INTR_MASK);
 }
+
 /*
  * Initiate (and continue) low level master read/write transaction.
  * This function is only called from i2c_dw_isr, and pumping i2c_msg
@@ -1226,7 +1212,7 @@ int
 i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 {
 	struct dw_i2c_dev *dev = i2c_get_adapdata(adap);
-	int ret = 0;
+	int ret;
 	unsigned long timeout;
 
 	dev_dbg(dev->dev, "%s: msgs: %d\n", __func__, num);
@@ -1243,15 +1229,6 @@ i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	dev->msg_err = 0;
 	dev->status = STATUS_IDLE;
 	dev->abort_source = 0;
-
-	/* if the host is shared between other units on the SoC */
-	if (dev->shared_host && dev->acquire_ownership) {
-		ret = dev->acquire_ownership();
-		if (ret < 0) {
-			dev_WARN(dev->dev, "couldnt acquire ownership\n");
-			goto done;
-		}
-	}
 
 	ret = i2c_dw_wait_bus_not_busy(dev);
 	if (ret < 0)
@@ -1274,7 +1251,6 @@ i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	}
 
 	if (dev->msg_err) {
-		dev_WARN(dev->dev, "i2c msg error\n");
 		ret = dev->msg_err;
 		goto done;
 	}
@@ -1295,9 +1271,6 @@ i2c_dw_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num)
 	ret = -EIO;
 
 done:
-	if (dev->shared_host && dev->release_ownership)
-		dev->release_ownership();
-
 	pm_runtime_mark_last_busy(dev->dev);
 	pm_runtime_put_autosuspend(dev->dev);
 	up(&dev->lock);
