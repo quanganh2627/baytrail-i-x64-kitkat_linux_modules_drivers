@@ -319,9 +319,10 @@ static int dlp_ctrl_send_response(struct dlp_channel *ch_ctx,
 					struct dlp_command_params *tx_params,
 					int response)
 {
-	int ret;
+	int ret, state;
 	struct hsi_msg *tx_msg;
 	struct dlp_command *dlp_cmd;
+	unsigned long flags;
 
 	/* Allocate the eDLP response */
 	dlp_cmd = dlp_ctrl_cmd_alloc(ch_ctx,
@@ -354,23 +355,38 @@ static int dlp_ctrl_send_response(struct dlp_channel *ch_ctx,
 	memcpy(sg_virt(tx_msg->sgt.sgl),
 	       &dlp_cmd->params, sizeof(struct dlp_command_params));
 
-	/* Send the TX HSI msg */
-	ret = hsi_async(tx_msg->cl, tx_msg);
-	if (ret) {
-		pr_err(DRVNAME ": TX xfer failed ! (cmd:0x%X, ret:%d)\n",
-			dlp_cmd->params.id, ret);
-
-		/* Free the TX msg */
-		dlp_pdu_free(tx_msg, tx_msg->channel);
-
-		/* Delete the command */
-		kfree(dlp_cmd);
-	} else {
-		/* Dump the TX command */
-		if (EDLP_CTRL_TX_DATA_REPORT)
-			pr_debug(DRVNAME ": CTRL_TX (0x%X)\n",
-					*((u32 *)&dlp_cmd->params));
+	spin_lock_irqsave(&ch_ctx->lock, flags);
+	state = dlp_ctrl_get_channel_state(ch_ctx->ch_id);
+	if ((state != DLP_CH_STATE_OPENING) && (state != DLP_CH_STATE_OPENED)) {
+		spin_unlock_irqrestore(&ch_ctx->lock, flags);
+		goto out;
 	}
+	else {
+		spin_unlock_irqrestore(&ch_ctx->lock, flags);
+		/* Send the TX HSI msg */
+		ret = hsi_async(tx_msg->cl, tx_msg);
+		if (ret) {
+			pr_err(DRVNAME ": TX xfer failed ! (cmd:0x%X, ret:%d)\n",
+				dlp_cmd->params.id, ret);
+
+			goto out;
+		}
+		else {
+			/* Dump the TX command */
+			if (EDLP_CTRL_TX_DATA_REPORT)
+				pr_debug(DRVNAME ": CTRL_TX (0x%X)\n",
+						*((u32 *)&dlp_cmd->params));
+		}
+	}
+
+	return 0;
+
+out:
+	/* Free the TX msg */
+	dlp_pdu_free(tx_msg, tx_msg->channel);
+
+	/* Delete the command */
+	kfree(dlp_cmd);
 
 	return 0;
 }
