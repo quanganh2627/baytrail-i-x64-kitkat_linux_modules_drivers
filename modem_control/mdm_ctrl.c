@@ -701,8 +701,10 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 		goto del_dev;
 	if (new_drv->pdata->cpu.init(new_drv->pdata->cpu_data))
 		goto del_dev;
+#if 0
 	if (new_drv->pdata->pmic.init(new_drv->pdata->pmic_data))
 		goto del_dev;
+#endif
 
 	if (new_drv->pdata->cpu.get_irq_rst(new_drv->pdata->cpu_data) > 0) {
 		ret =
