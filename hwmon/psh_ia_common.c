@@ -20,6 +20,7 @@
 #include <linux/ctype.h>
 #include "psh_ia_common.h"
 #include <asm/intel-mid.h>
+#include <linux/hrtimer.h>
 
 #define TOLOWER(x) ((x) | 0x20)
 /* translate string to unsigned long value */
@@ -225,11 +226,45 @@ int ia_circ_dbg_get_data(struct psh_ia_priv *psh_ia_data, char *buf, u32 size)
 	return cnt;
 }
 
+static int ia_sync_timestamp(struct psh_ia_priv *psh_ia_data, u8 check_interval)
+{
+	static u64 tick_old = 0;
+	struct ia_cmd cmd_timestamp = { 0 };
+	struct cmd_ia_notify_param *param = (struct cmd_ia_notify_param *)cmd_timestamp.param;
+	u8 *linux_base_ns = param->extra;
+	timestamp_t base_ns = 0;
+	int ret;
+
+	if (check_interval) {
+		if (!tick_old) {
+			tick_old = jiffies;
+			return 0;
+		} else {
+			if (jiffies - tick_old < (120 * HZ))
+				return 0;
+		}
+	}
+
+	cmd_timestamp.tran_id = 0;
+	cmd_timestamp.cmd_id = CMD_IA_NOTIFY;
+	cmd_timestamp.sensor_id = 0;
+	param->id = IA_NOTIFY_TIMESTAMP_SYNC;
+	base_ns = ktime_to_ns(ktime_get_boottime());
+	tick_old = jiffies;
+	*(timestamp_t *)linux_base_ns = base_ns;
+	ret = process_send_cmd(psh_ia_data, PSH2IA_CHANNEL0,
+			&cmd_timestamp, sizeof(struct ia_cmd) - CMD_PARAM_MAX_SIZE
+		+ sizeof(struct cmd_ia_notify_param) + sizeof(base_ns));
+	return ret;
+}
+
 int ia_send_cmd(struct psh_ia_priv *psh_ia_data,
 			struct ia_cmd *cmd, int len)
 {
 	int ret = 0;
 	static struct resp_cmd_ack cmd_ack;
+
+	ia_sync_timestamp(psh_ia_data, 0);
 
 	mutex_lock(&psh_ia_data->cmd_mutex);
 	if (cmd->cmd_id == CMD_RESET) {
@@ -741,6 +776,8 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 	const char *context_name;
 	struct trace_data *out_data;
 	char msg_str[STR_BUFF_SIZE];
+
+	ia_sync_timestamp(psh_ia_data, 1);
 
 	switch (resp->type) {
 	case RESP_CMD_ACK:
