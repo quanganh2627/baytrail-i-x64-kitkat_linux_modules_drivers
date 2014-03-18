@@ -1959,7 +1959,9 @@ static ssize_t scutrace_status_store(struct device *dev,
 	int ret = 0, rbuflen = 4;
 
 	char action[MAX_INPUT_LENGTH];
-	sscanf(buffer, "%s", action);
+	char format[10];
+	snprintf(format, sizeof(format), "%%%ds", MAX_INPUT_LENGTH-1);
+	sscanf(buffer, format, action);
 
 	if (!strcmp(action, "enabled")) {
 
@@ -2017,7 +2019,9 @@ static ssize_t unsolicit_scutrace_store(struct device *dev,
 	int ret = 0, rbuflen = 4;
 
 	char action[MAX_INPUT_LENGTH];
-	sscanf(buffer, "%s", action);
+	char format[10];
+	snprintf(format, sizeof(format), "%%%ds", MAX_INPUT_LENGTH-1);
+	sscanf(buffer, format, action);
 
 	if (!strcmp(action, "enabled")) {
 

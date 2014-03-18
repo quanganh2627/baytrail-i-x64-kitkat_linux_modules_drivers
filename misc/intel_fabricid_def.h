@@ -27,12 +27,12 @@
 #define FAB_ID_GP					3
 #define FAB_ID_SC					4
 #define FAB_ID_SC1					5
-#define FAB_ID_PM_FULLCHIP				6
-#define FAB_ID_PM_AUDIO					7
-#define FAB_ID_PM_SECONDARY				8
-#define FAB_ID_PM_GP					9
-#define FAB_ID_PM_SC					10
-#define FAB_ID_UNKNOWN					11
+#define FAB_ID_UNKNOWN					6
+#define FAB_ID_PM_FULLCHIP				7
+#define FAB_ID_PM_AUDIO					8
+#define FAB_ID_PM_SECONDARY				9
+#define FAB_ID_PM_GP					10
+#define FAB_ID_PM_SC					11
 
 enum scu_cold_boot_err {
 	ERR_MEM_ERR		= 0xE101,
