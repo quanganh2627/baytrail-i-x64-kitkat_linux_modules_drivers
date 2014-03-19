@@ -266,7 +266,7 @@ static int crystalcove_gpio_probe(struct platform_device *pdev)
 	int retval;
 	int i;
 	int gpio_base, irq_base;
-	struct device *dev = *(struct device **)pdev->dev.platform_data;
+	struct device *dev = intel_mid_pmic_dev();
 
 	mutex_init(&cg->buslock);
 	cg->irq_base = VV_PMIC_GPIO_IRQBASE;

@@ -117,7 +117,7 @@ f_out:
 	return ret;
 }
 
-
+extern struct soft_platform_id spid;
 int do_setup_ddr(struct device *dev)
 {
 	struct psh_ia_priv *ia_data =
@@ -132,6 +132,8 @@ int do_setup_ddr(struct device *dev)
 		.sensor_id = 0,
 		};
 	static int fw_load_done;
+	int load_default = 0;
+	char fname[20];
 
 	if (fw_load_done)
 		return 0;
@@ -140,12 +142,15 @@ int do_setup_ddr(struct device *dev)
 	intel_scu_ipc_msic_vprog2(1);
 	msleep(500);
 #endif
-	if (!request_firmware(&fw_entry, "psh.bin", dev)) {
+	snprintf(fname, 20, "psh.bin.%04x.%04x", (int)spid.platform_family_id,
+			(int)spid.hardware_id);
+again:
+	if (!request_firmware(&fw_entry, fname, dev)) {
 		if (!fw_entry)
 			return -ENOMEM;
 
 		psh_debug("psh fw size %d virt:0x%p\n",
-				fw_entry->size, fw_entry->data);
+				(int)fw_entry->size, fw_entry->data);
 		if (fw_entry->size > APP_IMR_SIZE) {
 			psh_err("psh fw size too big\n");
 		} else {
@@ -166,6 +171,14 @@ int do_setup_ddr(struct device *dev)
 			fw_load_done = 1;
 		}
 		release_firmware(fw_entry);
+	} else {
+		psh_err("cannot find psh firmware(%s)\n", fname);
+		if (!load_default) {
+			psh_err("try to load default psh.bin\n");
+			snprintf(fname, 20, "psh.bin");
+			load_default = 1;
+			goto again;
+		}
 	}
 	ia_lbuf_read_reset(ia_data->lbuf);
 	*(unsigned long *)(&cmd_user.param) = ddr_phy;

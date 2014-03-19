@@ -1,4 +1,3 @@
-source "drivers/external_drivers/drivers/gpio/Kconfig"
 source "drivers/external_drivers/drivers/gps/Kconfig"
 source "drivers/external_drivers/drivers/hsi/Kconfig"
 source "drivers/external_drivers/drivers/hwmon/Kconfig"

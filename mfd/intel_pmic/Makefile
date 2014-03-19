@@ -2,4 +2,4 @@
 # Makefile for multifunction miscellaneous devices
 #
 
-obj-$(CONFIG_INTEL_MID_PMIC)	+= intel_pmic/
+obj-y	+= pmic.o pmic_i2c.o crystal_cove.o dollar_cove.o
