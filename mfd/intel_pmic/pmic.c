@@ -400,7 +400,7 @@ static int pmic_irq_init(void)
 	}
 	pmic_regmap_flush();
 
-	pmic->irq_base = irq_alloc_descs(VV_PMIC_IRQBASE, 0, pmic->irq_num, 0);
+	pmic->irq_base = irq_alloc_descs(-1, VV_PMIC_IRQBASE, pmic->irq_num, 0);
 	if (pmic->irq_base < 0) {
 		dev_warn(pmic->dev, "Failed to allocate IRQs: %d\n",
 			 pmic->irq_base);
