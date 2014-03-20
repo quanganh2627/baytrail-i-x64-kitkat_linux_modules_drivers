@@ -1638,7 +1638,7 @@ static int create_sysfs_interfaces(struct sensor_data *data)
 
 	for (i = 0; i < data->config->sysfs_entries; i++, dev_attr++) {
 		dev_attr->attr.name = data->config->sysfs_table[i].name;
-		dev_attr->attr.mode = data->config->sysfs_table[i].mode;
+		dev_attr->attr.mode = S_IRUGO|S_IWUSR;
 
 		if (data->config->sysfs_table[i].type == DATA_ACTION) {
 			dev_attr->show = sensor_sysfs_data_acton_show;
