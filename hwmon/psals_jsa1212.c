@@ -450,7 +450,8 @@ static int sensor_input_init(struct sensor_data *data)
 		dev_err(&data->client->dev,
 			"unable to register input device %s:%d\n",
 			input->name, ret);
-		goto err;
+		input_free_device(input);
+		return ret;
 	}
 	data->input_ps = input;
 
@@ -458,7 +459,7 @@ static int sensor_input_init(struct sensor_data *data)
 	if (!input) {
 		dev_err(&data->client->dev, "input device allocate failed\n");
 		ret = -ENOMEM;
-		goto err_reg;
+		goto err;
 	}
 	input->name = ALS_INPUT_NAME;
 	input->id.bustype = BUS_I2C;
@@ -471,16 +472,13 @@ static int sensor_input_init(struct sensor_data *data)
 		dev_err(&data->client->dev,
 			"unable to register input device %s:%d\n",
 			input->name, ret);
-		goto err2;
+		input_free_device(input);
+		goto err;
 	}
 	data->input_als = input;
 	return 0;
-err2:
-	input_free_device(data->input_als);
-err_reg:
-	input_unregister_device(data->input_ps);
 err:
-	input_free_device(data->input_ps);
+	input_unregister_device(data->input_ps);
 	return ret;
 }
 

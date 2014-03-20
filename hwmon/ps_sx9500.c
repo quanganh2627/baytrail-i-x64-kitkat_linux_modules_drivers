@@ -578,7 +578,7 @@ static int sx9500_probe(struct i2c_client *client,
 
 	return 0;
 ret_sys:
-	input_free_device(sx9500.input_dev);
+	input_unregister_device(sx9500.input_dev);
 ret_input:
 	free_irq(sx9500.gpio_int, &sx9500);
 ret_irq:
@@ -597,7 +597,7 @@ static int sx9500_remove(struct i2c_client *client)
 	sx9500_disable(sx9500);
 	sysfs_remove_group(&client->dev.kobj, &sx9500_attribute_group);
 	free_irq(sx9500->irq, sx9500);
-	input_free_device(sx9500->input_dev);
+	input_unregister_device(sx9500->input_dev);
 	gpio_free(sx9500->gpio_rst);
 	gpio_free(sx9500->gpio_out);
 	gpio_free(sx9500->gpio_int);
