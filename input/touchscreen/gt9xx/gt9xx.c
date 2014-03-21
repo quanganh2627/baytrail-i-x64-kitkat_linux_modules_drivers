@@ -2269,13 +2269,11 @@ static void gtp_esd_check_func(struct work_struct *work)
 static const struct i2c_device_id goodix_ts_id[] = {
 	{ GTP_I2C_NAME, 0 },
 	{ "GODX0911", 0 },
-	{ "ATML1000", 0 }, /* Only used to verify driver on BYT CR board*/
 	{ }
 };
 
 static struct acpi_device_id goodix_acpi_match[] = {
 	{ "GODX0911", 0 },
-	{ "ATML1000", 0 }, /* Only used to verify driver on BYT CR board*/
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, goodix_acpi_match);
