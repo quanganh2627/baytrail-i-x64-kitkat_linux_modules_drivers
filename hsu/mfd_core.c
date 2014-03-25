@@ -1059,6 +1059,8 @@ static unsigned int serial_hsu_get_mctrl(struct uart_port *port)
 static void set_mctrl(struct uart_hsu_port *up, unsigned int mctrl)
 {
 	trace_hsu_func_start(up->index, __func__);
+	up->mcr &= ~(UART_MCR_RTS | UART_MCR_DTR | UART_MCR_OUT1 |
+		     UART_MCR_OUT2 | UART_MCR_LOOP);
 	if (mctrl & TIOCM_RTS)
 		up->mcr |= UART_MCR_RTS;
 	if (mctrl & TIOCM_DTR)
@@ -1081,6 +1083,8 @@ static void serial_hsu_set_mctrl(struct uart_port *port, unsigned int mctrl)
 		container_of(port, struct uart_hsu_port, port);
 
 	trace_hsu_func_start(up->index, __func__);
+	up->mcr &= ~(UART_MCR_RTS | UART_MCR_DTR | UART_MCR_OUT1 |
+		     UART_MCR_OUT2 | UART_MCR_LOOP);
 	if (mctrl & TIOCM_RTS)
 		up->mcr |= UART_MCR_RTS;
 	if (mctrl & TIOCM_DTR)
