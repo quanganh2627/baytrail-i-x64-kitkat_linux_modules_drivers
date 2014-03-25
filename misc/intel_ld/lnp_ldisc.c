@@ -508,7 +508,6 @@ static void st_send_frame(struct tty_struct *tty, struct lnp_uart *lnp_uart)
 
 	if (unlikely(lnp_uart == NULL || lnp_uart->rx_skb == NULL)) {
 		pr_info(" No channel registered, no data to send?");
-		kfree_skb(lnp_uart->rx_skb);
 		return;
 	}
 	buff = &lnp_uart->rx_skb->data[0];
@@ -586,10 +585,11 @@ static void st_send_frame(struct tty_struct *tty, struct lnp_uart *lnp_uart)
 	 readhead %d ", lnp_uart->read_cnt , lnp_uart->read_head);*/
 	}
 
-	if (lnp_uart->rx_skb)
+	if (lnp_uart->rx_skb) {
 		kfree_skb(lnp_uart->rx_skb);
+		lnp_uart->rx_skb = NULL;
+	}
 	lnp_uart->rx_state = LBF_W4_H4_HDR;
-	lnp_uart->rx_skb = NULL;
 	lnp_uart->rx_count = 0;
 	lnp_uart->rx_chnl = 0;
 	lnp_uart->bytes_pending = 0;
@@ -705,7 +705,6 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 
 	unsigned char *ptr;
 	int proto = INVALID;
-	struct sk_buff *prx_skb;
 	int pkt_status;
 	unsigned short payload_len = 0;
 	int len = 0, type = 0, i = 0;
@@ -717,11 +716,8 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 	print_hex_dump(KERN_DEBUG, ">in>", DUMP_PREFIX_NONE, 16, 1, cp, count,
 			0);
 	ptr = (unsigned char *) cp;
-	prx_skb = alloc_skb(255, GFP_ATOMIC);
-	/* tty_receive sent null ?*/
 	if (unlikely(ptr == NULL) || unlikely(p_lnp_uart == NULL)) {
 		pr_info(" received null from TTY ");
-		kfree_skb(prx_skb);
 		return;
 	}
 	spin_lock_irqsave(&p_lnp_uart->rx_lock, flags);
@@ -733,15 +729,12 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 		if (likely(p_lnp_uart->bytes_pending)) {
 			len = min_t(unsigned int, p_lnp_uart->bytes_pending,
 				 count);
-			memcpy(skb_put(prx_skb, len), ptr, len);
 			p_lnp_uart->rx_count = p_lnp_uart->bytes_pending;
 			memcpy(skb_put(p_lnp_uart->rx_skb, len),
-					&prx_skb->data[0], len);
+					ptr, len);
 		} else if ((p_lnp_uart->rx_count)) {
 			len = min_t(unsigned int, p_lnp_uart->rx_count, count);
-			memcpy(skb_put(prx_skb, len), ptr, len);
-			memcpy(skb_put(p_lnp_uart->rx_skb, len),
-					&prx_skb->data[0], len);
+			memcpy(skb_put(p_lnp_uart->rx_skb, len), ptr, len);
 		}
 
 		switch (p_lnp_uart->rx_state) {
@@ -765,6 +758,8 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				if (proto != INVALID) {
 					p_lnp_uart->rx_skb = alloc_skb(1700,
 						GFP_ATOMIC);
+					if (!p_lnp_uart->rx_skb)
+						return;
 					p_lnp_uart->rx_chnl = type;
 					p_lnp_uart->rx_state = LBF_W4_PKT_HDR;
 					p_lnp_uart->rx_count =
@@ -792,7 +787,6 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				st_send_frame(tty, p_lnp_uart);
 				p_lnp_uart->bytes_pending = 0;
 				p_lnp_uart->rx_count = 0;
-				skb_pull(prx_skb, prx_skb->len);
 				p_lnp_uart->rx_skb = NULL;
 			} else {
 				p_lnp_uart->bytes_pending = pkt_status;
@@ -825,17 +819,10 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 						"for id %d\n", __func__, proto);
 
 				st_check_data_len(p_lnp_uart, payload_len);
-				skb_pull(prx_skb, prx_skb->len);
 				}
 			continue;
 		} /* end of switch rx_state*/
 	} /* end of while*/
-
-	if (count == 0)
-		if (prx_skb != NULL) {
-			kfree_skb(prx_skb);
-			prx_skb = NULL;
-		}
 
 	spin_unlock_irqrestore(&p_lnp_uart->rx_lock, flags);
 	n_tty_set_room(tty);
@@ -936,7 +923,7 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 {
 	unsigned char __user *b = buf;
 	ssize_t size;
-	int retval;
+	int retval = 0;
 	int state = -1;
 	struct lnp_uart *p_lnp_uart = (struct lnp_uart *)tty->disc_data;
 	pr_info("-> %s\n", __func__);
@@ -1018,6 +1005,9 @@ static ssize_t lbf_ldisc_write(struct tty_struct *tty, struct file *file,
 
 	print_hex_dump(KERN_DEBUG, "<out<", DUMP_PREFIX_NONE, 16, 1, data,
 			count, 0);
+
+	if (!skb)
+		return -ENOMEM;
 
 	memcpy(skb_put(skb, count), data, count);
 	lbf_enqueue(skb);
