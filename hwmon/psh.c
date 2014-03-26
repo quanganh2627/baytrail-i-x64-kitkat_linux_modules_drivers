@@ -195,16 +195,17 @@ static void psh2ia_channel_handle(u32 msg, u32 param, void *data)
 	u8 *dbuf = NULL;
 	u16 size = 0;
 
+	if (unlikely(ia_data->load_in_progress)) {
+		ia_data->load_in_progress = 0;
+		complete(&ia_data->cmd_load_comp);
+		return;
+	}
+
 	while (!ia_lbuf_read_next(ia_data,
 			&plt_priv->lbuf, &dbuf, &size)) {
 		ia_handle_frame(ia_data, dbuf, size);
 	}
 	sysfs_notify(&pdev->dev.kobj, NULL, "data_size");
-
-	if (unlikely(ia_data->load_in_progress)) {
-		ia_data->load_in_progress = 0;
-		complete(&ia_data->cmd_load_comp);
-	}
 }
 
 static int psh_imr_init(struct pci_dev *pdev,
