@@ -1515,10 +1515,8 @@ static int mxt_soft_reset(struct mxt_data *data, u8 value)
 
 	dev_info(dev, "Resetting chip\n");
 #ifdef MXT_FORCE_BOOTLOADER
-	if (MXT_BOOT_VALUE == value) {
+	if (MXT_BOOT_VALUE == value && gpio_is_valid(data->pdata->gpio_reset)) {
 		dev_info(dev, "Force to enter bootloader\n");
-		gpio_request(data->pdata->gpio_reset, "ts_rst");
-		gpio_direction_output(data->pdata->gpio_reset, 0);
 		for (i = 1; i < 10; i++) {
 			MSLEEP(1);
 			gpio_set_value(data->pdata->gpio_reset, 1);
@@ -1529,7 +1527,6 @@ static int mxt_soft_reset(struct mxt_data *data, u8 value)
 		gpio_set_value(data->pdata->gpio_reset, 1);
 		MSLEEP(100);
 		MSLEEP(MXT_RESET_TIME * 3);
-		gpio_free(data->pdata->gpio_reset);
 
 		return 0;
 	}
@@ -1707,7 +1704,6 @@ static int mxt_check_reg_init(struct mxt_data *data, bool force)
 	unsigned int type, instance, size;
 	u8 val;
 	u16 reg;
-	struct mxt_panel_info *panel;
 
 	if (!data->cfg_name) {
 		dev_info(dev, "Skipping cfg download\n");
@@ -2346,21 +2342,29 @@ static int mxt_read_t9_resolution(struct mxt_data *data)
 
 static void mxt_regulator_enable(struct mxt_data *data)
 {
-	gpio_set_value(data->pdata->gpio_reset, 0);
+	if (gpio_is_valid(data->pdata->gpio_reset))
+		gpio_set_value(data->pdata->gpio_reset, 0);
 
-	regulator_enable(data->reg_vdd);
-	regulator_enable(data->reg_avdd);
+	if(data->pdata->regulator_en) {
+		regulator_enable(data->reg_vdd);
+		regulator_enable(data->reg_avdd);
+	}
 	msleep(MXT_REGULATOR_DELAY);
 
 	INIT_COMPLETION(data->bl_completion);
-	gpio_set_value(data->pdata->gpio_reset, 1);
+
+	if (gpio_is_valid(data->pdata->gpio_reset))
+		gpio_set_value(data->pdata->gpio_reset, 1);
+
 	mxt_wait_for_completion(data, &data->bl_completion, MXT_POWERON_DELAY);
 }
 
 static void mxt_regulator_disable(struct mxt_data *data)
 {
-	regulator_disable(data->reg_vdd);
-	regulator_disable(data->reg_avdd);
+	if(data->pdata->regulator_en) {
+		regulator_disable(data->reg_vdd);
+		regulator_disable(data->reg_avdd);
+	}
 }
 
 static void mxt_probe_regulators(struct mxt_data *data)
@@ -2945,12 +2949,12 @@ static int mxt_load_fw(struct device *dev)
 	mxt_wait_for_completion(data, &data->bl_completion,
 				MXT_FW_RESET_TIME);
 
-	data->in_bootloader = false;
-
 disable_irq:
 	disable_irq(data->irq);
 release_firmware:
 	release_firmware(fw);
+exit:
+	data->in_bootloader = false;
 	return ret;
 }
 
@@ -3411,6 +3415,8 @@ static int mxt_probe(struct i2c_client *client,
 		acpi_get_gpio_by_index(&client->dev, 0, &gpio_info);
 	pdata->gpio_switch =
 		acpi_get_gpio_by_index(&client->dev, 1, &gpio_info);
+	pdata->gpio_interrupt =
+		acpi_get_gpio_by_index(&client->dev, 2, &gpio_info);
 	dev_info(&client->dev, "gpio_reset=%d, gpio_switch=%d\n",
 				pdata->gpio_reset, pdata->gpio_switch);
 
@@ -3426,12 +3432,48 @@ static int mxt_probe(struct i2c_client *client,
 	init_completion(&data->crc_completion);
 	mutex_init(&data->debug_msg_lock);
 
+	if (gpio_is_valid(pdata->gpio_reset)) {
+		error = gpio_request(pdata->gpio_reset, "ts_reset");
+		if (error) {
+			dev_err(&client->dev,
+				"Failed to request touch reset GPIO\n");
+			goto err_free_mem;
+		}
+		gpio_direction_output(pdata->gpio_reset, 1);
+	}
+
+	if (gpio_is_valid(pdata->gpio_switch)) {
+		error = gpio_request(pdata->gpio_switch, "ts_power");
+		if (error) {
+			dev_err(&client->dev,
+				"Failed to request touch switch GPIO\n");
+			goto err_free_gpio;
+		}
+		gpio_export(pdata->gpio_switch, 0);
+		gpio_direction_output(pdata->gpio_switch, 1);
+	}
+
+	/* Use GPIO shared IRQ as touch interrupt
+	 * if such configuration is provided by BIOS
+	 */
+	if (gpio_is_valid(pdata->gpio_interrupt)) {
+		error = gpio_request_one(pdata->gpio_interrupt,
+					GPIOF_DIR_IN, "Touch Int");
+		if (error) {
+			dev_err(&client->dev,
+				"Failed to request touch-interrupt GPIO\n");
+			goto err_free_gpio;
+		}
+
+		data->irq = gpio_to_irq(pdata->gpio_interrupt);
+	}
+
 	error = request_threaded_irq(data->irq, NULL, mxt_interrupt,
 				     data->pdata->irqflags | IRQF_ONESHOT,
 				     client->name, data);
 	if (error) {
 		dev_err(&client->dev, "Failed to register interrupt\n");
-		goto err_free_mem;
+		goto err_free_gpio;
 	}
 
 	mxt_probe_regulators(data);
@@ -3441,12 +3483,6 @@ static int mxt_probe(struct i2c_client *client,
 	error = mxt_initialize(data);
 	if (error)
 		goto err_free_irq;
-
-	if (data->pdata->gpio_switch >= 0) {
-		gpio_request(data->pdata->gpio_switch, "ts_power");
-		gpio_export(data->pdata->gpio_switch, 0);
-		gpio_direction_output(data->pdata->gpio_switch, 1);
-	}
 
 	device_create_file(&client->dev, &dev_attr_early_suspend);
 
@@ -3490,6 +3526,13 @@ err_free_object:
 	mxt_free_object_table(data);
 err_free_irq:
 	free_irq(data->irq, data);
+err_free_gpio:
+	if (gpio_is_valid(pdata->gpio_reset))
+		gpio_free(pdata->gpio_reset);
+	if (gpio_is_valid(pdata->gpio_switch))
+		gpio_free(pdata->gpio_switch);
+	if (gpio_is_valid(pdata->gpio_interrupt))
+		gpio_free(pdata->gpio_interrupt);
 err_free_mem:
 	kfree(data->pdata);
 err_free_data:
@@ -3509,10 +3552,16 @@ static int mxt_remove(struct i2c_client *client)
 	sysfs_remove_group(&client->dev.kobj, &mxt_attr_group);
 	unregister_early_suspend_device(&client->dev);
 	free_irq(data->irq, data);
-	if (data->pdata->gpio_switch >= 0)
+	if (gpio_is_valid(data->pdata->gpio_reset))
+		gpio_free(data->pdata->gpio_reset);
+	if (gpio_is_valid(data->pdata->gpio_switch))
 		gpio_free(data->pdata->gpio_switch);
-	regulator_put(data->reg_avdd);
-	regulator_put(data->reg_vdd);
+	if (gpio_is_valid(data->pdata->gpio_interrupt))
+		gpio_free(data->pdata->gpio_interrupt);
+	if (data->pdata->regulator_en) {
+		regulator_put(data->reg_avdd);
+		regulator_put(data->reg_vdd);
+	}
 	mxt_free_object_table(data);
 	kfree(data->pdata);
 	kfree(data);
