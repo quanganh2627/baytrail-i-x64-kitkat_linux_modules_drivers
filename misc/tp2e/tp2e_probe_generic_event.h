@@ -9,6 +9,7 @@
 #define TRACE_SYSTEM tp2e
 #define TP2E_GENERIC_EVENT_NAME tp2e_generic_event
 #define TP2E_SCU_RECOV_EVENT_NAME tp2e_scu_recov_event
+#define TP2E_IWLWIFI_DRIVER_EVENT_NAME tp2e_iwlwifi_driver_event
 
 static void tp2e_probe_generic_event(void *cb_data,
 				     enum tp2e_ev_type tp2e_ev_type,
@@ -45,3 +46,5 @@ static void tp2e_probe_generic_event(void *cb_data,
 DEFINE_PROBE(TP2E_GENERIC_EVENT_NAME, tp2e_probe_generic_event);
 
 DEFINE_PROBE(TP2E_SCU_RECOV_EVENT_NAME, tp2e_probe_generic_event);
+
+DEFINE_PROBE(TP2E_IWLWIFI_DRIVER_EVENT_NAME, tp2e_probe_generic_event);

@@ -14,6 +14,7 @@ EXPORT_TRACEPOINT_SYMBOL(tp2e_generic_event);
 #include "tp2e_test.c"
 #endif
 
+EXPORT_TRACEPOINT_SYMBOL(tp2e_iwlwifi_driver_event);
 
 struct tp2e_element {
 	char *system;
