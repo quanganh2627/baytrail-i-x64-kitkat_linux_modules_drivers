@@ -442,6 +442,10 @@ int rmi4_i2c_byte_read(struct rmi4_data *pdata, u16 addr, u8 *val);
 int rmi4_i2c_block_write(struct rmi4_data *pdata, u16 addr, u8 *val, int size);
 int rmi4_i2c_byte_write(struct rmi4_data *pdata, u16 addr, u8 data);
 
+int rmi4_dev_ctl_detect(struct rmi4_data *pdata,
+				struct rmi4_fn *rfi, unsigned int cnt);
+int rmi4_dev_ctl_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi);
+
 int rmi4_touchpad_detect(struct rmi4_data *pdata,
 				struct rmi4_fn *rfi, unsigned int cnt);
 int rmi4_touchpad_config(struct rmi4_data *pdata, struct rmi4_fn *rfi);

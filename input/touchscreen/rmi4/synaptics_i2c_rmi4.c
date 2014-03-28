@@ -127,12 +127,14 @@ static struct rmi4_fn_ops supported_fn_ops[] = {
 		.irq_handler = rmi4_button_irq_handler,
 		.remove = rmi4_button_remove,
 	},
+	{
+		.fn_number = RMI4_DEV_CTL_FUNC_NUM,
+		.detect = rmi4_dev_ctl_detect,
+		.irq_handler = rmi4_dev_ctl_irq_handler,
+	},
 #ifdef DEBUG
 	{
 		.fn_number = RMI4_ANALOG_FUNC_NUM,
-	},
-	{
-		.fn_number = RMI4_DEV_CTL_FUNC_NUM,
 	},
 	{
 		.fn_number = RMI4_FLASH_FW_FUNC_NUM,
@@ -578,6 +580,32 @@ static irqreturn_t rmi4_irq_thread(int irq, void *data)
 			rfi->ops->irq_handler(pdata, rfi);
 	}
 	return IRQ_HANDLED;
+}
+
+int rmi4_dev_ctl_detect(struct rmi4_data *pdata, struct rmi4_fn *rfi,
+						unsigned int interruptcount)
+{
+	unsigned short	intr_offset;
+	int	i;
+	struct	i2c_client *client = pdata->i2c_client;
+
+	dev_info(&client->dev, "%s\n", __func__);
+
+	/* Need to get interrupt info for handling interrupts */
+	rfi->index_to_intr_reg = (interruptcount + 7)/8;
+	if (rfi->index_to_intr_reg != 0)
+		rfi->index_to_intr_reg -= 1;
+	/*
+	 * loop through interrupts for each source in fn $01
+	 * and or in a bit to the interrupt mask for each.
+	 */
+	intr_offset = interruptcount % 8;
+	rfi->intr_mask = 0;
+	for (i = intr_offset;
+		i < ((rfi->intr_src_count & MASK_3BIT) + intr_offset); i++)
+		rfi->intr_mask |= 1 << i;
+
+	return 0;
 }
 
 /**
@@ -1448,6 +1476,71 @@ static int rmi4_i2c_query_device(struct rmi4_data *pdata)
 	return 0;
 failed:
 	return retval;
+}
+
+static int do_sw_reset(struct rmi4_data *pdata)
+{
+	int	retval = 0;
+	struct rmi4_fn *rfi;
+	struct list_head *fn_list;
+	struct i2c_client *client = pdata->i2c_client;
+
+	fn_list = &(pdata->rmi4_mod_info.support_fn_list);
+	list_for_each_entry(rfi, fn_list, link) {
+		if (rfi->ops->fn_number == RMI4_DEV_CTL_FUNC_NUM) {
+			u16 addr = rfi->cmd_base_addr;
+			u8 cmd = RMI4_DEVICE_RESET_CMD;
+			dev_info(&client->dev, "%s: reset\n", __func__);
+			retval = rmi4_i2c_byte_write(pdata, addr, cmd);
+			if (retval < 0) {
+				dev_err(&client->dev, "reset cmd failed.\n");
+				return retval;
+			}
+			msleep(RMI4_RESET_DELAY);
+		}
+	}
+
+	return 0;
+}
+
+int rmi4_dev_ctl_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
+{
+	/* number of touch points - fingers down in this case */
+	int retval;
+	u16 data_base_addr;
+	u8 data;
+	struct i2c_client *client = pdata->i2c_client;
+
+	dev_info(&client->dev, "%s\n", __func__);
+
+	data_base_addr = rfi->data_base_addr;
+
+	retval = rmi4_i2c_block_read(pdata, data_base_addr,
+					&data, 1);
+	if (retval != 1) {
+		dev_err(&client->dev, "%s:read touch registers failed\n",
+								__func__);
+		return retval;
+	}
+
+	/* Check device status & act upon */
+	if ((data & 0x0F)) {
+		dev_info(&client->dev, "%s: reset & init!\n", __func__);
+		/* reset & init */
+		retval = do_sw_reset(pdata);
+		if (retval) {
+			dev_err(&client->dev, "%s: Soft reset failed!\n",
+					__func__);
+			return retval;
+		}
+		retval = rmi4_i2c_query_device(pdata);
+		if (retval) {
+			dev_err(&client->dev, "rmi4 query device failed\n");
+			return retval;
+		}
+	}
+
+	return 0;
 }
 
 static int rmi4_config_gpio(struct rmi4_data *pdata)
