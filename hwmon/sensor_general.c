@@ -95,6 +95,10 @@ static inline void sensor_time_end(struct sensor_data *data, ktime_t *start)
 
 #endif
 
+static p_extern_c extern_c_array[MAX_EXTERN_C];
+static DEFINE_MUTEX(sensor_externc_lock);
+static long extern_c_ref_cnt = 0;
+
 static void sensor_launch_work(struct sensor_data *data);
 static void unregister_failed_devices(void);
 
@@ -415,6 +419,8 @@ static int sensor_exec_actions(struct sensor_data *data,
 	int num_con;
 	int num_if;
 	int num_else;
+	int inx;
+	p_extern_c p = NULL;
 
 	while (num > 0) {
 		SENSOR_DBG(DBG_LEVEL4, data->dbg_on,
@@ -492,6 +498,39 @@ static int sensor_exec_actions(struct sensor_data *data,
 
 		case RETURN:
 			return RET_RETURN;
+
+		case EXTERNC:
+			SENSOR_DBG(DBG_LEVEL3, data->dbg_on,
+					"extern c action:%p", actions);
+
+			inx = actions->action.externc.index;
+
+			/*Don't use sensor_externc_lock directly for sake of performance
+			  use a reference count to aovid unregister extern_c here*/
+			mutex_lock(&sensor_externc_lock);
+			extern_c_ref_cnt++;
+			mutex_unlock(&sensor_externc_lock);
+			if (inx < MAX_EXTERN_C && (p = extern_c_array[inx])) {
+				ret = (*p)(data);
+				if (ret) {
+					dev_err(&data->client->dev,
+						"[%d]%s exec extern c %p\n",
+						__LINE__, __func__, p);
+				}
+			} else {
+				dev_err(&data->client->dev,
+						"[%d]%s\n", __LINE__, __func__);
+				ret = -EINVAL;
+			}
+			mutex_lock(&sensor_externc_lock);
+			extern_c_ref_cnt--;
+			mutex_unlock(&sensor_externc_lock);
+
+			if (ret)
+				return ret;
+			actions++;
+			num--;
+			break;
 
 		default:
 			dev_err(&data->client->dev,
@@ -870,6 +909,57 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL(sensor_unregister_rawdata_proc);
+
+int sensor_register_extern_c(p_extern_c p)
+{
+	int i;
+	int ret = 0;
+
+	SENSOR_DBG(DBG_LEVEL3, DBG_ALL_SENSORS, "%p", p);
+
+	mutex_lock(&sensor_externc_lock);
+	for (i = 0; i < MAX_EXTERN_C; i++) {
+		if (!extern_c_array[i]) {
+			extern_c_array[i] = p;
+			break;
+		}
+	}
+	if (i >= MAX_EXTERN_C)
+		ret = -EINVAL;
+	mutex_unlock(&sensor_externc_lock);
+	return ret;
+}
+EXPORT_SYMBOL(sensor_register_extern_c);
+
+int sensor_unregister_extern_c(p_extern_c p)
+{
+	int i;
+	int ret = 0;
+
+	SENSOR_DBG(DBG_LEVEL3, DBG_ALL_SENSORS, "%p", p);
+
+	mutex_lock(&sensor_externc_lock);
+
+	if (extern_c_ref_cnt > 0) {
+		printk(KERN_ERR "Err: can't unregister externc %d",
+				extern_c_ref_cnt);
+		ret = -EBUSY;
+		goto out;
+	}
+
+	for (i = 0; i < MAX_EXTERN_C; i++) {
+		if (extern_c_array[i] == p) {
+			extern_c_array[i] = NULL;
+			break;
+		}
+	}
+	if (i >= MAX_EXTERN_C)
+		ret = -EINVAL;
+out:
+	mutex_unlock(&sensor_externc_lock);
+	return ret;
+}
+EXPORT_SYMBOL(sensor_unregister_extern_c);
 
 static int sensor_get_report_data(struct sensor_data *data)
 {
