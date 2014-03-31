@@ -2319,9 +2319,10 @@ struct uart_hsu_port *serial_hsu_port_setup(struct device *pdev, int port,
 	unsigned int uclk, clock;
 	struct hsu_port_cfg *cfg;
 
-	cfg = hsu_port_func_cfg + port;
-	if (!cfg)
+	if (!hsu_port_func_cfg)
 		return ERR_PTR(-EINVAL);
+
+	cfg = hsu_port_func_cfg + port;
 
 	pr_info("Found a %s HSU\n", cfg->hw_ip ? "Designware" : "Intel");
 

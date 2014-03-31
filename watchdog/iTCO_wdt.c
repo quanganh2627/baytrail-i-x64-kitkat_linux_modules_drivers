@@ -704,6 +704,8 @@ static int iTCO_wdt_init(struct pci_dev *pdev,
 		iTCO_wdt_private.enable = false;
 		/* Set the NO_REBOOT bit to prevent later reboots */
 		iTCO_wdt_set_NO_REBOOT_bit();
+		/* Ensure Wdt is well stopped in case started by IAFW */
+		iTCO_wdt_stop();
 	} else {
 		iTCO_wdt_private.enable = true;
 		/* Check chipset's NO_REBOOT bit */
