@@ -1188,18 +1188,41 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 	int mask;
 	u8 usb_id_sts;
 	int ret;
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 
 	if (!int_reg)
 		return;
 
+	if (vendor_id == SHADYCOVE_VENDORID) {
+		if (int_reg & CHRGRIRQ1_SUSBIDFLTDET_MASK)
+			dev_info(chc.dev,
+				"USBID-FLT interrupt received\n");
+
+		mask = ((stat_reg & SCHRGRIRQ1_SUSBIDGNDDET_MASK)
+				== SHRT_GND_DET) ? 1 : 0;
+		if (int_reg & CHRGRIRQ1_SUSBIDGNDDET_MASK) {
+			if (mask)
+				dev_info(chc.dev,
+				"USBID-GND Detected. Notifying OTG\n");
+			else
+				dev_info(chc.dev,
+				"USBID-GND Removed. Notifying OTG\n");
+
+			atomic_notifier_call_chain(&chc.otg->notifier,
+					USB_EVENT_ID, &mask);
+		}
+	}
+
 	mask = !!(int_reg & stat_reg);
-	if (int_reg & CHRGRIRQ1_SUSBIDDET_MASK) {
+	if ((vendor_id == BASINCOVE_VENDORID) &&
+			(int_reg & CHRGRIRQ1_SUSBIDDET_MASK)) {
 		if (mask)
 			dev_info(chc.dev,
 				"USB ID Detected. Notifying OTG driver\n");
 		else
 			dev_info(chc.dev,
 				"USB ID Removed. Notifying OTG driver\n");
+
 		atomic_notifier_call_chain(&chc.otg->notifier,
 				USB_EVENT_ID, &mask);
 	}
@@ -1233,7 +1256,7 @@ static void pmic_event_worker(struct work_struct *work)
 	list_for_each_entry_safe(evt, tmp, &chc.evt_queue, node) {
 		list_del(&evt->node);
 
-		dev_dbg(chc.dev, "CHGRIRQ0=%X SCHGRIRQ0=%X CHGRIRQ1=%x SCHGRIRQ1=%X\n",
+		dev_info(chc.dev, "CHGRIRQ0=%X SCHGRIRQ0=%X CHGRIRQ1=%x SCHGRIRQ1=%X\n",
 				evt->chgrirq0_int, evt->chgrirq0_stat,
 				evt->chgrirq1_int, evt->chgrirq1_stat);
 		if (evt->chgrirq0_int)
@@ -1255,7 +1278,16 @@ static irqreturn_t pmic_isr(int irq, void *data)
 	u16 pmic_intr;
 	u8 chgrirq0_int;
 	u8 chgrirq1_int;
-	u8 mask = ((CHRGRIRQ1_SVBUSDET_MASK) | (CHRGRIRQ1_SUSBIDDET_MASK));
+	u8 mask = 0;
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+
+	if (vendor_id == BASINCOVE_VENDORID)
+		mask = ((CHRGRIRQ1_SVBUSDET_MASK) |
+				(CHRGRIRQ1_SUSBIDDET_MASK));
+	else if (vendor_id == SHADYCOVE_VENDORID)
+		mask = ((CHRGRIRQ1_SVBUSDET_MASK) |
+				(CHRGRIRQ1_SUSBIDFLTDET_MASK) |
+				(CHRGRIRQ1_SUSBIDGNDDET_MASK));
 
 	pmic_intr = ioread16(chc.pmic_intr_iomap);
 	chgrirq0_int = (u8)pmic_intr;
