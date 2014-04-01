@@ -715,6 +715,12 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 		/* Start checking from the highest bit */
 		temp = extra_data->data15_size - 1; /* Highest byte */
+		if (temp >= ARRAY_SIZE(extra_data->data15_data)) {
+			dev_err(rmi4_data->pdev->dev.parent,
+					"%s: Invalid data15_size %d\n",
+					__func__, temp);
+			return 0;
+		}
 		finger = (fingers_to_process - 1) % 8; /* Highest bit */
 		do {
 			if (extra_data->data15_data[temp] & (1 << finger))
@@ -1297,7 +1303,13 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 
 	fhandler->fn_number = fd->fn_number;
 	fhandler->num_of_data_sources = fd->intr_src_count;
-	fhandler->extra = kmalloc(sizeof(*extra_data), GFP_KERNEL);
+	fhandler->extra = kzalloc(sizeof(*extra_data), GFP_KERNEL);
+	if (!fhandler->extra) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Failed to alloc mem for extra data\n",
+				__func__);
+		return -ENOMEM;
+	}
 	extra_data = (struct synaptics_rmi4_f12_extra_data *)fhandler->extra;
 	size_of_2d_data = sizeof(struct synaptics_rmi4_f12_finger_data);
 
