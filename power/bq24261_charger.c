@@ -843,6 +843,9 @@ static inline int bq24261_enable_boost_mode(
 				chip->pdata->enable_vbus(true);
 		}
 
+		if (chip->pdata->handle_otgmode)
+			chip->pdata->handle_otgmode(true);
+
 		/* TODO: Support different Host Mode Current limits */
 
 		bq24261_enable_charger(chip, true);
@@ -887,6 +890,9 @@ static inline int bq24261_enable_boost_mode(
 			if (chip->pdata->enable_vbus)
 				chip->pdata->enable_vbus(false);
 		}
+
+		if (chip->pdata->handle_otgmode)
+			chip->pdata->handle_otgmode(false);
 
 		/* Notify power supply subsystem to enable charging
 		 * if needed. Eg. if DC adapter is connected

@@ -719,31 +719,45 @@ int pmic_get_health(void)
 
 int pmic_enable_vbus(bool enable)
 {
-	int ret;
+	int ret = 0;
+
+	if (enable)
+		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
+				WDT_NOKICK_ENABLE, CHGRCTRL0_WDT_NOKICK_MASK);
+	else
+		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
+				WDT_NOKICK_DISABLE, CHGRCTRL0_WDT_NOKICK_MASK);
+
+	/* If access is blocked return success to avoid additional
+	*  error handling at client side
+	*/
+	if (ret == -EACCES) {
+		dev_warn(chc.dev, "IPC blocked due to unsigned kernel/invalid battery\n");
+		ret = 0;
+	}
+
+	return ret;
+}
+
+int pmic_handle_otgmode(bool enable)
+{
+	int ret = 0;
 	int vendor_id;
 
 	vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 
-	if (enable) {
-		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
-				WDT_NOKICK_ENABLE, CHGRCTRL0_WDT_NOKICK_MASK);
-		if (ret)
-			return ret;
-
-		if (vendor_id == SHADYCOVE_VENDORID)
-			ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
-					CHGRCTRL1_OTGMODE_MASK,
-					CHGRCTRL1_OTGMODE_MASK);
-	} else {
-		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
-				WDT_NOKICK_DISABLE, CHGRCTRL0_WDT_NOKICK_MASK);
-		if (ret)
-			return ret;
-
-		if (vendor_id == SHADYCOVE_VENDORID)
-			ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
-					0x0, CHGRCTRL1_OTGMODE_MASK);
+	if (vendor_id != SHADYCOVE_VENDORID) {
+		dev_err(chc.dev, "Ignore otg-mode event received\n");
+		return 0;
 	}
+
+	if (enable)
+		ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
+				CHGRCTRL1_OTGMODE_MASK,
+				CHGRCTRL1_OTGMODE_MASK);
+	else
+		ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
+				0x0, CHGRCTRL1_OTGMODE_MASK);
 
 	/* If access is blocked return success to avoid additional
 	*  error handling at client side
