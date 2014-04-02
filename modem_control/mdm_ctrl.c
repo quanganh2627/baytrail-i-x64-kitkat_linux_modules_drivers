@@ -196,7 +196,8 @@ static int mdm_ctrl_power_off(struct mdm_ctrl *drv)
 
 	rst = cpu->get_gpio_rst(cpu_data);
 	mdm->power_off(mdm_data, rst);
-	pmic->power_off_mdm(pmic_data);
+    // kezhao, monitor this change. need more considering .
+	//pmic->power_off_mdm(pmic_data);
 
 	return 0;
 }
@@ -742,7 +743,7 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	init_timer(&mdm_drv->flashing_timer);
 
 	/* Modem power off sequence */
-	if (mdm_drv->pdata->pmic.get_early_pwr_off(mdm_drv->pdata->pmic_data))
+	//if (mdm_drv->pdata->pmic.get_early_pwr_off(mdm_drv->pdata->pmic_data))
 		mdm_ctrl_power_off(mdm_drv);
 
 	/* Modem cold boot sequence */

@@ -152,6 +152,9 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 		break;
 	}
 
+    // kezhao workaround here. as pmic is removed in FW.
+    pmic_type = PMIC_BYT;
+
 	switch (pmic_type) {
 	case PMIC_MFLD:
 	case PMIC_MRFL:
@@ -178,6 +181,7 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 		drv->is_mdm_ctrl_disabled = true;
 		break;
 	}
+
 }
 
 /**
@@ -245,9 +249,11 @@ struct mcd_base_info *modem_ctrl_get_dev_data(struct platform_device *pdev)
 
 	pr_err(DRVNAME ": cpu: %d mdm: %d pmic: %d.", info->cpu_ver,
 	       info->mdm_ver, info->pmic_ver);
+
 	if ((info->mdm_ver == MODEM_UNSUP)
-	    || (info->cpu_ver == CPU_UNSUP)
-	    || (info->pmic_ver == PMIC_UNSUP)) {
+	    || (info->cpu_ver == CPU_UNSUP)) {
+/* kezhao - No need to check cpu and pmic anymore. */
+//      || (info->pmic_ver == PMIC_UNSUP)) {
 		/* mdm_ctrl is disabled as some components */
 		/* of the platform are not supported */
 		kfree(info);
