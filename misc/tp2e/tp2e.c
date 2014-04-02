@@ -6,6 +6,8 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/tp2e.h>
 
+EXPORT_TRACEPOINT_SYMBOL(tp2e_generic_event);
+
 /* uncomment to compile test */
 /* #define TP2E_TEST */
 #ifdef TP2E_TEST
