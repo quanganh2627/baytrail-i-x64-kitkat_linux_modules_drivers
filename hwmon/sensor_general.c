@@ -1588,7 +1588,7 @@ static void sysfs_interfaces_link(struct device *dev)
 {
 	static int general_sensor_num = 0;
 	int ret = 0;
-	char name[8] = {0};
+	char name[32] = {0};
 
 	sprintf(name, "sensor%d", general_sensor_num++);
 	ret = sysfs_create_link(&general_sensor_device.kobj, &dev->kobj, name);
