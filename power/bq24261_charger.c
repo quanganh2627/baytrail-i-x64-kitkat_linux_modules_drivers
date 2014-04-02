@@ -813,7 +813,8 @@ static inline int bq24261_enable_boost_mode(
 
 	if (val) {
 
-		if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+		if (((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) ||
+				chip->pdata->is_wdt_kick_needed) {
 			if (chip->pdata->enable_vbus)
 				chip->pdata->enable_vbus(true);
 		}
@@ -837,7 +838,8 @@ static inline int bq24261_enable_boost_mode(
 			return ret;
 		chip->boost_mode = true;
 
-		if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV)
+		if (((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) ||
+				chip->pdata->is_wdt_kick_needed)
 			schedule_delayed_work(&chip->wdt_work, 0);
 
 		dev_info(&chip->client->dev, "Boost Mode enabled\n");
@@ -859,7 +861,8 @@ static inline int bq24261_enable_boost_mode(
 		chip->boost_mode = false;
 		dev_info(&chip->client->dev, "Boost Mode disabled\n");
 
-		if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+		if (((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) ||
+				chip->pdata->is_wdt_kick_needed) {
 			cancel_delayed_work_sync(&chip->wdt_work);
 
 			if (chip->pdata->enable_vbus)
@@ -1759,7 +1762,8 @@ static int bq24261_probe(struct i2c_client *client,
 				bq24261_low_supply_fault_work);
 	INIT_DELAYED_WORK(&chip->exception_mon_work,
 				bq24261_exception_mon_work);
-	if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+	if (((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) ||
+			chip->pdata->is_wdt_kick_needed) {
 		INIT_DELAYED_WORK(&chip->wdt_work,
 					bq24261_wdt_reset_worker);
 	}
@@ -1818,7 +1822,8 @@ static int bq24261_suspend(struct device *dev)
 {
 	struct bq24261_charger *chip = dev_get_drvdata(dev);
 
-	if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+	if (((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) ||
+			chip->pdata->is_wdt_kick_needed) {
 		if (chip->boost_mode)
 			cancel_delayed_work_sync(&chip->wdt_work);
 	}
@@ -1830,7 +1835,8 @@ static int bq24261_resume(struct device *dev)
 {
 	struct bq24261_charger *chip = dev_get_drvdata(dev);
 
-	if ((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) {
+	if (((chip->revision & BQ24261_REV_MASK) == BQ24261_REV) ||
+			chip->pdata->is_wdt_kick_needed) {
 		if (chip->boost_mode)
 			bq24261_enable_boost_mode(chip, 1);
 	}
