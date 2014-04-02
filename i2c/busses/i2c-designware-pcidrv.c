@@ -87,6 +87,7 @@ static int i2c_dw_pci_resume(struct device *dev)
 	struct dw_i2c_dev *i2c = pci_get_drvdata(pdev);
 
 	dev_dbg(dev, "resume called\n");
+
 	return i2c_dw_resume(i2c, false);
 }
 
@@ -151,11 +152,7 @@ const struct pci_device_id *id)
 		pci_release_region(pdev, 0);
 		dev_err(&pdev->dev, "failed to setup i2c\n");
 		return -EINVAL;
- 	}
-
-	pci_set_drvdata(pdev, dev);
-
-	i2c_acpi_devices_setup(&pdev->dev, dev);
+	}
 
 	pm_runtime_set_autosuspend_delay(&pdev->dev, 50);
 	pm_runtime_use_autosuspend(&pdev->dev);
