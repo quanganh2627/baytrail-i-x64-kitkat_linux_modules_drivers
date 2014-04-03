@@ -335,12 +335,20 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 		if (!pdata)
 			return -ENOMEM;
 
+#ifndef CONFIG_GPS_CSRGSD5T
 		if (!strncmp(dev_name(&pdev->dev),
 				ACPI_DEVICE_ID_BCM4752,
 				strlen(ACPI_DEVICE_ID_BCM4752))) {
 			pdata->has_reset = 0;  /* Unavailable */
 			pdata->has_enable = 1; /* Available */
 		}
+
+#else
+                 /* GPS GSD5T to enable both*/
+               pdata->has_reset = 1;  /* Available */
+               pdata->has_enable = 1; /* Available */
+#endif
+#ifndef CONFIG_GPS_CSRGSD5T
 
 		/* Check below if EDK Bios (EFI RS enabled) or FDK Ifwi
 		 as we have to maintain both ACPI tables for now */
@@ -357,7 +365,10 @@ static int intel_mid_gps_probe(struct platform_device *pdev)
 				: -EINVAL;
 		}
 		pdata->gpio_hostwake = -EINVAL;
-
+#else
+               pdata->gpio_reset  = 139;/*GPIO_SUS9,NFC_FW_RESET not used*/
+               pdata->gpio_enable = 152;/*GPIO_SUS22, GPS_WAKEUP*/
+#endif
 		pr_info("%s enable: %d, reset: %d\n", __func__, pdata->gpio_enable, pdata->gpio_reset);
 		platform_set_drvdata(pdev, pdata);
 	} else {
@@ -404,7 +415,13 @@ static void intel_mid_gps_shutdown(struct platform_device *pdev)
 #ifdef CONFIG_ACPI
 static struct acpi_device_id acpi_gps_id_table[] = {
 	/* ACPI IDs here */
-	{ACPI_DEVICE_ID_BCM4752},
+#ifndef CONFIG_GPS_CSRGSD5T
+        {ACPI_DEVICE_ID_BCM4752},
+#else
+        /* Fix me: use this to rigister gps device, if FW supported BCM4752 correctly, remove it, here
+           BT cannot be used */
+        {"OBDA8723"},
+#endif
 	{ }
 };
 

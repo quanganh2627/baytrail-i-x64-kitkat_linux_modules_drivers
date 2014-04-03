@@ -557,7 +557,9 @@ static struct acpi_device_id bcm_id_table[] = {
 	/* ACPI IDs here */
 	{ "BCM2E1A", 0 },
 	{ "BCM2E3A", 0 },
+#ifndef CONFIG_GPS_CSRGSD5T
 	{ "OBDA8723", 0},
+#endif
 	{ }
 };
 
