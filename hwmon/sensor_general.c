@@ -726,17 +726,6 @@ static int sensor_resume(struct device *dev)
 
 	SENSOR_DBG(DBG_LEVEL1, data->dbg_on, "%s", data->config->input_name);
 
-	/*check if any devices are enabled before suspend*/
-	for (i = 0; i < num; i++, data++) {
-		if (data->state_suspend == STATE_EN)
-			break;
-	}
-
-	if (i >= num)
-		return 0;
-
-	data = i2c_get_clientdata(client);
-
 	if (INT == data->config->method) {
 		int irq = gpio_to_irq(data->gpio);
 		enable_irq(irq);
