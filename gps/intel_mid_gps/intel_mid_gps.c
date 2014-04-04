@@ -27,6 +27,8 @@
 #include <asm/intel-mid.h>
 #include <asm/intel_mid_hsu.h>
 #include <linux/intel_mid_gps.h>
+#include <linux/lnw_gpio.h>
+
 
 #define DRIVER_NAME "intel_mid_gps"
 
@@ -227,6 +229,9 @@ static int intel_mid_gps_init(struct platform_device *pdev)
 			goto error_gpio_reset_request;
 		}
 
+		/* Force GPIO muxmode */
+		lnw_gpio_set_alt(pdata->gpio_reset, LNW_GPIO);
+
 		/* set gpio direction */
 		ret = gpio_direction_output(pdata->gpio_reset, pdata->reset);
 		if (ret < 0) {
@@ -246,6 +251,9 @@ static int intel_mid_gps_init(struct platform_device *pdev)
 					__func__, pdata->gpio_enable, ret);
 			goto error_gpio_enable_request;
 		}
+
+		/* Force GPIO muxmode */
+		lnw_gpio_set_alt(pdata->gpio_enable, LNW_GPIO);
 
 		/* set gpio direction */
 		ret = gpio_direction_output(pdata->gpio_enable, pdata->enable);
@@ -267,6 +275,9 @@ static int intel_mid_gps_init(struct platform_device *pdev)
 					__func__, pdata->gpio_hostwake, ret);
 			goto error_gpio_hostwake_request;
 		}
+
+		/* Force GPIO muxmode */
+		lnw_gpio_set_alt(pdata->gpio_hostwake, LNW_GPIO);
 
 		/* set gpio direction */
 		ret = gpio_direction_input(pdata->gpio_hostwake);
