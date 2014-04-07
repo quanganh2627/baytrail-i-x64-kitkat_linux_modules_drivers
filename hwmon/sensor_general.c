@@ -203,7 +203,7 @@ static int data_op_access(struct sensor_data *data, struct data_action *action)
 	int val;
 	int ret = 0;
 
-	SENSOR_DBG(DBG_LEVEL4, data->dbg_on, "%x", (unsigned int)action);
+	SENSOR_DBG(DBG_LEVEL4, data->dbg_on, "%p", action);
 
 	switch (action->operand1.type) {
 	case OPT_REG_BUF:
@@ -418,9 +418,9 @@ static int sensor_exec_actions(struct sensor_data *data,
 
 	while (num > 0) {
 		SENSOR_DBG(DBG_LEVEL4, data->dbg_on,
-				"%s %x actions:%x num:%d",
-				data->config->input_name, (int)data,
-				(int)actions, (int)num);
+				"%s %p actions:%p num:%d",
+				data->config->input_name, data,
+				actions, (int)num);
 
 		switch (actions->type) {
 		case DATA:
@@ -456,7 +456,7 @@ static int sensor_exec_actions(struct sensor_data *data,
 
 			if (pop(data)) {
 				SENSOR_DBG(DBG_LEVEL3, data->dbg_on,
-					"true of if action:%x", (int)actions);
+					"true of if action:%p", actions);
 
 				ret = sensor_exec_actions(data,
 							num_if, actions);
@@ -468,8 +468,8 @@ static int sensor_exec_actions(struct sensor_data *data,
 				}
 			} else {
 				SENSOR_DBG(DBG_LEVEL3, data->dbg_on,
-						"false of if action:%x",
-						(int)actions);
+						"false of if action:%p",
+						actions);
 
 				ret = sensor_exec_actions(data,
 						num_else, actions + num_if);
@@ -1621,7 +1621,7 @@ static int create_sysfs_interfaces(struct sensor_data *data)
 
 	for (i = 0; i < data->config->sysfs_entries; i++, dev_attr++) {
 		dev_attr->attr.name = data->config->sysfs_table[i].name;
-		dev_attr->attr.mode = data->config->sysfs_table[i].mode;
+		dev_attr->attr.mode = S_IRUGO|S_IWUSR;
 
 		if (data->config->sysfs_table[i].type == DATA_ACTION) {
 			dev_attr->show = sensor_sysfs_data_acton_show;
@@ -1792,7 +1792,7 @@ static int sensor_data_init(struct i2c_client *client,
 			dev_set_drvdata(dev, data);
 		}
 
-		config = (struct sensor_config *)((int)config + config->size);
+		config = (struct sensor_config *)((char *)config + config->size);
 	}
 
 	return 0;
@@ -2135,9 +2135,11 @@ static int sensor_parse_config(int num, struct sensor_config *configs)
 		shared_nums = configs->shared_nums;
 		num -= shared_nums;
 
-		while (shared_nums--)
+		while (shared_nums > 0) {
+			shared_nums--;
 			configs = (struct sensor_config *)
-				((int)configs + configs->size);
+				((char *)configs + configs->size);
+		}
 	}
 
 	return 0;

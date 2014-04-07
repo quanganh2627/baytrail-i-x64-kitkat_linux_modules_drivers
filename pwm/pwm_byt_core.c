@@ -227,6 +227,7 @@ int lpio_bl_write_bits(uint8_t pwm_num, uint32_t reg, uint32_t val,
 {
 	struct byt_pwm_chip *byt_pwm;
 	uint32_t update;
+	int ret;
 
 	/* only PWM_CTRL register is supported */
 	if (reg != LPIO_PWM_CTRL)
@@ -242,6 +243,7 @@ int lpio_bl_write_bits(uint8_t pwm_num, uint32_t reg, uint32_t val,
 	pm_runtime_get_sync(byt_pwm->dev);
 	mutex_lock(&byt_pwm->lock);
 
+	ret = byt_pwm_wait_update_complete(byt_pwm);
 	update = ioread32(PWMCR(byt_pwm));
 	update = (update & ~mask) | (val & mask);
 	iowrite32(update, PWMCR(byt_pwm));
@@ -250,7 +252,7 @@ int lpio_bl_write_bits(uint8_t pwm_num, uint32_t reg, uint32_t val,
 	pm_runtime_mark_last_busy(byt_pwm->dev);
 	pm_runtime_put_autosuspend(byt_pwm->dev);
 
-	return 0;
+	return ret;
 }
 EXPORT_SYMBOL(lpio_bl_write_bits);
 
@@ -260,7 +262,6 @@ int lpio_bl_update(uint8_t pwm_num, uint32_t reg)
 {
 	struct byt_pwm_chip *byt_pwm;
 	uint32_t update;
-	int r;
 
 	/* only PWM_CTRL register is supported */
 	if (reg != LPIO_PWM_CTRL)
@@ -279,13 +280,12 @@ int lpio_bl_update(uint8_t pwm_num, uint32_t reg)
 	update = ioread32(PWMCR(byt_pwm));
 	update |= PWMCR_UP;
 	iowrite32(update, PWMCR(byt_pwm));
-	r = byt_pwm_wait_update_complete(byt_pwm);
 
 	mutex_unlock(&byt_pwm->lock);
 	pm_runtime_mark_last_busy(byt_pwm->dev);
 	pm_runtime_put_autosuspend(byt_pwm->dev);
 
-	return r;
+	return 0;
 }
 EXPORT_SYMBOL(lpio_bl_update);
 

@@ -280,7 +280,7 @@ struct bq24192_chip {
 	int irq;
 	bool is_charger_enabled;
 	bool is_charging_enabled;
-	bool votg;
+	bool a_bus_enable;
 	bool is_pwr_good;
 	bool boost_mode;
 	bool online;
@@ -953,7 +953,7 @@ static int bq24192_turn_otg_vbus(struct bq24192_chip *chip, bool votg_on)
 
 	dev_info(&chip->client->dev, "%s %d\n", __func__, votg_on);
 
-	if (votg_on) {
+	if (votg_on && chip->a_bus_enable) {
 			/* Program the timers */
 			ret = program_timers(chip,
 						CHRG_TIMER_EXP_CNTL_WDT80SEC,
@@ -1030,7 +1030,7 @@ static int bq24192_turn_otg_vbus(struct bq24192_chip *chip, bool votg_on)
 	 *  Drive the gpio to turn ON/OFF the VBUS
 	 */
 	if (chip->pdata->drive_vbus)
-		chip->pdata->drive_vbus(votg_on);
+		chip->pdata->drive_vbus(votg_on && chip->a_bus_enable);
 
 	return ret;
 i2c_write_fail:
@@ -1771,7 +1771,10 @@ static void bq24192_otg_evt_worker(struct work_struct *work)
 			"%s:%d state=%d\n", __FILE__, __LINE__,
 				evt->is_enable);
 
+		mutex_lock(&chip->event_lock);
 		ret = bq24192_turn_otg_vbus(chip, evt->is_enable);
+		mutex_unlock(&chip->event_lock);
+
 		if (ret < 0)
 			dev_err(&chip->client->dev, "VBUS ON FAILED:\n");
 
@@ -1885,6 +1888,51 @@ static int otg_handle_notification(struct notifier_block *nb,
 	return NOTIFY_OK;
 }
 
+static void bq24192_usb_otg_enable(struct usb_phy *phy)
+{
+	struct bq24192_chip *chip = i2c_get_clientdata(bq24192_client);
+	int ret, id_value = -1;
+
+	mutex_lock(&chip->event_lock);
+	if (phy->vbus_state == VBUS_DISABLED)
+		chip->a_bus_enable = false;
+	else
+		chip->a_bus_enable = true;
+	mutex_unlock(&chip->event_lock);
+
+	if (phy->get_id_status) {
+		/*get_id_status will store 0 in id_value if otg device is connected*/
+		ret = phy->get_id_status(phy, &id_value);
+		if (ret < 0) {
+			dev_warn(&chip->client->dev,
+				"otg get ID status failed:%d\n", ret);
+			return;
+		} else if (id_value != 0) {
+			/*otg vbus should not be enabled or disabled if otg device is not connected*/
+			return;
+		}
+	} else {
+		dev_err(&chip->client->dev, "get_id_status is not defined for usb_phy");
+		return;
+	}
+
+	mutex_lock(&chip->event_lock);
+
+	if (phy->vbus_state == VBUS_DISABLED) {
+		dev_info(&chip->client->dev, "OTG Disable");
+		ret = bq24192_turn_otg_vbus(chip, false);
+		if (ret < 0)
+			dev_err(&chip->client->dev, "VBUS OFF FAILED:\n");
+	} else {
+		dev_info(&chip->client->dev, "OTG Enable");
+		ret = bq24192_turn_otg_vbus(chip, true);
+		if (ret < 0)
+			dev_err(&chip->client->dev, "VBUS ON FAILED:\n");
+	}
+
+	mutex_unlock(&chip->event_lock);
+}
+
 static inline int register_otg_notification(struct bq24192_chip *chip)
 {
 
@@ -1904,6 +1952,7 @@ static inline int register_otg_notification(struct bq24192_chip *chip)
 		dev_err(&chip->client->dev, "Failed to get the USB transceiver\n");
 		return -EINVAL;
 	}
+	chip->transceiver->a_bus_drop = bq24192_usb_otg_enable;
 	retval = usb_register_notifier(chip->transceiver, &chip->otg_nb);
 	if (retval) {
 		dev_err(&chip->client->dev,
@@ -2032,6 +2081,7 @@ static int bq24192_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 	chip->irq = -1;
+	chip->a_bus_enable = true;
 
 	/*assigning default value for min and max temp*/
 	chip->max_temp = chip->pdata->max_temp;
