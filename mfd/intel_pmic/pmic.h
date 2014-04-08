@@ -56,6 +56,7 @@ int intel_pmic_remove(struct intel_mid_pmic *chip);
 
 extern struct intel_mid_pmic crystal_cove_pmic;
 extern struct intel_mid_pmic dollar_cove_pmic;
+extern struct intel_mid_pmic dollar_cove_ti_pmic;
 
 #endif
 
