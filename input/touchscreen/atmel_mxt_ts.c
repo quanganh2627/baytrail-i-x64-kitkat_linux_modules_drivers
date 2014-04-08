@@ -40,6 +40,8 @@
 /* Configuration file */
 #define MXT_FW_NAME		"maxtouch.fw"
 #define MXT_CFG_NAME		"maxtouch.cfg"
+#define MXT_FW_NAME_1664T	"maxtouch_1664T.fw"
+#define MXT_CFG_NAME_1664T	"maxtouch_1664T.cfg"
 #define MXT_CFG_MAGIC		"OBP_RAW V1"
 #define MXT_1664S_NAME		"ATML1000"
 #define MXT_3432S_NAME		"MXT3432"
@@ -331,10 +333,14 @@ static void mxt_late_resume(struct early_suspend *es);
 static int mxt_load_fw(struct device *dev);
 static void mxt_reset_slots(struct mxt_data *data);
 
+#define MAX_FAMILY_ID_3432S	160
+#define MAX_FAMILY_ID_1664S	162
+#define MAX_FAMILY_ID_1664T	164
+
 struct mxt_panel_info supported_panels[] = {
 	/* 1664S 8 inch panel */
 	{
-		.family_id = 162,
+		.family_id = MAX_FAMILY_ID_1664S,
 		.variant_id = 0,
 		.version = 0x20,
 		.build = 0xAB,
@@ -343,7 +349,7 @@ struct mxt_panel_info supported_panels[] = {
 	},
 	/* 1664S 10 inch panel */
 	{
-		.family_id = 162,
+		.family_id = MAX_FAMILY_ID_1664S,
 		.variant_id = 16,
 		.version = 0x10,
 		.build = 0xAA,
@@ -352,12 +358,21 @@ struct mxt_panel_info supported_panels[] = {
 	},
 	/* 3432S 17 inch panel */
 	{
-		.family_id = 160,
+		.family_id = MAX_FAMILY_ID_3432S,
 		.variant_id = 10,
 		.version = 0x20,
 		.build = 0xAB,
 		.info_crc = 0xB86FA4,
 		.config_crc = 0xB85700,
+	},
+	/* 1664T 8 inch panel */
+	{
+		.family_id = MAX_FAMILY_ID_1664T,
+		.variant_id = 1,
+		.version = 0x10,
+		.build = 0xBA,
+		.info_crc = 0x1F8550,
+		.config_crc = 0x93A1C6,
 	},
 };
 
@@ -880,6 +895,15 @@ static bool supported_firmware(struct mxt_data *data, struct mxt_info *info)
 				panel->version == info->version &&
 				panel->build == info->build) {
 			data->pdata->hardware_id = i;
+
+			/* If touch control is MAX1664T,  this is a chance
+			 * to change the default fw name and cfg name
+			 */
+			if (info->family_id == MAX_FAMILY_ID_1664T) {
+				data->fw_name = MXT_FW_NAME_1664T;
+				data->cfg_name = MXT_CFG_NAME_1664T;
+			}
+
 			dev_info(&client->dev, "%s: Supported panel: %u %u %02X %02X\n",
 					__func__,
 					info->family_id, info->variant_id,
@@ -2375,27 +2399,30 @@ static void mxt_probe_regulators(struct mxt_data *data)
 	/* According to maXTouch power sequencing specification, RESET line
 	 * must be kept low until some time after regulators come up to
 	 * voltage */
-	if (!data->pdata->regulator_en || !data->pdata->gpio_reset) {
+	if (!data->pdata->regulator_en && !data->pdata->gpio_reset) {
 		dev_warn(dev, "Not support regulator, gpio reset pin: %d\n",
 				data->pdata->gpio_reset);
 		goto fail;
 	}
 
-	data->reg_vdd = regulator_get(dev, "vdd");
-	if (IS_ERR(data->reg_vdd)) {
-		error = PTR_ERR(data->reg_vdd);
-		dev_err(dev, "Error %d getting vdd regulator\n", error);
-		goto fail;
+	if (data->pdata->regulator_en) {
+		data->reg_vdd = regulator_get(dev, "vdd");
+		if (IS_ERR(data->reg_vdd)) {
+			error = PTR_ERR(data->reg_vdd);
+			dev_err(dev, "Error %d getting vdd regulator\n", error);
+			goto fail;
+		}
+
+		data->reg_avdd = regulator_get(dev, "avdd");
+		if (IS_ERR(data->reg_vdd)) {
+			error = PTR_ERR(data->reg_vdd);
+			dev_err(dev, "Error %d getting avdd regulator\n", error);
+			goto fail_release;
+		}
+
+		data->use_regulator = true;
 	}
 
-	data->reg_avdd = regulator_get(dev, "avdd");
-	if (IS_ERR(data->reg_vdd)) {
-		error = PTR_ERR(data->reg_vdd);
-		dev_err(dev, "Error %d getting avdd regulator\n", error);
-		goto fail_release;
-	}
-
-	data->use_regulator = true;
 	mxt_regulator_enable(data);
 
 	dev_dbg(dev, "Initialised regulators\n");
@@ -2515,8 +2542,7 @@ static int mxt_initialize_t100_input_device(struct mxt_data *data)
 		return -ENOMEM;
 	}
 
-	input_dev->name = "atmel_mxt_ts T100 touchscreen";
-
+	input_dev->name = "atmel_mxt_ts";
 	input_dev->phys = data->phys;
 	input_dev->id.bustype = BUS_I2C;
 	input_dev->dev.parent = &data->client->dev;
@@ -3417,8 +3443,10 @@ static int mxt_probe(struct i2c_client *client,
 		acpi_get_gpio_by_index(&client->dev, 1, &gpio_info);
 	pdata->gpio_interrupt =
 		acpi_get_gpio_by_index(&client->dev, 2, &gpio_info);
-	dev_info(&client->dev, "gpio_reset=%d, gpio_switch=%d\n",
-				pdata->gpio_reset, pdata->gpio_switch);
+	dev_info(&client->dev, "gpio_reset=%d, gpio_switch=%d, gpio_int=%d\n",
+				pdata->gpio_reset,
+				pdata->gpio_switch,
+				pdata->gpio_interrupt);
 
 	data->pdata = pdata;
 	data->fw_name = MXT_FW_NAME;
