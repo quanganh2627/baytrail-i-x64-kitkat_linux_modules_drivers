@@ -39,6 +39,7 @@
 #include "mcd_mdm.h"
 
 #define MDM_BOOT_DEVNAME	CONFIG_MDM_CTRL_DEV_NAME
+#define POWER_OFF 100
 
 #define MDM_MODEM_READY_DELAY	60	/* Modem readiness wait duration (sec) */
 
@@ -112,6 +113,7 @@ static int mdm_ctrl_cold_boot(struct mdm_ctrl *drv)
 static int mdm_ctrl_normal_warm_reset(struct mdm_ctrl *drv)
 {
 	unsigned long flags;
+    int err = 0;
 
 	struct mdm_ops *mdm = &drv->pdata->mdm;
 	struct cpu_ops *cpu = &drv->pdata->cpu;
@@ -121,7 +123,7 @@ static int mdm_ctrl_normal_warm_reset(struct mdm_ctrl *drv)
 	void *cpu_data = drv->pdata->cpu_data;
 	void *pmic_data = drv->pdata->pmic_data;
 
-	int rst, wflash_delay;
+	int rst, wflash_delay, pwr_on;
 
 	pr_info(DRVNAME ": Normal warm reset requested\r\n");
 
@@ -132,8 +134,39 @@ static int mdm_ctrl_normal_warm_reset(struct mdm_ctrl *drv)
 	mdm_ctrl_set_state(drv, MDM_CTRL_STATE_WARM_BOOT);
 
 	rst = cpu->get_gpio_rst(cpu_data);
+	pwr_on = cpu->get_gpio_pwr(cpu_data);
 	wflash_delay = mdm->get_wflash_delay(mdm_data);
-	mdm->warm_reset(mdm_data, rst);
+
+    //mdm->warm_reset(mdm_data, rst);
+
+    pr_warn(DRVNAME": kz - mdm_ctrl_silent_warm_reset_h350");
+
+    err = gpio_direction_output(POWER_OFF, 1);
+    if(err)
+        pr_info(DRVNAME": can't output gpio 100");
+
+    gpio_set_value(POWER_OFF, 0);
+
+    usleep_range(200, 500);
+
+    gpio_set_value(POWER_OFF, 1);
+
+    usleep_range(200, 500);
+
+    gpio_direction_output(rst, 1);
+    usleep_range(200, 500);
+    /* Toggle the RESET_BB_N */
+    gpio_set_value(rst, 1);
+
+    /* Wait before doing the pulse on ON1 */
+    usleep_range(200, 500);
+
+    gpio_direction_output(pwr_on, 1);
+    /* Do a pulse on ON1 */
+    gpio_set_value(pwr_on, 1);
+    usleep_range(200, 500);
+    gpio_set_value(pwr_on, 0);
+
 
 	mdm_ctrl_launch_timer(&drv->flashing_timer,
 			      wflash_delay, MDM_TIMER_FLASH_ENABLE);

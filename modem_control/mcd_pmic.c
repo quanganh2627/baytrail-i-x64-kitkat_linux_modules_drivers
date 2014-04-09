@@ -62,6 +62,7 @@ int pmic_io_power_on_mdm(void *data)
 {
 #if 1
     int retval = 0;
+    int err = 0;
     pr_info("DRVNAME: kz IRQ request for GPIO (POWER_OFF: %d)", POWER_OFF);
     retval = gpio_request(POWER_OFF, "power_off");
     if (retval < 0)
@@ -70,6 +71,16 @@ int pmic_io_power_on_mdm(void *data)
         retval = -ENODEV;
         return retval;
     }
+
+    pr_info(DRVNAME": kz start export gpio 100");
+    err = 0;
+    err = gpio_export(100, 1);
+    if(err)
+        pr_info(DRVNAME": can't export gpio 100");
+    pr_info(DRVNAME": kz finish export gpio 100");
+
+    usleep_range(200, 500);
+
 
     retval = gpio_get_value(POWER_OFF);
     pr_info("DRVNAME: POWER_OFF default value:  %d)", retval);
