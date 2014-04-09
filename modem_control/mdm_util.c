@@ -101,20 +101,18 @@ void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
 }
 
 /**
- *  mdm_ctrl_set_func - Set modem sequences functions to use
+ *  mdm_ctrl_set_mdm_cpu - Set modem sequences functions to use
  *  @drv: Reference to the driver structure
  *
  */
-void mdm_ctrl_set_func(struct mdm_ctrl *drv)
+void mdm_ctrl_set_mdm_cpu(struct mdm_ctrl *drv)
 {
-	int conf_type = 0;
-	int pmic_type = 0;
+	int board_type = drv->pdata->board_type;
 
-	conf_type = drv->pdata->conf_type;
-	pmic_type = drv->pdata->pmic_ver;
+	pr_info(DRVNAME ": board type: %d", board_type);
 
-	switch (conf_type) {
-	case XMM_CONF_GENERIC:
+	switch (board_type) {
+	case BOARD_AOB:
 		drv->pdata->mdm.init = mcd_mdm_init;
 		drv->pdata->mdm.power_on = mcd_mdm_cold_boot;
 		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
@@ -130,19 +128,19 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 		drv->pdata->cpu.get_gpio_rst = get_gpio_rst;
 		drv->pdata->cpu.get_gpio_pwr = get_gpio_pwr;
 		break;
-	case XMM_CONF_M2:
+	case BOARD_NGFF:
 		drv->pdata->mdm.init = mcd_mdm_init;
-		drv->pdata->mdm.power_on = mcd_mdm_cold_boot_m2;
+		drv->pdata->mdm.power_on = mcd_mdm_cold_boot_ngff;
 		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
 		drv->pdata->mdm.power_off = mcd_mdm_power_off;
 		drv->pdata->mdm.cleanup = mcd_mdm_cleanup;
 		drv->pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
 		drv->pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
-		drv->pdata->cpu.init = cpu_init_gpio_m2;
-		drv->pdata->cpu.cleanup = cpu_cleanup_gpio_m2;
-		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state_m2;
-		drv->pdata->cpu.get_irq_cdump = get_gpio_irq_cdump_m2;
-		drv->pdata->cpu.get_irq_rst = get_gpio_irq_rst_m2;
+		drv->pdata->cpu.init = cpu_init_gpio_ngff;
+		drv->pdata->cpu.cleanup = cpu_cleanup_gpio_ngff;
+		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state_ngff;
+		drv->pdata->cpu.get_irq_cdump = get_gpio_irq_cdump_ngff;
+		drv->pdata->cpu.get_irq_rst = get_gpio_irq_rst_ngff;
 		drv->pdata->cpu.get_gpio_rst = get_gpio_rst;
 		drv->pdata->cpu.get_gpio_pwr = get_gpio_pwr;
 		break;
@@ -151,6 +149,15 @@ void mdm_ctrl_set_func(struct mdm_ctrl *drv)
 		drv->is_mdm_ctrl_disabled = true;
 		break;
 	}
+}
+
+/**
+ * configures PMIC
+ * @drv: Reference to the driver structure
+ */
+static void mdm_ctrl_set_pmic(struct mdm_ctrl *drv)
+{
+	int pmic_type = drv->pdata->pmic_ver;
 
 	switch (pmic_type) {
 	case PMIC_MFLD:
@@ -230,12 +237,12 @@ struct mcd_base_info *modem_ctrl_get_dev_data(struct platform_device *pdev)
 
 	if (!pdev->dev.platform_data) {
 		pr_info(DRVNAME
-			"%s: No platform data available, checking ACPI...",
+			" %s: No platform data available, checking ACPI...",
 			__func__);
 		/* FOR ACPI HANDLING */
 		if (retrieve_modem_platform_data(pdev)) {
 			pr_err(DRVNAME
-			       "%s: No registered info found. Disabling driver.",
+			       " %s: No registered info found. Disabling driver.",
 			       __func__);
 			return NULL;
 		}
@@ -243,11 +250,8 @@ struct mcd_base_info *modem_ctrl_get_dev_data(struct platform_device *pdev)
 
 	info = pdev->dev.platform_data;
 
-	pr_err(DRVNAME ": cpu: %d mdm: %d pmic: %d.", info->cpu_ver,
-	       info->mdm_ver, info->pmic_ver);
-	if ((info->mdm_ver == MODEM_UNSUP)
-	    || (info->cpu_ver == CPU_UNSUP)
-	    || (info->pmic_ver == PMIC_UNSUP)) {
+	pr_err(DRVNAME ": cpu: %d pmic: %d.", info->cpu_ver, info->pmic_ver);
+	if ((info->cpu_ver == CPU_UNSUP) || (info->pmic_ver == PMIC_UNSUP)) {
 		/* mdm_ctrl is disabled as some components */
 		/* of the platform are not supported */
 		kfree(info);
@@ -274,7 +278,8 @@ void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
 		goto out;
 	}
 
-	mdm_ctrl_set_func(drv);
+	drv->pdata->board_type = BOARD_UNSUP;
+	mdm_ctrl_set_pmic(drv);
  out:
 	return;
 }

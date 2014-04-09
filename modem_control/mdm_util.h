@@ -140,4 +140,6 @@ inline int mdm_ctrl_get_state(struct mdm_ctrl *drv);
 
 void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
 			      struct platform_device *pdev);
+
+void mdm_ctrl_set_mdm_cpu(struct mdm_ctrl *drv);
 #endif				/* _MDM_UTIL_H */

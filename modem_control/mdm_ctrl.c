@@ -73,7 +73,6 @@ static void mdm_ctrl_handle_hangup(struct work_struct *work)
 static int mdm_ctrl_cold_boot(struct mdm_ctrl *drv)
 {
 	int ret = 0;
-	unsigned long flags;
 
 	struct mdm_ops *mdm = &drv->pdata->mdm;
 	struct cpu_ops *cpu = &drv->pdata->cpu;
@@ -121,15 +120,11 @@ end:
 
 static int mdm_ctrl_normal_warm_reset(struct mdm_ctrl *drv)
 {
-	unsigned long flags;
-
 	struct mdm_ops *mdm = &drv->pdata->mdm;
 	struct cpu_ops *cpu = &drv->pdata->cpu;
-	struct pmic_ops *pmic = &drv->pdata->pmic;
 
 	void *mdm_data = drv->pdata->modem_data;
 	void *cpu_data = drv->pdata->cpu_data;
-	void *pmic_data = drv->pdata->pmic_data;
 
 	int rst, wflash_delay;
 
@@ -153,15 +148,11 @@ static int mdm_ctrl_normal_warm_reset(struct mdm_ctrl *drv)
 
 static int mdm_ctrl_flashing_warm_reset(struct mdm_ctrl *drv)
 {
-	unsigned long flags;
-
 	struct mdm_ops *mdm = &drv->pdata->mdm;
 	struct cpu_ops *cpu = &drv->pdata->cpu;
-	struct pmic_ops *pmic = &drv->pdata->pmic;
 
 	void *mdm_data = drv->pdata->modem_data;
 	void *cpu_data = drv->pdata->cpu_data;
-	void *pmic_data = drv->pdata->pmic_data;
 
 	int rst, wflash_delay;
 
@@ -185,7 +176,6 @@ static int mdm_ctrl_flashing_warm_reset(struct mdm_ctrl *drv)
 static int mdm_ctrl_power_off(struct mdm_ctrl *drv)
 {
 	int ret = 0;
-	unsigned long flags;
 
 	struct mdm_ops *mdm = &drv->pdata->mdm;
 	struct cpu_ops *cpu = &drv->pdata->cpu;
@@ -274,7 +264,6 @@ static irqreturn_t mdm_ctrl_reset_it(int irq, void *data)
 {
 	int value, reset_ongoing;
 	struct mdm_ctrl *drv = data;
-	unsigned long flags;
 
 	value = drv->pdata->cpu.get_mdm_state(drv->pdata->cpu_data);
 
@@ -382,6 +371,94 @@ static int mdm_ctrl_dev_close(struct inode *inode, struct file *filep)
 	return 0;
 }
 
+inline bool mcd_is_initialized(struct mdm_ctrl *drv)
+{
+	return (BOARD_UNSUP != drv->pdata->board_type) &&
+		(MODEM_UNSUP != drv->pdata->mdm_ver);
+}
+
+int mcd_init(struct mdm_ctrl *mdm_drv)
+{
+	int ret = 0;
+
+	if (mdm_drv->pdata->mdm.init(mdm_drv->pdata->modem_data)) {
+		pr_err(DRVNAME ": MDM init failed...returning -ENODEV.");
+		ret = -ENODEV;
+		goto out;
+	}
+
+	if (mdm_drv->pdata->cpu.init(mdm_drv->pdata->cpu_data)) {
+		pr_err(DRVNAME ": CPU init failed...returning -ENODEV.");
+		ret = -ENODEV;
+		goto del_mdm;
+	}
+
+	if (mdm_drv->pdata->cpu.get_irq_rst(mdm_drv->pdata->cpu_data) > 0) {
+		ret = request_irq(mdm_drv->pdata->cpu.
+			get_irq_rst(mdm_drv->pdata->cpu_data),
+			mdm_ctrl_reset_it,
+			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_NO_SUSPEND,
+			DRVNAME,
+			mdm_drv);
+		if (ret) {
+			pr_err(DRVNAME ": IRQ request failed (err:%d) for GPIO"
+					" (RST_OUT)", ret);
+			ret = -ENODEV;
+			goto del_cpu;
+		}
+	}
+
+	if (mdm_drv->pdata->cpu.get_irq_cdump(mdm_drv->pdata->cpu_data) > 0) {
+		ret = request_irq(mdm_drv->pdata->cpu.
+			get_irq_cdump(mdm_drv->pdata->cpu_data),
+			mdm_ctrl_coredump_it,
+			IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND, DRVNAME,
+			mdm_drv);
+		if (ret) {
+			pr_err(DRVNAME ": IRQ request failed (err:%d) for GPIO"
+					" (CORE DUMP)", ret);
+			ret = -ENODEV;
+			goto free_irq;
+		}
+	}
+
+	/* Modem power off sequence */
+	if (mdm_drv->pdata->pmic.get_early_pwr_off(mdm_drv->pdata->pmic_data)) {
+		if (mdm_ctrl_power_off(mdm_drv)) {
+			ret = -EPROBE_DEFER;
+			goto free_all;
+		}
+	}
+
+	/* Modem cold boot sequence */
+	if (mdm_drv->pdata->pmic.get_early_pwr_on(mdm_drv->pdata->pmic_data)) {
+		if (mdm_ctrl_cold_boot(mdm_drv)) {
+			ret = -EPROBE_DEFER;
+			goto free_all;
+		}
+	}
+
+	pr_info(DRVNAME "%s initialization has succeed", __FUNCTION__);
+	return 0;
+
+ free_all:
+	free_irq(mdm_drv->pdata->cpu.get_irq_cdump(mdm_drv->pdata->cpu_data),
+		 mdm_drv);
+
+ free_irq:
+	free_irq(mdm_drv->pdata->cpu.get_irq_rst(mdm_drv->pdata->cpu_data),
+		 mdm_drv);
+
+ del_cpu:
+	mdm_drv->pdata->cpu.cleanup(mdm_drv->pdata->cpu_data);
+
+ del_mdm:
+	mdm_drv->pdata->mdm.cleanup(mdm_drv->pdata->modem_data);
+
+out:
+	return ret;
+}
+
 /**
  *  mdm_ctrl_dev_ioctl - Process ioctl requests
  *  @filep: Reference to file that stores private data.
@@ -392,22 +469,62 @@ static int mdm_ctrl_dev_close(struct inode *inode, struct file *filep)
 long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
 	struct mdm_ctrl *drv = filep->private_data;
-	struct mdm_ctrl_cmd cmd_params;
 	long ret = 0;
 	unsigned int mdm_state;
 	unsigned int param;
 
 	pr_info(DRVNAME ": ioctl request 0x%x received \r\n", cmd);
+
+	if (!mcd_is_initialized(drv)) {
+		switch (cmd) {
+		case MDM_CTRL_SET_BOARD:
+			ret = copy_from_user(&param, (void *)arg, sizeof(param));
+			if (ret < 0) {
+				pr_info(DRVNAME ": copy from user failed ret = %ld\r\n",
+					ret);
+				goto out;
+			}
+			drv->pdata->board_type = param;
+			mdm_ctrl_set_mdm_cpu(drv);
+			mcd_finalize_cpu_data(drv->pdata);
+			break;
+
+		case MDM_CTRL_SET_MDM:
+			ret = copy_from_user(&param, (void *)arg, sizeof(param));
+			if (ret < 0) {
+				pr_info(DRVNAME ": copy from user failed ret = %ld\r\n",
+					ret);
+				goto out;
+			}
+			pr_info(DRVNAME ": modem family: %d", param);
+			mcd_set_mdm(drv->pdata, param);
+			break;
+
+		default:
+			pr_err(DRVNAME ": Provide modem and board type first");
+			ret = -EINVAL;
+			goto out;
+		}
+		if (mcd_is_initialized(drv)) {
+			if (mcd_init(drv)) {
+				drv->is_mdm_ctrl_disabled = true;
+				ret = -EINVAL;
+			}
+		}
+		goto out;
+
+	}
+
 	mdm_state = mdm_ctrl_get_state(drv);
 
 	switch (cmd) {
 	case MDM_CTRL_POWER_OFF:
-		/* Unconditionnal power off */
+		/* Unconditional power off */
 		mdm_ctrl_power_off(drv);
 		break;
 
 	case MDM_CTRL_POWER_ON:
-		/* Only allowed when modem is OFF or in unkown state */
+		/* Only allowed when modem is OFF or in unknown state */
 		if ((mdm_state == MDM_CTRL_STATE_OFF) ||
 				(mdm_state == MDM_CTRL_STATE_UNKNOWN))
 			mdm_ctrl_cold_boot(drv);
@@ -648,7 +765,7 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	mdm_ctrl_get_device_info(new_drv, pdev);
 
 	/* HERE new_drv variable must contain all modem specifics
-	   (mdm name, cpu name, pmic, GPIO, early power on/off */
+	   (cpu name, pmic, early power on/off) */
 
 	if (new_drv->is_mdm_ctrl_disabled) {
 		/* KW fix can't happen. */
@@ -716,95 +833,18 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 
 	mdm_ctrl_set_state(new_drv, MDM_CTRL_STATE_OFF);
 
-	if (new_drv->pdata->mdm.init(new_drv->pdata->modem_data)) {
-		pr_err(DRVNAME ": MDM init failed...returning -ENODEV.");
-		ret = -ENODEV;
-		goto del_dev;
-	}
-
-	if (new_drv->pdata->cpu.init(new_drv->pdata->cpu_data)) {
-		pr_err(DRVNAME ": CPU init failed...returning -ENODEV.");
-		ret = -ENODEV;
-		goto del_mdm;
-	}
-
 	if (new_drv->pdata->pmic.init(new_drv->pdata->pmic_data)) {
 		pr_err(DRVNAME ": PMIC init failed...returning -ENODEV.");
 		ret = -ENODEV;
-		goto del_cpu;
+		goto del_dev;
 	}
-
-	if (new_drv->pdata->cpu.get_irq_rst(new_drv->pdata->cpu_data) > 0) {
-		ret = request_irq(new_drv->pdata->cpu.
-			get_irq_rst(new_drv->pdata->cpu_data),
-			mdm_ctrl_reset_it,
-			IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_NO_SUSPEND,
-			DRVNAME,
-			new_drv);
-		if (ret) {
-			pr_err(DRVNAME ": IRQ request failed (err:%d) for GPIO"
-					" (RST_OUT)", ret);
-			ret = -ENODEV;
-			goto del_pmic;
-		}
-	}
-
-	if (new_drv->pdata->cpu.get_irq_cdump(new_drv->pdata->cpu_data) > 0) {
-		ret = request_irq(new_drv->pdata->cpu.
-			get_irq_cdump(new_drv->pdata->cpu_data),
-			mdm_ctrl_coredump_it,
-			IRQF_TRIGGER_RISING | IRQF_NO_SUSPEND, DRVNAME,
-			new_drv);
-		if (ret) {
-			pr_err(DRVNAME ": IRQ request failed (err:%d) for GPIO"
-					" (CORE DUMP)", ret);
-			ret = -ENODEV;
-			goto free_irq;
-		}
-	}
-
 	/* Everything is OK */
 	mdm_drv = new_drv;
 	/* Init driver */
 	init_timer(&mdm_drv->flashing_timer);
 
-	/* Modem power off sequence */
-	if (mdm_drv->pdata->pmic.get_early_pwr_off(mdm_drv->pdata->pmic_data)) {
-		if (mdm_ctrl_power_off(mdm_drv)) {
-			ret = -EPROBE_DEFER;
-			goto free_all;
-		}
-	}
-
-	/* Modem cold boot sequence */
-	if (mdm_drv->pdata->pmic.get_early_pwr_on(mdm_drv->pdata->pmic_data)) {
-		if (mdm_ctrl_cold_boot(mdm_drv)) {
-			ret = -EPROBE_DEFER;
-			goto free_all;
-		}
-	}
-
 	pr_info(DRVNAME ": MCD initialization successful.");
 	return 0;
-
- free_all:
-	del_timer(&new_drv->flashing_timer);
-
-	free_irq(new_drv->pdata->cpu.get_irq_cdump(new_drv->pdata->cpu_data),
-		 new_drv);
-
- free_irq:
-	free_irq(new_drv->pdata->cpu.get_irq_rst(new_drv->pdata->cpu_data),
-		 new_drv);
-
- del_pmic:
-	new_drv->pdata->pmic.cleanup(new_drv->pdata->pmic_data);
-
- del_cpu:
-	new_drv->pdata->cpu.cleanup(new_drv->pdata->cpu_data);
-
- del_mdm:
-	new_drv->pdata->mdm.cleanup(new_drv->pdata->modem_data);
 
  del_dev:
 	device_destroy(new_drv->class, new_drv->tdev);

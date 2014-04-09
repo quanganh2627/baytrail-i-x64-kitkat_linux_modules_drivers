@@ -175,7 +175,7 @@ int get_gpio_pwr(void *data)
 	return cpu_data->gpio_pwr_on;
 }
 
-int cpu_init_gpio_m2(void *data)
+int cpu_init_gpio_ngff(void *data)
 {
 	struct mdm_ctrl_cpu_data *cpu_data = data;
 	int ret;
@@ -205,7 +205,7 @@ int cpu_init_gpio_m2(void *data)
 	return -ENODEV;
 }
 
-int cpu_cleanup_gpio_m2(void *data)
+int cpu_cleanup_gpio_ngff(void *data)
 {
 	struct mdm_ctrl_cpu_data *cpu_data = data;
 
@@ -215,17 +215,17 @@ int cpu_cleanup_gpio_m2(void *data)
 	return 0;
 }
 
-int get_gpio_mdm_state_m2(void *data)
+int get_gpio_mdm_state_ngff(void *data)
 {
 	return 0;
 }
 
-int get_gpio_irq_cdump_m2(void *data)
+int get_gpio_irq_cdump_ngff(void *data)
 {
 	return 0;
 }
 
-int get_gpio_irq_rst_m2(void *data)
+int get_gpio_irq_rst_ngff(void *data)
 {
 	return 0;
 }
