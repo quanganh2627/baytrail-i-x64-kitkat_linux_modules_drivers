@@ -634,6 +634,7 @@ static void __exit pn544_dev_exit(void)
 }
 module_exit(pn544_dev_exit);
 
+MODULE_ALIAS("i2c:pn544");
 MODULE_AUTHOR("Sylvain Fonteneau");
 MODULE_DESCRIPTION("NFC PN544 driver");
 MODULE_LICENSE("GPL");
