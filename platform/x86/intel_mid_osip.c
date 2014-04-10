@@ -416,7 +416,7 @@ static struct notifier_block osip_reboot_notifier = {
 #define OSIP_MAX_CMDLINE_SECTOR ((OSIP_MAX_CMDLINE_SIZE >> 9) + 1)
 
 /* Size used by signature is not the same for valleyview */
-#define OSIP_SIGNATURE_SIZE 		0x1E0
+#define OSIP_SIGNATURE_SIZE 		0x2D8
 #define OSIP_VALLEYVIEW_SIGNATURE_SIZE 	0x400
 
 struct cmdline_priv {
