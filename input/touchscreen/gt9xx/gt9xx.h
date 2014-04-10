@@ -41,7 +41,12 @@
 #define GTP_HAVE_TOUCH_KEY    0
 #define GTP_POWER_CTRL_SLEEP  0
 #define GTP_ICS_SLOT_REPORT   0
+#ifdef CONFIG_MRD7
 #define GTP_ORIENT_INVERSE    1
+#else
+#define GTP_ORIENT_INVERSE    0
+#endif
+
 
 /* auto update fw by .bin file as default */
 #define GTP_AUTO_UPDATE       0
