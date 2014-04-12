@@ -1260,12 +1260,6 @@ static inline int bq24192_enable_charging(
 	ret = bq24192_write_reg(chip->client, BQ24192_POWER_ON_CFG_REG, regval);
 	if (ret < 0)
 		dev_warn(&chip->client->dev, "charger enable/disable failed\n");
-	else {
-		if (val)
-			chip->online = true;
-		else
-			chip->online = false;
-	}
 
 	return ret;
 }
