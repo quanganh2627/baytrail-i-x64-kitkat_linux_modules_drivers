@@ -35,7 +35,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/lnw_gpio.h>
 #include <linux/input/intel_mid_vibra.h>
-#include <asm/intel-mid.h>
 #include <trace/events/power.h>
 #include "mid_vibra.h"
 
@@ -330,12 +329,9 @@ static int vibra_drv2605_calibrate(struct vibra_info *info)
 		if (!((status >> DRV2605_DIAG_RESULT_BIT) & 0x1) &&
 			(reg_val != DRV2605_AUTO_CAL_COMP_VALUE)) {
 
-			if (!((INTEL_MID_BOARD(1, PHONE, MOFD)) ||
-					(INTEL_MID_BOARD(1, TABLET, MOFD)))) {
-				vibra_gpio_set_value(info, 0);
-				pr_debug("Do Nothing -  Device Calibrated\n");
-				return 0;
-			}
+			vibra_gpio_set_value(info, 0);
+			pr_debug("Do Nothing -  Device Calibrated\n");
+			return 0;
 		}
 	}
 
