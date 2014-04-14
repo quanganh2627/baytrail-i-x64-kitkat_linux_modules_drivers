@@ -39,6 +39,7 @@
 #include <asm/intel_scu_ipcutil.h>
 #include <asm/intel_mid_rpmsg.h>
 #include <asm/intel-mid.h>
+#include <asm/intel_scu_pmic.h>
 
 #include "reboot_target.h"
 
@@ -266,6 +267,8 @@ static int osip_restore(struct OSIP_header *osip, void *data)
 /* down for 8 seconds */
 #define FORCE_SHUTDOWN_DELAY_IN_MSEC 5000
 
+#define PMIC_USBIDCTRL_ADDR 0x19
+
 static int osip_shutdown_notifier_call(struct notifier_block *notifier,
 				     unsigned long what, void *data)
 {
@@ -277,6 +280,10 @@ static int osip_shutdown_notifier_call(struct notifier_block *notifier,
 		pr_info("%s(): sys power off ...\n", __func__);
 
 		if (get_force_shutdown_occured()) {
+			/* BZ 174011 software workaround: clear USBIDCTRL to avoid reboot */
+			ret = intel_scu_ipc_iowrite8(PMIC_USBIDCTRL_ADDR, 0x00);
+			if (ret)
+				pr_err("%s(): PMIC USBIDCTRL clear failed\n", __func__);
 			pr_warn("[SHTDWN] %s: Force shutdown occured, delaying ...\n",
 				__func__);
 			mdelay(FORCE_SHUTDOWN_DELAY_IN_MSEC);
