@@ -399,16 +399,19 @@ static int sensor_exec_data_action(struct sensor_data *data,
 
         if (action->op == OP_ACCESS)
                 return data_op_access(data, action);
-        else if (action->op < OP_BIT_NOR)/*two operands*/
-                op2 = data_operand(data, &action->operand2);
+        else if (action->op > OP_ACCESS && action->op < OP_RESERVE) {
+		/*other data operations*/
+	        op1 = data_operand(data, &action->operand1);
+		if (action->op < OP_BIT_NOR)
+			op2 = data_operand(data, &action->operand2);
+		result = data_op_array[action->op](op1, op2);
+		push(data, result);
 
-        op1 = data_operand(data, &action->operand1);
-        result = data_op_array[action->op](op1, op2);
-	push(data, result);
-
-        SENSOR_DBG(DBG_LEVEL3, data->dbg_on, "0x%x %s 0x%x = 0x%x",
+		SENSOR_DBG(DBG_LEVEL3, data->dbg_on, "0x%x %s 0x%x = 0x%x",
                         op1, action_debug[action->op], op2, result);
-        return 0;
+		return 0;
+	} else
+		return -EINVAL;
 }
 
 #define RET_RETURN	2
