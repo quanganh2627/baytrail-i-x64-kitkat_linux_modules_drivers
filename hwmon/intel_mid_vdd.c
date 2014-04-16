@@ -90,6 +90,9 @@
 #define SBCUIRQ		(OFFSET + 7)
 #define SBCUCTRL	(OFFSET + 8)
 
+/* Level 1 PMIC IRQ register */
+#define MIRQLVL1	0x0E
+
 #define VWARNA_VOLT_THRES	VWARNA_THRES
 #define VWARNB_VOLT_THRES	VWARNB_THRES
 #define VCRIT_VOLT_THRES	VWARNCRIT_THRES
@@ -148,10 +151,21 @@
 /* mask level 2 interrupt register set */
 #define MBCUIRQ_SET		0x07
 
+/* Level 1 bcu irq mask */
+#define MIRQLVL1_BCU_MASK	(1<<2)
+
 /* interrupt bit masks for MBCUIRQ reg*/
 #define VCRIT_MASK		0x04
 #define VWARNA_MASK		0x02
 #define VWARNB_MASK		0x01
+
+/* Comparator enable-disable  bit mask */
+#define VWARN_CFG_MASK		0x08
+#define VCRITSDWNEN_MASK	0x10
+
+/* O/P signal enable-disable mask */
+#define BCUDIS_MASK		0x01
+#define PROCHOT_B_MASK		0x03
 
 /* Vsys status bit mask for SBCUIRQ register */
 #define SBCUIRQ_MASK		(VCRIT_MASK | VWARNA_MASK | VWARNB_MASK)
@@ -190,6 +204,18 @@ static struct workqueue_struct *bcu_workqueue;
 static void unmask_theburst(struct work_struct *work);
 static struct intel_msic_vdd_pdata *pdata;
 
+struct vdd_smip_data {
+	u8 vwarna_cfg;
+	u8 vwarnb_cfg;
+	u8 vcrit_cfg;
+	u8 bcudisa_beh;
+	u8 bcudisb_beh;
+	u8 bcudiscrit_beh;
+	u8 bcuprochot_beh;
+	u8 mbcu_irq;
+	/* 12 bits are reserved for bcu*/
+};
+
 struct vdd_info {
 	unsigned int irq;
 	uint32_t intr_count_lvl1;
@@ -202,22 +228,12 @@ struct vdd_info {
 	unsigned int delay;
 	u64 seed_time;
 	struct delayed_work vdd_intr_dwork;
+	struct vdd_smip_data init_reg_data;
 };
 
 static uint8_t cam_flash_state;
 
 static uint8_t global_irq_data;
-struct vdd_smip_data {
-	u8 vwarna_cfg;
-	u8 vwarnb_cfg;
-	u8 vcrit_cfg;
-	u8 bcudisa_beh;
-	u8 bcudisb_beh;
-	u8 bcudiscrit_beh;
-	u8 bcuprochot_beh;
-	u8 mbcu_irq;
-	/* 12 bits are reserved for bcu*/
-};
 
 /**
   * vdd_set_bits - set bit in register corresponding to mask value
@@ -872,16 +888,21 @@ static int program_bcu(struct platform_device *pdev, struct vdd_info *vinfo)
 {
 	int ret;
 	uint8_t irq_data;
-	struct vdd_smip_data vdata = {0};
+
+	/* earlier this structure was used locally only.
+	 * now it needs to be accessed by other functions
+	 * also as part of device info
+	 */
+	struct vdd_smip_data *vdata = &vinfo->init_reg_data;
 
 	/* will be useful in case of clvp only
 	 * in baytrail we are calling a dummy function
 	 */
-	ret = intel_scu_ipc_read_mip((u8 *)&vdata, sizeof(struct
+	ret = intel_scu_ipc_read_mip((u8 *)vdata, sizeof(struct
 		vdd_smip_data), BCU_SMIP_OFFSET, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "scu ipc read failed\n");
-		restore_default_value(&vdata);
+		restore_default_value(vdata);
 		goto configure_register;
 	}
 
@@ -904,8 +925,8 @@ static int program_bcu(struct platform_device *pdev, struct vdd_info *vinfo)
 	 * valid voltage will be in range 2.6-3.3V so 0 means values aren't
 	 * defined in SMIP
 	 */
-	if (vdata.vwarna_cfg == 0)
-		restore_default_value(&vdata);
+	if (vdata->vwarna_cfg == 0)
+		restore_default_value(vdata);
 
 configure_register:
 	/* configure all related register */
@@ -917,21 +938,21 @@ configure_register:
 	 * pdata must be checked as pdata came as null in some platform
 	 */
 	if (pdata && (pdata->disable_unused_comparator & DISABLE_VWARNA))
-		vdata.vwarna_cfg = 0;
+		vdata->vwarna_cfg = 0;
 	if (pdata && (pdata->disable_unused_comparator & DISABLE_VWARNB))
-		vdata.vwarnb_cfg = 0;
+		vdata->vwarnb_cfg = 0;
 	if (pdata && (pdata->disable_unused_comparator & DISABLE_VCRIT))
-		vdata.vcrit_cfg = 0;
+		vdata->vcrit_cfg = 0;
 
 
-	ret = vdd_set_register(VWARNA_CFG, vdata.vwarna_cfg);
-	ret |= vdd_set_register(VWARNB_CFG, vdata.vwarnb_cfg);
-	ret |= vdd_set_register(VCRIT_CFG, vdata.vcrit_cfg);
-	ret |= vdd_set_register(BCUDISA_BEH, vdata.bcudisa_beh);
-	ret |= vdd_set_register(BCUDISB_BEH, vdata.bcudisb_beh);
-	ret |= vdd_set_register(BCUDISCRIT_BEH, vdata.bcudiscrit_beh);
-	ret |= vdd_set_register(BCUPROCHOT_BEH, vdata.bcuprochot_beh);
-	ret |= vdd_set_register(MBCUIRQ, vdata.mbcu_irq);
+	ret = vdd_set_register(VWARNA_CFG, vdata->vwarna_cfg);
+	ret |= vdd_set_register(VWARNB_CFG, vdata->vwarnb_cfg);
+	ret |= vdd_set_register(VCRIT_CFG, vdata->vcrit_cfg);
+	ret |= vdd_set_register(BCUDISA_BEH, vdata->bcudisa_beh);
+	ret |= vdd_set_register(BCUDISB_BEH, vdata->bcudisb_beh);
+	ret |= vdd_set_register(BCUDISCRIT_BEH, vdata->bcudiscrit_beh);
+	ret |= vdd_set_register(BCUPROCHOT_BEH, vdata->bcuprochot_beh);
+	ret |= vdd_set_register(MBCUIRQ, vdata->mbcu_irq);
 	if (ret)
 		goto vdd_init_error;
 
@@ -1016,12 +1037,108 @@ vdd_error1:
 
 static int mid_vdd_resume(struct device *dev)
 {
-	return 0;
+	int ret;
+	long bcu_enable = 1;
+	struct vdd_info *vinfo = dev_get_drvdata(dev);
+
+	mutex_lock(&vdd_update_lock);
+	/* enabling comparators only if they
+	 * are not disabled during initialization
+	 * pdata must be checked as pdata came as null in some platform
+	 */
+	if ((!pdata) || !(pdata->disable_unused_comparator & DISABLE_VWARNA)) {
+		ret = intel_scu_ipc_update_register(VWARNA_CFG,
+				(bcu_enable << 3), VWARN_CFG_MASK);
+		if (ret)
+			goto bcu_ipc_fail;
+	}
+	if ((!pdata) || !(pdata->disable_unused_comparator & DISABLE_VWARNB)) {
+		ret = intel_scu_ipc_update_register(VWARNB_CFG,
+			(bcu_enable << 3), VWARN_CFG_MASK);
+		if (ret)
+			goto bcu_ipc_fail;
+	}
+	if ((!pdata) || !(pdata->disable_unused_comparator & DISABLE_VCRIT)) {
+		ret = intel_scu_ipc_update_register(VCRIT_CFG,
+			(bcu_enable << 4), VCRITSDWNEN_MASK);
+		ret |= intel_scu_ipc_update_register(VCRIT_CFG,
+			(bcu_enable << 3), VWARN_CFG_MASK);
+		if (ret)
+			goto bcu_ipc_fail;
+	}
+
+	/* Enabling o/p lines */
+	ret = intel_scu_ipc_update_register(BCUDISA_BEH,
+				vinfo->init_reg_data.bcudisa_beh, BCUDIS_MASK);
+	ret |= intel_scu_ipc_update_register(BCUDISB_BEH,
+				vinfo->init_reg_data.bcudisb_beh, BCUDIS_MASK);
+	ret |= intel_scu_ipc_update_register(BCUDISCRIT_BEH,
+			vinfo->init_reg_data.bcudiscrit_beh, BCUDIS_MASK);
+	ret |= intel_scu_ipc_update_register(BCUPROCHOT_BEH,
+			vinfo->init_reg_data.bcuprochot_beh, PROCHOT_B_MASK);
+	if (ret)
+		goto bcu_ipc_fail;
+
+	/* Unmasking interrupt */
+	ret = vdd_set_register(MBCUIRQ, vinfo->init_reg_data.mbcu_irq);
+	ret = intel_scu_ipc_update_register(MIRQLVL1,
+					~MIRQLVL1_BCU_MASK, MIRQLVL1_BCU_MASK);
+
+bcu_ipc_fail:
+	mutex_unlock(&vdd_update_lock);
+	return ret;
 }
 
 static int mid_vdd_suspend(struct device *dev)
 {
-	return 0;
+	int ret;
+	long bcu_disable = 0;
+
+	mutex_lock(&vdd_update_lock);
+	/*
+	 * To properly disable BCU
+	 * Interrupts should be disabled
+	 * after this o/p signals should be disabled
+	 * finally the comparators should be disabled
+	 */
+	/* Masking interrupts */
+	ret = intel_scu_ipc_update_register(MIRQLVL1,
+					MIRQLVL1_BCU_MASK, MIRQLVL1_BCU_MASK);
+	ret |= vdd_set_register(MBCUIRQ, MBCUIRQ_SET);
+	/* Disabling o/p lines*/
+	ret |= intel_scu_ipc_update_register(BCUPROCHOT_BEH,
+							0x0, PROCHOT_B_MASK);
+	ret |= intel_scu_ipc_update_register(BCUDISA_BEH, 0x0, BCUDIS_MASK);
+	ret |= intel_scu_ipc_update_register(BCUDISB_BEH, 0x0, BCUDIS_MASK);
+	ret |= intel_scu_ipc_update_register(BCUDISCRIT_BEH, 0x0, BCUDIS_MASK);
+	if (ret)
+		goto bcu_ipc_fail;
+
+	/* Disabling Comparators only if they are already enabled
+	 * during initialization
+	 * pdata must be checked as pdata came as null in some platform
+	 */
+	if ((!pdata) || !(pdata->disable_unused_comparator & DISABLE_VWARNA)) {
+		ret = intel_scu_ipc_update_register(VWARNA_CFG,
+				(bcu_disable << 3), VWARN_CFG_MASK);
+		if (ret)
+			goto bcu_ipc_fail;
+	}
+	if ((!pdata) || !(pdata->disable_unused_comparator & DISABLE_VWARNB)) {
+		ret = intel_scu_ipc_update_register(VWARNB_CFG,
+				(bcu_disable << 3), VWARN_CFG_MASK);
+		if (ret)
+			goto bcu_ipc_fail;
+	}
+	if ((!pdata) || !(pdata->disable_unused_comparator & DISABLE_VCRIT)) {
+		ret = intel_scu_ipc_update_register(VCRIT_CFG,
+				(bcu_disable << 4), VCRITSDWNEN_MASK);
+		ret |= intel_scu_ipc_update_register(VCRIT_CFG,
+				(bcu_disable << 3), VWARN_CFG_MASK);
+	}
+bcu_ipc_fail:
+	mutex_unlock(&vdd_update_lock);
+	return ret;
 }
 
 static int mid_vdd_remove(struct platform_device *pdev)
