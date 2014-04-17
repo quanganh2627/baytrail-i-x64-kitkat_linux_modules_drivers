@@ -59,6 +59,8 @@ int mcd_mdm_cold_boot(void *data, int rst, int pwr_on)
 {
 	struct mdm_ctrl_mdm_data *mdm_data = data;
 
+    pr_info("kz enter function: %s", __func__);
+
 	/* Toggle the RESET_BB_N */
 	gpio_set_value(rst, 1);
 
@@ -141,6 +143,7 @@ int mcd_mdm_cold_boot_m2(void *data, int rst, int pwr_on)
 {
 	/* Toggle the RESET_BB_N */
 	gpio_set_value(rst, 1);
+    pr_info("kz enter function: %s", __func__);
 
 	return 0;
 }

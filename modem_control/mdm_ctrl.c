@@ -85,6 +85,8 @@ static int mdm_ctrl_cold_boot(struct mdm_ctrl *drv)
 
 	int rst, pwr_on, cflash_delay;
 
+    pr_info("kz enter function: %s", __func__);
+
 	pr_warn(DRVNAME ": Cold boot requested");
 
 	/* Set the current modem state */
@@ -218,6 +220,8 @@ static int mdm_ctrl_power_off(struct mdm_ctrl *drv)
 	void *pmic_data = drv->pdata->pmic_data;
 
 	int rst;
+    int value;
+    int err;
 
 	pr_info(DRVNAME ": Power OFF requested");
 
@@ -231,6 +235,21 @@ static int mdm_ctrl_power_off(struct mdm_ctrl *drv)
 	mdm->power_off(mdm_data, rst);
     // kezhao, monitor this change. need more considering .
 	//pmic->power_off_mdm(pmic_data);
+
+    value = gpio_get_value(POWER_OFF);
+    pr_warn(DRVNAME": kz start deassert power off gpio 100, default result is %d\n", value);
+
+    err = gpio_direction_output(POWER_OFF, 1);
+    if(err)
+        pr_info(DRVNAME": kz can't output gpio 100");
+
+    gpio_set_value(POWER_OFF, 0);
+
+    usleep_range(200, 500);
+
+    value = gpio_get_value(POWER_OFF);
+
+    pr_warn(DRVNAME": kz finish deassert power off gpio 100, actual result is %d\n", value);
 
 	return 0;
 }
@@ -424,8 +443,10 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	case MDM_CTRL_POWER_ON:
 		/* Only allowed when modem is OFF or in unkown state */
 		if ((mdm_state == MDM_CTRL_STATE_OFF) ||
-				(mdm_state == MDM_CTRL_STATE_UNKNOWN))
+				(mdm_state == MDM_CTRL_STATE_UNKNOWN)) {
 			mdm_ctrl_cold_boot(drv);
+        pr_info("kz enter function: %s - case MDM_CTRL_POWER_ON", __func__);
+        }
 		else
 			/* Specific log in COREDUMP state */
 			if (mdm_state == MDM_CTRL_STATE_COREDUMP)
@@ -649,7 +670,7 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	int ret;
 	struct mdm_ctrl *new_drv;
 
-	pr_err(DRVNAME ": probing mdm_ctrl");
+	pr_err(DRVNAME ": kezhao probing mdm_ctrl");
 	/* Allocate modem struct data */
 	new_drv = kzalloc(sizeof(struct mdm_ctrl), GFP_KERNEL);
 	if (!new_drv) {
@@ -782,7 +803,9 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	/* Modem cold boot sequence */
     // fix me after power on, as condition is not true+
     // if (mdm_drv->pdata->pmic.get_early_pwr_on(mdm_drv->pdata->pmic_data))
-		mdm_ctrl_cold_boot(mdm_drv);
+
+    pr_info("kz enter function: %s - mdm_ctrl_cold_boot xxx", __func__);
+    mdm_ctrl_cold_boot(mdm_drv);
 
 	return 0;
 
