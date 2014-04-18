@@ -236,6 +236,14 @@ static int mdm_ctrl_power_off(struct mdm_ctrl *drv)
     // kezhao, monitor this change. need more considering .
 	//pmic->power_off_mdm(pmic_data);
 
+    rst = gpio_request(POWER_OFF, "power_off");
+    if (rst< 0)
+    {
+        pr_info("kz : IRQ request failed for GPIO (POWER_OFF)");
+        rst = -ENODEV;
+        return rst;
+    }
+
     value = gpio_get_value(POWER_OFF);
     pr_warn(DRVNAME": kz start deassert power off gpio 100, default result is %d\n", value);
 

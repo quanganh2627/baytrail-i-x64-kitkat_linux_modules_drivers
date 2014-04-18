@@ -64,13 +64,13 @@ int pmic_io_power_on_mdm(void *data)
     int retval = 0;
     int err = 0;
     pr_info("DRVNAME: kz IRQ request for GPIO (POWER_OFF: %d)", POWER_OFF);
-    retval = gpio_request(POWER_OFF, "power_off");
+    /*retval = gpio_request(POWER_OFF, "power_off");
     if (retval < 0)
     {
         pr_info("DRVNAME: IRQ request failed for GPIO (POWER_OFF)");
         retval = -ENODEV;
         return retval;
-    }
+    }*/
 
     pr_info(DRVNAME": kz start export gpio 100");
     err = 0;
