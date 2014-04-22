@@ -70,20 +70,19 @@ static inline struct byt_pwm_chip *to_byt_pwm_chip(struct pwm_chip *chip)
 static int byt_pwm_wait_update_complete(struct byt_pwm_chip *byt_pwm)
 {
 	uint32_t update;
-	int retry = 0;
+	int retry = 1000000;
 
-	while (retry < 20) {
+	while (retry--) {
 		update = ioread32(PWMCR(byt_pwm));
 		if (!(update & PWMCR_UP))
 			break;
 		if (!(update & PWMCR_EN))
 			break;
-		/* typically, it needs about 6 ns to clear the update bit */
-		ndelay(6);
-		++retry;
+
+		usleep_range(1, 10);
 	}
 
-	if (retry >= 20) {
+	if (retry < 0) {
 		pr_err("PWM update failed, update bit is not cleared!");
 		return -EBUSY;
 	} else {
