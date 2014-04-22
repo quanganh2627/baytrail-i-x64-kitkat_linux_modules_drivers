@@ -556,18 +556,18 @@ static int hsu_debugfs_init(struct hsu_port *hsu)
 
 	for (i = 0; i < 3; i++) {
 		snprintf(name, sizeof(name), "port_%d_regs", i);
-		debugfs_create_file(name, S_IFREG | S_IRUGO,
+		debugfs_create_file(name, S_IRUSR,
 			hsu->debugfs, (void *)(&hsu->port[i]), &port_regs_ops);
 	}
 
 	for (i = 0; i < 6; i++) {
 		snprintf(name, sizeof(name), "dma_chan_%d_regs", i);
-		debugfs_create_file(name, S_IFREG | S_IRUGO,
+		debugfs_create_file(name, S_IRUSR,
 			hsu->debugfs, (void *)&hsu->chans[i], &dma_regs_ops);
 	}
 
 	snprintf(name, sizeof(name), "dump_status");
-	debugfs_create_file(name, S_IFREG | S_IRUGO,
+	debugfs_create_file(name, S_IRUSR,
 		hsu->debugfs, NULL, &hsu_dump_ops);
 
 	return 0;
