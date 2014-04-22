@@ -1744,7 +1744,7 @@ static ssize_t attr_ctrl_reg_get(struct device *dev,
 	}
 	return -EINVAL;
 }
-static DEVICE_ATTR(ctrl_reg, S_IRUGO | S_IWUSR,
+static DEVICE_ATTR(ctrl_reg, S_IRUSR | S_IWUSR,
 		attr_ctrl_reg_get, attr_ctrl_reg_set);
 
 static ssize_t attr_query_reg_set(struct device *dev,
@@ -1788,7 +1788,7 @@ static ssize_t attr_query_reg_get(struct device *dev,
 	}
 	return -EINVAL;
 }
-static DEVICE_ATTR(query_reg, S_IRUGO | S_IWUSR,
+static DEVICE_ATTR(query_reg, S_IRUSR | S_IWUSR,
 		attr_query_reg_get, attr_query_reg_set);
 
 static ssize_t attr_data_reg_set(struct device *dev,
@@ -1832,7 +1832,7 @@ static ssize_t attr_data_reg_get(struct device *dev,
 	}
 	return -EINVAL;
 }
-static DEVICE_ATTR(data_reg, S_IRUGO | S_IWUSR,
+static DEVICE_ATTR(data_reg, S_IRUSR | S_IWUSR,
 		attr_data_reg_get, attr_data_reg_set);
 
 static ssize_t attr_reg_addr_set(struct device *dev,
@@ -1856,7 +1856,7 @@ static ssize_t attr_reg_addr_get(struct device *dev,
 	return sprintf(buf, "%d(0x%x)\n",
 			rmi4_data->dbg_reg_addr, rmi4_data->dbg_reg_addr);
 }
-static DEVICE_ATTR(reg_addr, S_IRUGO | S_IWUSR,
+static DEVICE_ATTR(reg_addr, S_IRUSR | S_IWUSR,
 			attr_reg_addr_get, attr_reg_addr_set);
 
 static ssize_t attr_fn_num_set(struct device *dev,
@@ -1879,7 +1879,7 @@ static ssize_t attr_fn_num_get(struct device *dev,
 
 	return sprintf(buf, "0x%x\n", rmi4_data->dbg_fn_num);
 }
-static DEVICE_ATTR(fn_num, S_IRUGO | S_IWUSR,
+static DEVICE_ATTR(fn_num, S_IRUSR | S_IWUSR,
 		attr_fn_num_get, attr_fn_num_set);
 
 static ssize_t attr_reg_set(struct device *dev,
@@ -1903,7 +1903,7 @@ static ssize_t attr_reg_get(struct device *dev,
 	rmi4_i2c_byte_read(rmi4_data, rmi4_data->dbg_reg_addr, &val);
 	return sprintf(buf, "%d(0x%x)\n", val, val);
 }
-static DEVICE_ATTR(reg, S_IRUGO | S_IWUSR, attr_reg_get, attr_reg_set);
+static DEVICE_ATTR(reg, S_IRUSR | S_IWUSR, attr_reg_get, attr_reg_set);
 
 static struct attribute *rmi4_attrs[] = {
 	&dev_attr_ctrl_reg.attr,
