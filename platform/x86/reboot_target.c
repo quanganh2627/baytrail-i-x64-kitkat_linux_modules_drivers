@@ -44,9 +44,16 @@ static const struct name2id NAME2ID[] = {
 	{ "factory2",   0x18 },
 };
 
+#define ALLOW_FACTORY_PARAM_NAME "allow_factory="
+
 static int reboot_target_name2id(const char *name)
 {
 	int i;
+	char *allow_factory;
+
+	allow_factory = strstr(saved_command_line, ALLOW_FACTORY_PARAM_NAME);
+	if (!allow_factory && strstr(name, "factory"))
+		return NAME2ID[DEFAULT_TARGET_INDEX].id;
 
 	for (i = 0; i < ARRAY_SIZE(NAME2ID); i++)
 		if (!strcmp(NAME2ID[i].name, name))
