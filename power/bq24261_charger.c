@@ -93,16 +93,10 @@
 #define BQ24261_HZ_ENABLE		(0x01)
 
 #define BQ24261_ICHRG_MASK		(0x1F << 3)
-#define BQ24261_ICHRG_100ma		(0x01 << 3)
-#define BQ24261_ICHRG_200ma		(0x01 << 4)
-#define BQ24261_ICHRG_400ma		(0x01 << 5)
-#define BQ24261_ICHRG_800ma		(0x01 << 6)
-#define BQ24261_ICHRG_1600ma		(0x01 << 7)
 
 #define BQ24261_ITERM_MASK		(0x03)
-#define BQ24261_ITERM_50ma		(0x01 << 0)
-#define BQ24261_ITERM_100ma		(0x01 << 1)
-#define BQ24261_ITERM_200ma		(0x01 << 2)
+#define BQ24261_MIN_ITERM 50 /* 50 mA */
+#define BQ24261_MAX_ITERM 300 /* 300 mA */
 
 #define BQ24261_VBREG_MASK		(0x3F << 2)
 
@@ -159,7 +153,8 @@
 #define BQ24261_DPM_STAT_MASK		(0x01 << 6)
 #define BQ24261_MINSYS_STAT_MASK	(0x01 << 7)
 
-#define BQ24261_MIN_CC			500
+#define BQ24261_MIN_CC			500 /* 500mA */
+#define BQ24261_MAX_CC			3000 /* 3A */
 
 u16 bq24261_sfty_tmr[][2] = {
 	{0, BQ24261_SAFETY_TIMER_DISABLED}
@@ -185,51 +180,6 @@ u16 bq24261_inlmt[][2] = {
 	{1500, BQ24261_INLMT_1500}
 	,
 	{2500, BQ24261_INLMT_2500}
-	,
-};
-
-u16 bq24261_iterm[][2] = {
-	{0, 0x00}
-	,
-	{50, BQ24261_ITERM_50ma}
-	,
-	{100, BQ24261_ITERM_100ma}
-	,
-	{150, BQ24261_ITERM_100ma | BQ24261_ITERM_50ma}
-	,
-	{200, BQ24261_ITERM_200ma}
-	,
-	{250, BQ24261_ITERM_200ma | BQ24261_ITERM_50ma}
-	,
-	{300, BQ24261_ITERM_200ma | BQ24261_ITERM_100ma}
-	,
-	{350, BQ24261_ITERM_200ma | BQ24261_ITERM_100ma | BQ24261_ITERM_50ma}
-	,
-};
-
-u16 bq24261_cc[][2] = {
-
-	{500, 0x00}
-	,
-	{600, BQ24261_ICHRG_100ma}
-	,
-	{700, BQ24261_ICHRG_200ma}
-	,
-	{800, BQ24261_ICHRG_100ma | BQ24261_ICHRG_200ma}
-	,
-	{900, BQ24261_ICHRG_400ma}
-	,
-	{1000, BQ24261_ICHRG_400ma | BQ24261_ICHRG_100ma}
-	,
-	{1100, BQ24261_ICHRG_400ma | BQ24261_ICHRG_200ma}
-	,
-	{1200, BQ24261_ICHRG_400ma | BQ24261_ICHRG_200ma | BQ24261_ICHRG_100ma}
-	,
-	{1300, BQ24261_ICHRG_800ma}
-	,
-	{1400, BQ24261_ICHRG_800ma | BQ24261_ICHRG_100ma}
-	,
-	{1500, BQ24261_ICHRG_800ma | BQ24261_ICHRG_200ma}
 	,
 };
 
@@ -380,8 +330,12 @@ static void lookup_regval(u16 tbl[][2], size_t size, u16 in_val, u8 *out_val)
 
 void bq24261_cc_to_reg(int cc, u8 *reg_val)
 {
-	return lookup_regval(bq24261_cc, ARRAY_SIZE(bq24261_cc), cc, reg_val);
-
+	/* Ichrg bits are B3-B7
+	 * Icharge = 500mA + IchrgCode * 100mA
+	 */
+	cc = clamp_t(int, cc, BQ24261_MIN_CC, BQ24261_MAX_CC);
+	cc = cc - BQ24261_MIN_CC;
+	*reg_val = (cc / 100) << 3;
 }
 
 void bq24261_cv_to_reg(int cv, u8 *reg_val)
@@ -402,8 +356,12 @@ void bq24261_inlmt_to_reg(int inlmt, u8 *regval)
 
 static inline void bq24261_iterm_to_reg(int iterm, u8 *regval)
 {
-	return lookup_regval(bq24261_iterm, ARRAY_SIZE(bq24261_iterm),
-			     iterm, regval);
+	/* Iterm bits are B0-B2
+	 * Icharge = 50mA + ItermCode * 50mA
+	 */
+	iterm = clamp_t(int, iterm, BQ24261_MIN_ITERM,  BQ24261_MAX_ITERM);
+	iterm = iterm - BQ24261_MIN_ITERM;
+	*regval =  iterm / 50;
 }
 
 static inline void bq24261_sfty_tmr_to_reg(int tmr, u8 *regval)
