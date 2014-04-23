@@ -1210,6 +1210,7 @@ static int get_charger_type(void)
 
 	switch (chgr_type) {
 	case PMIC_CHARGER_TYPE_SDP:
+	case PMIC_CHARGER_TYPE_FLOAT_DP_DN:
 		return POWER_SUPPLY_CHARGER_TYPE_USB_SDP;
 	case PMIC_CHARGER_TYPE_DCP:
 		return POWER_SUPPLY_CHARGER_TYPE_USB_DCP;
