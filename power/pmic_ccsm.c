@@ -140,6 +140,8 @@ u16 pmic_inlmt[][2] = {
 	{ 500, CHGRCTRL1_FUSB_INLMT_500},
 	{ 900, CHGRCTRL1_FUSB_INLMT_900},
 	{ 1500, CHGRCTRL1_FUSB_INLMT_1500},
+	{ 2000, CHGRCTRL1_FUSB_INLMT_1500},
+	{ 2500, CHGRCTRL1_FUSB_INLMT_1500},
 };
 
 
@@ -439,6 +441,10 @@ static struct pmic_regs_def pmic_regs_sc[] = {
 	PMIC_REG_DEF(USBIDCTRL_ADDR),
 	PMIC_REG_DEF(USBIDSTAT_ADDR),
 	PMIC_REG_DEF(WAKESRC_ADDR),
+	PMIC_REG_DEF(USBPHYCTRL_ADDR),
+	PMIC_REG_DEF(DBG_USBBC1_ADDR),
+	PMIC_REG_DEF(DBG_USBBC2_ADDR),
+	PMIC_REG_DEF(DBG_USBBCSTAT_ADDR),
 	PMIC_REG_DEF(USBPATH_ADDR),
 	PMIC_REG_DEF(USBSRCDETSTATUS_ADDR),
 	PMIC_REG_DEF(THRMBATZONE_ADDR_SC),
@@ -949,6 +955,18 @@ int pmic_set_ilimma(int ilim_ma)
 	u8 reg_val;
 	int ret;
 
+	if (ilim_ma >= 1500) {
+		if (chc.pdata->inlmt_to_reg)
+			chc.pdata->inlmt_to_reg(ilim_ma, &reg_val);
+
+		ret = pmic_write_tt(TT_USBINPUTICC1500VAL_ADDR, reg_val);
+		if (ret) {
+			dev_err(chc.dev, "Error in updating TT-reg(%x): %d\n",
+					TT_USBINPUTICC1500VAL_ADDR, ret);
+			return ret;
+		}
+	}
+
 	lookup_regval(pmic_inlmt, ARRAY_SIZE(pmic_inlmt),
 			ilim_ma, &reg_val);
 	dev_dbg(chc.dev, "Setting inlmt %d in register %x=%x\n", ilim_ma,
@@ -1028,6 +1046,86 @@ int pmic_get_battery_pack_temp(int *temp)
 	return pmic_read_adc_val(GPADC_BATTEMP0, temp, &chc);
 }
 
+static bool is_hvdcp_charging_enabled(int mask)
+{
+	int ret;
+	u8 val;
+
+	if (mask) {
+		/* Enable VDPSRC so that it stays on when switch is closed */
+		ret = intel_scu_ipc_update_register(DBG_USBBC2_ADDR,
+				DBG_USBBC2_EN_VDPSRC_MASK,
+				DBG_USBBC2_EN_VDPSRC_MASK);
+		if (ret) {
+			dev_err(chc.dev,
+				"Error updating DBG_USBBC2-register 0x%3x\n",
+				DBG_USBBC2_ADDR);
+			return false;
+		}
+
+		/* Enable SW control of the USB charger type detection */
+		ret = intel_scu_ipc_update_register(DBG_USBBC1_ADDR,
+			DBG_USBBC1_SWCTRL_EN_MASK | DBG_USBBC1_EN_CMP_DM_MASK |
+			DBG_USBBC1_EN_CMP_DP_MASK | DBG_USBBC1_EN_CHG_DET_MASK,
+			DBG_USBBC1_SWCTRL_EN_MASK | DBG_USBBC1_EN_CMP_DM_MASK |
+			DBG_USBBC1_EN_CMP_DP_MASK |
+			DBG_USBBC1_EN_CHG_DET_MASK);
+		if (ret) {
+			dev_err(chc.dev,
+				"Error updating DBG_USBBC1-register 0x%3x\n",
+				DBG_USBBC1_ADDR);
+			return false;
+		}
+
+		/* Wait >1.5 sec */
+		msleep(HVDCPDET_SLEEP_TIME);
+
+		/* Check if DM<VDATDET.  If a HVDCP is attached, it will remove
+		 * the DP/DM short & enable Rdm_dwn, pulling down DM to 0V.
+		 * DCP will keep DM at 0.6V
+		 */
+		ret = pmic_read_reg(DBG_USBBCSTAT_ADDR, &val);
+		if (ret) {
+			dev_err(chc.dev,
+				"Error reading DBG_USBBCSTAT-register 0x%3x\n",
+				DBG_USBBCSTAT_ADDR);
+			return false;
+		}
+
+		/* If “0”, HVDCP detected */
+		dev_info(chc.dev,
+				"DBG_USBBCSTAT-register 0x%3x: %x\n",
+				DBG_USBBCSTAT_ADDR, val);
+		if (!(val & DBG_USBBCSTAT_CMP_DM_MASK)) {
+			/* Enable HVDCP 12V charging  by enabling VDMSRC */
+			ret = intel_scu_ipc_update_register(DBG_USBBC2_ADDR,
+					DBG_USBBC2_EN_VDMSRC_MASK,
+					DBG_USBBC2_EN_VDMSRC_MASK);
+			if (ret) {
+				dev_err(chc.dev,
+				"Error updating DBG_USBBC2-register 0x%3x\n",
+				DBG_USBBC2_ADDR);
+			} else {
+				/* HVDCP detection completed successfully */
+				dev_info(chc.dev,
+					"HVDCP 12V charging enabled\n");
+				return true;
+			}
+		}
+	}
+
+	/* Cleanup on either HVDCP-not-detected or HVDCP-disconnected */
+	dev_info(chc.dev, "HVDCP 12V charging disabled");
+	/* Open PMIC switch */
+	intel_scu_ipc_iowrite8(USBPHYCTRL_ADDR, 0x00);
+	/* Disable VDMSRC & VDPSRC */
+	intel_scu_ipc_iowrite8(DBG_USBBC2_ADDR, 0x00);
+	/* Disable SW control of the USB charger type detection */
+	intel_scu_ipc_iowrite8(DBG_USBBC1_ADDR, 0x00);
+
+	return false;
+}
+
 static int get_charger_type()
 {
 	int ret, i = 0;
@@ -1083,6 +1181,7 @@ static int get_charger_type()
 static void handle_internal_usbphy_notifications(int mask)
 {
 	struct power_supply_cable_props cap = {0};
+	bool hvdcp_chgr = false;
 
 	if (mask) {
 		cap.chrg_evt = POWER_SUPPLY_CHARGER_EVENT_CONNECT;
@@ -1105,6 +1204,21 @@ static void handle_internal_usbphy_notifications(int mask)
 			cap.ma);
 	atomic_notifier_call_chain(&chc.otg->notifier,
 			USB_EVENT_CHARGER, &cap);
+
+	if (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_DCP) {
+		hvdcp_chgr = is_hvdcp_charging_enabled(mask);
+		if (hvdcp_chgr && mask) {
+			cap.chrg_evt = POWER_SUPPLY_CHARGER_EVENT_UPDATE;
+			cap.ma = 2000;
+
+			dev_info(chc.dev, "Notifying OTG ev:%d, evt:%d,"
+					" chrg_type:%d, mA:%d\n",
+					USB_EVENT_CHARGER, cap.chrg_evt,
+					cap.chrg_type, cap.ma);
+			atomic_notifier_call_chain(&chc.otg->notifier,
+					USB_EVENT_CHARGER, &cap);
+		}
+	}
 }
 
 /* ShadyCove-WA for VBUS removal detect issue */

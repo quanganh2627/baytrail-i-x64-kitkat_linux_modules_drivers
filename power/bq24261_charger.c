@@ -106,6 +106,7 @@
 #define BQ24261_INLMT_500		(0x02 << 4)
 #define BQ24261_INLMT_900		(0x03 << 4)
 #define BQ24261_INLMT_1500		(0x04 << 4)
+#define BQ24261_INLMT_2000		(0x05 << 4)
 #define BQ24261_INLMT_2500		(0x06 << 4)
 
 #define BQ24261_TE_MASK			(0x01 << 2)
@@ -125,6 +126,9 @@
 #define BQ24261_BOOST_ILIM_MASK		(0x01 << 4)
 #define BQ24261_BOOST_ILIM_500ma	(0x0)
 #define BQ24261_BOOST_ILIM_1A		(0x01 << 4)
+#define BQ24261_VINDPM_OFF_MASK		(0x01 << 0)
+#define BQ24261_VINDPM_OFF_5V		(0x0)
+#define BQ24261_VINDPM_OFF_12V		(0x01 << 0)
 
 #define BQ24261_SAFETY_TIMER_MASK	(0x03 << 5)
 #define BQ24261_SAFETY_TIMER_40MIN	0x00
@@ -178,6 +182,8 @@ u16 bq24261_inlmt[][2] = {
 	{900, BQ24261_INLMT_900}
 	,
 	{1500, BQ24261_INLMT_1500}
+	,
+	{2000, BQ24261_INLMT_2000}
 	,
 	{2500, BQ24261_INLMT_2500}
 	,
@@ -1710,7 +1716,7 @@ static int bq24261_probe(struct i2c_client *client,
 	chip->psy_usb.throttle_states = chip->pdata->throttle_states;
 	chip->psy_usb.num_throttle_states = chip->pdata->num_throttle_states;
 	chip->psy_usb.supported_cables = POWER_SUPPLY_CHARGER_TYPE_USB;
-	chip->max_cc = 1500;
+	chip->max_cc = chip->pdata->max_cc;
 	chip->max_cv = 4350;
 	chip->chrgr_stat = BQ24261_CHRGR_STAT_UNKNOWN;
 	chip->chrgr_health = POWER_SUPPLY_HEALTH_UNKNOWN;
