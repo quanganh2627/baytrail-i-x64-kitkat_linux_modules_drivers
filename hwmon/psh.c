@@ -50,7 +50,7 @@
 #include <asm/intel_scu_ipcutil.h>
 #endif
 
-#define APP_IMR_SIZE (1024 * 126)
+#define APP_IMR_SIZE (1024 * 256)
 
 enum {
 	imr_allocate = 0,
