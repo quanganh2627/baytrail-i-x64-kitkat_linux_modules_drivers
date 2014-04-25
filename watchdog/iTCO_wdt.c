@@ -108,8 +108,6 @@
 static u32 pmc_base_address;
 #define PMC_CFG		(pmc_base_address + 0x8)
 
-#define TCO_WARNING_IRQ 51
-
 static struct dentry *iTCO_debugfs_dir;
 
 /* internal variables */
@@ -710,6 +708,7 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 	u32 base_address;
 	unsigned long val32;
 	struct pci_dev *parent;
+	struct resource *irq;
 
 	if (!pdev->dev.parent || !dev_is_pci(pdev->dev.parent)) {
 		pr_err("Unqualified parent device.\n");
@@ -800,15 +799,25 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 	/* Reset OS policy */
 	iTCO_wdt_set_reset_type(TCO_POLICY_NORM);
 
-	ret = acpi_register_gsi(NULL, TCO_WARNING_IRQ,
-				ACPI_EDGE_SENSITIVE, ACPI_ACTIVE_HIGH);
-	if (ret < 0) {
-		pr_err("failed to configure TCO warning IRQ %d\n", TCO_WARNING_IRQ);
+	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+	if (!irq) {
+		pr_err("No warning interrupt resource found\n");
 		goto misc_unreg;
 	}
-	ret = request_irq(TCO_WARNING_IRQ, tco_irq_handler, 0, "tco_watchdog", NULL);
+
+	ret = acpi_register_gsi(NULL, irq->start,
+				irq->flags & (IORESOURCE_IRQ_HIGHEDGE | IORESOURCE_IRQ_LOWEDGE)
+				? ACPI_EDGE_SENSITIVE : ACPI_LEVEL_SENSITIVE,
+				irq->flags & (IORESOURCE_IRQ_HIGHEDGE | IORESOURCE_IRQ_HIGHLEVEL)
+				? ACPI_ACTIVE_HIGH : ACPI_ACTIVE_LOW);
 	if (ret < 0) {
-		pr_err("failed to request TCO warning IRQ %d\n", TCO_WARNING_IRQ);
+		pr_err("failed to configure TCO warning IRQ %d\n", (int)irq->start);
+		goto misc_unreg;
+	}
+
+	ret = request_irq(irq->start, tco_irq_handler, 0, "tco_watchdog", NULL);
+	if (ret < 0) {
+		pr_err("failed to request TCO warning IRQ %d\n", (int)irq->start);
 		goto gsi_unreg;
 	}
 
@@ -837,7 +846,7 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 	return 0;
 
 gsi_unreg:
-	acpi_unregister_gsi(TCO_WARNING_IRQ);
+	acpi_unregister_gsi((int)(irq->start));
 misc_unreg:
 	misc_deregister(&iTCO_wdt_miscdev);
 unreg_region:
