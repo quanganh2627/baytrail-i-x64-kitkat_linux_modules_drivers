@@ -723,7 +723,8 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 		}
 		finger = (fingers_to_process - 1) % 8; /* Highest bit */
 		do {
-			if (extra_data->data15_data[temp] & (1 << finger))
+			if (temp < 0 ||
+				extra_data->data15_data[temp] & (1 << finger))
 				break;
 
 			if (finger) {
