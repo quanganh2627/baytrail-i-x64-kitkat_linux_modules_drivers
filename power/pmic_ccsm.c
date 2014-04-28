@@ -1247,13 +1247,19 @@ int pmic_handle_low_supply(void)
 		int mask = 0;
 
 		dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
+		mutex_lock(&chc.evt_queue_lock);
 		chc.vbus_connect_status = false;
+		mutex_unlock(&chc.evt_queue_lock);
 
-		if (chc.is_internal_usb_phy)
+		if (chc.is_internal_usb_phy && !chc.otg_mode_enabled)
 			handle_internal_usbphy_notifications(mask);
-		else
+		else {
 			atomic_notifier_call_chain(&chc.otg->notifier,
 					USB_EVENT_VBUS, &mask);
+			mutex_lock(&chc.evt_queue_lock);
+			chc.otg_mode_enabled = false;
+			mutex_unlock(&chc.evt_queue_lock);
+		}
 	}
 
 	return ret;
@@ -1314,7 +1320,7 @@ static void handle_level0_interrupt(u8 int_reg, u8 stat_reg,
 static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 {
 	int mask;
-	u8 usb_id_sts;
+	u8 val;
 	int ret;
 	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 
@@ -1360,20 +1366,36 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 			dev_info(chc.dev,
 				"USB VBUS Detected. Notifying OTG driver\n");
 			chc.vbus_connect_status = true;
+
+			ret = pmic_read_reg(CHGRCTRL1_ADDR, &val);
+			if (ret != 0) {
+				dev_err(chc.dev,
+				"Error reading CHGRCTRL1-register 0x%2x\n",
+				CHGRCTRL1_ADDR);
+				return;
+			}
+
+			if (val & CHGRCTRL1_OTGMODE_MASK)
+				chc.otg_mode_enabled = true;
 		} else {
 			dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
 			chc.vbus_connect_status = false;
 		}
 
-		if (chc.is_internal_usb_phy)
+		/* Avoid charger-detection flow in case of host-mode */
+		if (chc.is_internal_usb_phy && !chc.otg_mode_enabled)
 			handle_internal_usbphy_notifications(mask);
-		else
+		else {
 			atomic_notifier_call_chain(&chc.otg->notifier,
 					USB_EVENT_VBUS, &mask);
+			if (!mask)
+				chc.otg_mode_enabled = false;
+		}
 	}
 
 	return;
 }
+
 static void pmic_event_worker(struct work_struct *work)
 {
 	struct pmic_event *evt, *tmp;
