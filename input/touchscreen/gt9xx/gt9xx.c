@@ -2273,7 +2273,13 @@ static const struct i2c_device_id goodix_ts_id[] = {
 };
 
 static struct acpi_device_id goodix_acpi_match[] = {
+#ifdef CONFIG_MRD7
 	{ "GODX0911", 0 },
+#elif CONFIG_MRD8
+	{ "GODX0911", 0 },
+#else
+	{ "ATML1000", 0 },
+#endif
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, goodix_acpi_match);
