@@ -375,32 +375,27 @@ static void dc_xpwr_chrg_pdata(void)
 				(void *)&pdata, sizeof(pdata));
 }
 
-static int fg_bat_curve[] = {
-	0x0, 0x0, 0x0, 0x0, 0x1, 0x1, 0x2, 0x2,
-	0x2, 0x3, 0x3, 0x4, 0xc, 0x10, 0x16, 0x1c,
-	0x27, 0x2c, 0x30, 0x35, 0x3a, 0x3f, 0x43, 0x47,
-	0x4b, 0x4e, 0x50, 0x51, 0x54, 0x57, 0x5b, 0x5e,
-};
-
 static void dc_xpwr_fg_pdata(void)
 {
 	static struct dollarcove_fg_pdata pdata;
+	struct em_config_oem0_data data;
 	int i;
 
-	memcpy(pdata.battid, "INTN0001", strlen("INTN0001"));
+	if (em_config_get_oem0_data(&data)) {
+		snprintf(pdata.battid, (BATTID_LEN + 1),
+				"%s", "INTN0001");
+		pdata.technology = POWER_SUPPLY_TECHNOLOGY_LION;
+	} else {
+		snprintf(pdata.battid, (BATTID_LEN + 1),
+				"%s", "UNKNOWNB");
+		pdata.technology = POWER_SUPPLY_TECHNOLOGY_UNKNOWN;
+	}
+
 	pdata.design_cap = 4980;
 	pdata.design_min_volt = 3400;
 	pdata.design_max_volt = 4350;
 	pdata.max_temp = 55;
 	pdata.min_temp = 0;
-
-	pdata.cap1 = 0x8D;
-	pdata.cap0 = 0xA3;
-	pdata.rdc1 = 0xc0;
-	pdata.rdc0 = 0x97;
-	/* copy curve data */
-	for (i = 0; i < BAT_CURVE_SIZE; i++)
-		pdata.bat_curve[i] = fg_bat_curve[i];
 
 	intel_mid_pmic_set_pdata("dollar_cove_battery",
 				(void *)&pdata, sizeof(pdata));
