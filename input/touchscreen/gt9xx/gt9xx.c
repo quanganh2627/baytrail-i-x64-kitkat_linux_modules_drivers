@@ -1991,6 +1991,9 @@ static int goodix_ts_remove(struct i2c_client *client)
 	destroy_workqueue(gtp_esd_check_workqueue);
 #endif
 
+	dev_info(&client->dev, "GTP driver removing...");
+	i2c_set_clientdata(client, NULL);
+
 	if (ts) {
 		if (ts->use_irq) {
 			gpio_direction_input(GTP_INT_PORT);
@@ -1998,12 +2001,10 @@ static int goodix_ts_remove(struct i2c_client *client)
 			free_irq(client->irq, ts);
 		} else
 			hrtimer_cancel(&ts->timer);
-	}
 
-	dev_info(&client->dev, "GTP driver removing...");
-	i2c_set_clientdata(client, NULL);
-	input_unregister_device(ts->input_dev);
-	kfree(ts);
+		input_unregister_device(ts->input_dev);
+		kfree(ts);
+	}
 
 	return 0;
 }
