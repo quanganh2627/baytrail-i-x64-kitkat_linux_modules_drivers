@@ -779,7 +779,7 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 						GFP_ATOMIC);
 					if (!lbf_uart->rx_skb)
 						return;
-					lbf_uart->rx_chnl = type;
+					lbf_uart->rx_chnl = proto;
 					lbf_uart->rx_state = LBF_W4_PKT_HDR;
 					lbf_uart->rx_count =
 				lbf_st_proto[lbf_uart->rx_chnl].hdr_len + 1;
@@ -792,26 +792,6 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				continue;
 			}
 			break;
-
-		case LBF_W4_DATA:
-			pkt_status = packet_state(lbf_uart->rx_count, count);
-			count -= len;
-			ptr += len;
-			i = 0;
-			lbf_uart->rx_count -= len;
-			if (!pkt_status) {
-				pr_info("\n---------Complete pkt received-----"
-						"--------\n");
-				lbf_uart->rx_state = LBF_W4_H4_HDR;
-				st_send_frame(tty, lbf_uart);
-				lbf_uart->bytes_pending = 0;
-				lbf_uart->rx_count = 0;
-				lbf_uart->rx_skb = NULL;
-			} else {
-				lbf_uart->bytes_pending = pkt_status;
-				count = 0;
-			}
-			continue;
 
 		case LBF_W4_PKT_HDR:
 			pkt_status = packet_state(lbf_uart->rx_count, count);
@@ -841,6 +821,28 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				st_check_data_len(lbf_uart, payload_len);
 				}
 			continue;
+
+		case LBF_W4_DATA:
+			pkt_status = packet_state(lbf_uart->rx_count, count);
+			count -= len;
+			ptr += len;
+			i = 0;
+			lbf_uart->rx_count -= len;
+			if (!pkt_status) {
+				pr_info("\n---------Complete pkt received-----"
+						"--------\n");
+				lbf_uart->rx_state = LBF_W4_H4_HDR;
+				st_send_frame(tty, lbf_uart);
+				lbf_uart->bytes_pending = 0;
+				lbf_uart->rx_count = 0;
+				lbf_uart->rx_skb = NULL;
+			} else {
+				lbf_uart->bytes_pending = pkt_status;
+				count = 0;
+			}
+			continue;
+
+
 		} /* end of switch rx_state*/
 	} /* end of while*/
 
