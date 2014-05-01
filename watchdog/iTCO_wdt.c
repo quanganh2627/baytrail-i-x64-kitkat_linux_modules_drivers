@@ -768,7 +768,7 @@ static int iTCO_wdt_init(struct platform_device *pdev)
 	outl(TCO_STS_BIT, SMI_STS); /* Clear the Time Out Status bit */
 
 	val32 = inl(SMI_EN);
-	val32 &= EOS_BIT;	/* Finish handling SMI */
+	val32 |= EOS_BIT;	/* Finish handling SMI */
 	outl(val32, SMI_EN);
 
 	/* Check that the heartbeat value is within it's range;
