@@ -34,7 +34,7 @@
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
 
-
+#define RECEIVE_ROOM 65536
 
 
 /*------ Forward Declaration-----*/
@@ -71,9 +71,14 @@ struct lbf_q_tx {
 	struct sk_buff_head txq, tx_waitq;
 	struct sk_buff *tx_skb;
 	spinlock_t lock;
+	struct mutex tx_wakeup;
+	unsigned long tx_state;
 	struct mutex writelock;
+	int tbusy;
+	int woke_up;
 	struct mutex fwdownloadlock;
 	struct tty_struct *tty;
+	struct work_struct tx_wakeup_work;
 } lbf_q_tx;
 
 static struct lbf_q_tx *lbf_tx;
@@ -145,23 +150,47 @@ int lbf_tx_wakeup(struct lbf_uart *lbf_uart)
 	struct sk_buff *skb;
 	int len = 0;
 	pr_info("-> %s\n", __func__);
+
+	mutex_lock(&lbf_tx->tx_wakeup);
+	if (lbf_tx->tbusy) {
+		lbf_tx->woke_up = 1;
+		mutex_unlock(&lbf_tx->tx_wakeup);
+		return len;
+	}
+	lbf_tx->tbusy = 1; //busy.
+
+check_again:
+	lbf_tx->woke_up = 0;
+	mutex_unlock(&lbf_tx->tx_wakeup);
+
+
 	while ((skb = lbf_dequeue())) {
 
-		mutex_lock(&lbf_tx->writelock);
 		if (lbf_tx->tty) {
+			set_bit(TTY_DO_WRITE_WAKEUP, &lbf_tx->tty->flags);
 			len = lbf_tty_write((void *) lbf_tx->tty, skb->data,
 					skb->len);
 			skb_pull(skb, len);
+
 			if (skb->len) {
 				lbf_tx->tx_skb = skb;
-				mutex_unlock(&lbf_tx->writelock);
+				pr_info("-> %s added to pending buffer:%d \n",
+					__func__, skb->len);
 				break;
 			}
 			kfree_skb(skb);
-			mutex_unlock(&lbf_tx->writelock);
-		} else
-			mutex_unlock(&lbf_tx->writelock);
+		}
 	}
+
+	mutex_lock(&lbf_tx->tx_wakeup);
+	if (lbf_tx->woke_up) {
+		goto check_again;
+	}
+	lbf_tx->tbusy = 0; // Done with Tx.
+	mutex_unlock(&lbf_tx->tx_wakeup);
+
+	pr_info("<- %s\n", __func__);
+
 
 	return len;
 }
@@ -171,9 +200,16 @@ int lbf_tx_wakeup(struct lbf_uart *lbf_uart)
  */
 int lbf_tty_write(struct tty_struct *tty, const unsigned char *data, int count)
 {
-	struct lbf_uart *lbf_uart;
-	lbf_uart = tty->disc_data;
-	return lbf_uart->tty->ops->write(tty, data, count);
+	int len;
+	pr_info("-> %s\n", __func__);
+	len = tty->ops->write(tty, data, count);
+	pr_info("<- %s\n", __func__);
+	return  len;
+}
+
+static void lbf_tx_wakeup_work(struct work_struct *work)
+{
+	lbf_tx_wakeup(NULL);
 }
 
 long lbf_write(struct sk_buff *skb)
@@ -181,14 +217,10 @@ long lbf_write(struct sk_buff *skb)
 	long len = skb->len;
 	pr_info("-> %s\n", __func__);
 
-	/*ST to decide where to enqueue the skb */
 	lbf_enqueue(skb);
-	/* wake up */
 	lbf_tx_wakeup(NULL);
-
 	pr_info("<- %s\n", __func__);
 
-	/* return number of bytes written */
 	return len;
 }
 
@@ -338,8 +370,7 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	tty->disc_data = lbf_uart;
 	lbf_uart->tty = tty;
 	lbf_tx->tty = tty;
-	skb_queue_head_init(&lbf_tx->txq);
-	skb_queue_head_init(&lbf_tx->tx_waitq);
+
 	/* don't do an wakeup for now */
 	clear_bit(TTY_DO_WRITE_WAKEUP, &tty->flags);
 
@@ -357,14 +388,18 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 		}
 	}
 
-	tty->receive_room = 65536;
+	tty->receive_room = RECEIVE_ROOM;
+
+	skb_queue_head_init(&lbf_tx->txq);
+	skb_queue_head_init(&lbf_tx->tx_waitq);
 	spin_lock_init(&lbf_uart->rx_lock);
 	spin_lock_init(&lbf_tx->lock);
+	mutex_init(&lbf_tx->tx_wakeup);
+	INIT_WORK(&lbf_tx->tx_wakeup_work, lbf_tx_wakeup_work);
 	mutex_init(&lbf_uart->tx_lock);
 	mutex_init(&lbf_tx->writelock);
 	mutex_init(&lbf_tx->fwdownloadlock);
 
-	set_bit(TTY_DO_WRITE_WAKEUP, &lbf_uart->tty->flags);
 	init_waitqueue_head(&lbf_uart->read_wait);
 	mutex_init(&lbf_uart->atomic_read_lock);
 	lbf_ldisc_running = 1;
@@ -374,6 +409,8 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	if (tty->ldisc->ops->flush_buffer)
 		tty->ldisc->ops->flush_buffer(tty);
 	tty_driver_flush_buffer(tty);
+
+	pr_info("<- %s\n", __func__);
 
 	return 0;
 }
@@ -393,6 +430,7 @@ static void lbf_ldisc_close(struct tty_struct *tty)
 	skb_queue_purge(&lbf_tx->txq);
 	skb_queue_purge(&lbf_tx->tx_waitq);
 	lbf_uart->rx_count = 0;
+	fw_download_state = 0;
 	lbf_uart->rx_state = LBF_W4_H4_HDR;
 
 	kfree_skb(lbf_uart->rx_skb);
@@ -417,11 +455,14 @@ static void lbf_ldisc_wakeup(struct tty_struct *tty)
 {
 
 	struct lbf_uart *lbf_uart = (void *) tty->disc_data;
-	pr_info("--> lbf_ldisc_wakeup");
+	pr_info("-> %s\n", __func__);
 
 	clear_bit(TTY_DO_WRITE_WAKEUP, &lbf_uart->tty->flags);
 
 	/*lbf_tx_wakeup(NULL);*/
+	schedule_work(&lbf_tx->tx_wakeup_work);
+
+	pr_info("<- %s\n", __func__);
 
 }
 
@@ -985,18 +1026,21 @@ static ssize_t lbf_ldisc_write(struct tty_struct *tty, struct file *file,
 {
 	struct sk_buff *skb = alloc_skb(count + 1, GFP_ATOMIC);
 	int len = 0;
+
 	pr_info("-> %s\n", __func__);
 
-	print_hex_dump(KERN_DEBUG, "<out<", DUMP_PREFIX_NONE, 16, 1, data,
-			count, 0);
+	/*print_hex_dump(KERN_DEBUG, "<out<", DUMP_PREFIX_NONE, 16, 1, data,
+			count, 0);*/
 
 	if (!skb)
 		return -ENOMEM;
 
 	memcpy(skb_put(skb, count), data, count);
+	len = count;
+
 	lbf_enqueue(skb);
 
-	len = lbf_tx_wakeup(NULL);
+	lbf_tx_wakeup(NULL);
 
 	pr_info("<- %s\n", __func__);
 	return len;
@@ -1038,7 +1082,7 @@ static unsigned int lbf_ldisc_poll(struct tty_struct *tty, struct file *file,
 				&& tty_write_room(tty) > 0)
 			mask |= POLLOUT | POLLWRNORM;
 	}
-	pr_info("<- %s mask : %d\n", __func__ , mask);
+	pr_info("<- %s\n", __func__);
 	return mask;
 }
 
@@ -1155,7 +1199,7 @@ static int intel_lpm_bluetooth_remove(struct platform_device *pdev)
 /*Line discipline op*/
 static struct tty_ldisc_ops lbf_ldisc = {
 	.magic = TTY_LDISC_MAGIC,
-	.name = "n_ld",
+	.name = "n_ld_intel",
 	.open = lbf_ldisc_open,
 	.close = lbf_ldisc_close,
 	.read = lbf_ldisc_read,
