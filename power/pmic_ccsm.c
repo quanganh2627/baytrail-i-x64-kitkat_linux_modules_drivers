@@ -1804,6 +1804,7 @@ static int pmic_check_initial_events(void)
 	struct pmic_event *evt;
 	int ret;
 	u8 mask = (CHRGRIRQ1_SVBUSDET_MASK);
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 
 	evt = kzalloc(sizeof(struct pmic_event), GFP_KERNEL);
 	if (evt == NULL) {
@@ -1816,6 +1817,21 @@ static int pmic_check_initial_events(void)
 	evt->chgrirq0_int = evt->chgrirq0_stat;
 	ret = intel_scu_ipc_ioread8(SCHGRIRQ1_ADDR, &evt->chgrirq1_stat);
 	evt->chgrirq1_int = evt->chgrirq1_stat;
+
+	/* For ShadyCove, CHGRIRQ1_REG & SCHGRIRQ1_REG cannot be directly
+	 * mapped. If status has (01 = Short to ground detected), it means
+	 * USBIDGNDDET should be handled. If status has (10 = Floating pin
+	 * detected), it means USBIDFLTDET should be handled.
+	 */
+	if (vendor_id == SHADYCOVE_VENDORID) {
+		if ((evt->chgrirq1_stat & SCHRGRIRQ1_SUSBIDGNDDET_MASK)
+				== SHRT_FLT_DET) {
+			evt->chgrirq1_int |= CHRGRIRQ1_SUSBIDFLTDET_MASK;
+			evt->chgrirq1_int &= ~CHRGRIRQ1_SUSBIDGNDDET_MASK;
+		} else if ((evt->chgrirq1_stat & SCHRGRIRQ1_SUSBIDGNDDET_MASK)
+				== SHRT_GND_DET)
+			evt->chgrirq1_int |= CHRGRIRQ1_SUSBIDGNDDET_MASK;
+	}
 
 	if (evt->chgrirq1_stat || evt->chgrirq0_int) {
 		INIT_LIST_HEAD(&evt->node);
