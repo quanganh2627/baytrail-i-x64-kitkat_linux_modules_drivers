@@ -2355,6 +2355,11 @@ static void do_hsi_start_dma(struct hsi_msg *msg,
 		goto do_start_dma_done;
 
 	if (is_arasan_v1(version)) {
+		unsigned int dma_bit;
+		/* Wait for CH_EN bit is automatically cleared by hardware before setting next DMA */
+		dma_bit = 1 << dma_ch;
+		while (hsi_ioread32(intel_hsi, HSI_DWAHB_CHEN(dma)) & dma_bit)
+			;
 		if (is_using_link_list(dma_ctx)) {
 			struct intel_dma_lli_xfer *lli_xfer;
 
