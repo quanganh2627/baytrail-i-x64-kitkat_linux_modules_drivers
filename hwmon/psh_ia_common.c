@@ -660,23 +660,23 @@ ssize_t ia_get_version(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%s\n", psh_ia_data->version_str);
 }
-static SENSOR_DEVICE_ATTR(status_mask, S_IWUSR | S_IRUGO,
+static SENSOR_DEVICE_ATTR(status_mask, S_IRUSR | S_IWUSR,
 				ia_get_status_mask, ia_set_status_mask, 0);
 static SENSOR_DEVICE_ATTR(status_trig, S_IWUSR, NULL, ia_trig_get_status, 1);
-static SENSOR_DEVICE_ATTR(debug, S_IWUSR | S_IRUGO,
+static SENSOR_DEVICE_ATTR(debug, S_IRUSR | S_IWUSR ,
 				ia_get_dbg_mask, ia_set_dbg_mask, 0);
 static SENSOR_DEVICE_ATTR(control, S_IWUSR, NULL, ia_start_control, 1);
-static SENSOR_DEVICE_ATTR(data_size, S_IRUGO, ia_read_data_size, NULL, 2);
-static SENSOR_DEVICE_ATTR(counter, S_IWUSR | S_IRUGO, ia_get_counter,
+static SENSOR_DEVICE_ATTR(data_size, S_IRUSR, ia_read_data_size, NULL, 2);
+static SENSOR_DEVICE_ATTR(counter, S_IWUSR | S_IRUSR, ia_get_counter,
 				ia_clear_counter, 0);
-static SENSOR_DEVICE_ATTR(fw_version, S_IRUGO, ia_get_version, NULL, 0);
+static SENSOR_DEVICE_ATTR(fw_version, S_IRUSR, ia_get_version, NULL, 0);
 
 static struct bin_attribute bin_attr = {
-	.attr = { .name = "data", .mode = S_IRUGO },
+	.attr = { .name = "data", .mode = S_IRUSR },
 	.read = ia_read_data
 };
 static struct bin_attribute dbg_attr = {
-	.attr = { .name = "trace", .mode = S_IRUGO },
+	.attr = { .name = "trace", .mode = S_IRUSR },
 	.read = ia_read_debug_data
 };
 
