@@ -131,6 +131,7 @@
 #define SCHRGRIRQ1_SDCDET_MASK		D1
 #define SCHRGRIRQ1_SVBUSDET_MASK	D0
 #define SHRT_GND_DET			(0x01 << 3)
+#define SHRT_FLT_DET			(0x10 << 3)
 
 #define PMIC_CHRGR_INT0_MASK		0xB1
 #define PMIC_CHRGR_CCSM_INT0_MASK	0xB0
@@ -335,6 +336,15 @@ struct interrupt_info {
 	void (*int_handle) (void);
 	/* interrupt status handler */
 	void (*stat_handle) (bool);
+};
+
+enum pmic_charger_aca_type {
+	RID_UNKNOWN = 0,
+	RID_A,
+	RID_B,
+	RID_C,
+	RID_FLOAT,
+	RID_GND,
 };
 
 enum pmic_charger_cable_type {

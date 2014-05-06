@@ -1126,11 +1126,59 @@ static bool is_hvdcp_charging_enabled(int mask)
 	return false;
 }
 
-static int get_charger_type()
+static int scove_get_usbid(void)
+{
+	int ret;
+	struct iio_channel *indio_chan;
+	int rid, id = RID_UNKNOWN;
+	u8 val;
+
+	ret = pmic_read_reg(SCHGRIRQ1_ADDR, &val);
+	if (ret) {
+		dev_err(chc.dev,
+			"Error reading SCHGRIRQ1-register 0x%2x\n",
+			SCHGRIRQ1_ADDR);
+		return ret;
+	}
+
+	/* SCHGRIRQ1_REG SUSBIDDET bit definition:
+	 * 00 = RID_A/B/C ; 01 = RID_GND ; 10 = RID_FLOAT */
+	if ((val & SCHRGRIRQ1_SUSBIDGNDDET_MASK) == SHRT_FLT_DET)
+		return RID_FLOAT;
+	else if ((val & SCHRGRIRQ1_SUSBIDGNDDET_MASK) == SHRT_GND_DET)
+		return RID_GND;
+
+	indio_chan = iio_channel_get(NULL, "USBID");
+	if (IS_ERR_OR_NULL(indio_chan)) {
+		dev_err(chc.dev, "Failed to get IIO channel USBID\n");
+		ret = PTR_ERR(indio_chan);
+		goto exit;
+	}
+
+	ret = iio_read_channel_raw(indio_chan, &rid);
+	if (ret) {
+		dev_err(chc.dev, "IIO channel read error for USBID\n");
+		goto err_exit;
+	}
+
+	if ((rid > 11150) && (rid < 13640))
+		id = RID_A;
+	else if ((rid > 6120) && (rid < 7480))
+		id = RID_B;
+	else if ((rid > 3285) && (rid < 4015))
+		id = RID_C;
+
+err_exit:
+	iio_channel_release(indio_chan);
+exit:
+	return id;
+}
+
+static int get_charger_type(void)
 {
 	int ret, i = 0;
 	u8 val;
-	int chgr_type;
+	int chgr_type, rid;
 
 	do {
 		ret = pmic_read_reg(USBSRCDETSTATUS_ADDR, &val);
@@ -1168,7 +1216,11 @@ static int get_charger_type()
 	case PMIC_CHARGER_TYPE_CDP:
 		return POWER_SUPPLY_CHARGER_TYPE_USB_CDP;
 	case PMIC_CHARGER_TYPE_ACA:
-		return POWER_SUPPLY_CHARGER_TYPE_USB_ACA;
+		rid = scove_get_usbid();
+		if (rid == RID_A)
+			return POWER_SUPPLY_CHARGER_TYPE_ACA_DOCK;
+		else if (rid != RID_UNKNOWN)
+			return POWER_SUPPLY_CHARGER_TYPE_USB_ACA;
 	case PMIC_CHARGER_TYPE_SE1:
 		return POWER_SUPPLY_CHARGER_TYPE_SE1;
 	case PMIC_CHARGER_TYPE_MHL:
@@ -1196,7 +1248,9 @@ static void handle_internal_usbphy_notifications(int mask)
 		cap.ma = 0;
 	else if ((cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_DCP)
 			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_CDP)
-			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_SE1))
+			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_SE1)
+			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_ACA)
+			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_ACA_DOCK))
 		cap.ma = 1500;
 
 	dev_info(chc.dev, "Notifying OTG ev:%d, evt:%d, chrg_type:%d, mA:%d\n",
