@@ -160,6 +160,8 @@
 #define BQ24261_MIN_CC			500 /* 500mA */
 #define BQ24261_MAX_CC			3000 /* 3A */
 
+#define BQ24261_INT_COUNTER "bq24261_irq_counter"
+
 u16 bq24261_sfty_tmr[][2] = {
 	{0, BQ24261_SAFETY_TIMER_DISABLED}
 	,
@@ -273,6 +275,7 @@ struct bq24261_charger {
 	char model_name[MODEL_NAME_SIZE];
 	char manufacturer[DEV_MANUFACTURER_NAME_SIZE];
 	struct wake_lock chrgr_en_wakelock;
+	u32 irq_counter;
 };
 
 enum bq2426x_model_num {
@@ -479,6 +482,7 @@ static void bq24261_debugfs_init(void)
 {
 	struct dentry *fentry;
 	u32 count = ARRAY_SIZE(bq24261_register_set);
+	struct bq24261_charger *chip = i2c_get_clientdata(bq24261_client);
 	u32 i;
 	char name[6] = {0};
 
@@ -495,6 +499,13 @@ static void bq24261_debugfs_init(void)
 		if (fentry == NULL)
 			goto debugfs_err_exit;
 	}
+
+	fentry = debugfs_create_u32(BQ24261_INT_COUNTER, S_IRUGO,
+			bq24261_dbgfs_dir, &chip->irq_counter);
+
+	if (fentry == NULL)
+		goto debugfs_err_exit;
+
 	dev_err(&bq24261_client->dev, "Debugfs created successfully!!\n");
 	return;
 
@@ -1509,11 +1520,15 @@ static void bq24261_irq_worker(struct work_struct *work)
 	dev_dbg(&chip->client->dev, "%s\n", __func__);
 
 	ret = bq24261_read_reg(chip->client, BQ24261_STAT_CTRL0_ADDR);
-	if (ret < 0)
+	if (ret < 0) {
 		dev_err(&chip->client->dev,
 			"Error (%d) in reading BQ24261_STAT_CTRL0_ADDR\n", ret);
-	else
+	} else {
 		bq24261_handle_irq(chip, ret);
+#ifdef CONFIG_DEBUG_FS
+		chip->irq_counter++;
+#endif
+	}
 
 	mutex_unlock(&chip->stat_lock);
 }
