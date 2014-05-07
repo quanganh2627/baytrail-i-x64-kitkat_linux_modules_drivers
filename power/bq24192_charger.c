@@ -1699,22 +1699,28 @@ static void bq24192_task_worker(struct work_struct *work)
 	if (vbatt <= INPUT_SRC_LOW_VBAT_LIMIT)
 		goto sched_task_work;
 
-	if (vbatt > INPUT_SRC_LOW_VBAT_LIMIT &&
-		vbatt < INPUT_SRC_MIDL_VBAT_LIMIT)
-		vindpm = INPUT_SRC_VOLT_LMT_444;
-	else if (vbatt > INPUT_SRC_MIDL_VBAT_LIMIT &&
-		vbatt < INPUT_SRC_MIDH_VBAT_LIMIT)
-		vindpm = INPUT_SRC_VOLT_LMT_468;
-	else if (vbatt > INPUT_SRC_MIDH_VBAT_LIMIT &&
-		vbatt < INPUT_SRC_HIGH_VBAT_LIMIT)
-		vindpm = INPUT_SRC_VOLT_LMT_476;
+	/* The charger vindpm voltage changes are causing charge current throttle
+	 * resulting in a prolonged changing time.
+	 * Hence disabling dynamic vindpm update  for bq24296 chip.
+	*/
+	if (chip->chip_type != BQ24296) {
+		if (vbatt > INPUT_SRC_LOW_VBAT_LIMIT &&
+			vbatt < INPUT_SRC_MIDL_VBAT_LIMIT)
+			vindpm = INPUT_SRC_VOLT_LMT_444;
+		else if (vbatt > INPUT_SRC_MIDL_VBAT_LIMIT &&
+			vbatt < INPUT_SRC_MIDH_VBAT_LIMIT)
+			vindpm = INPUT_SRC_VOLT_LMT_468;
+		else if (vbatt > INPUT_SRC_MIDH_VBAT_LIMIT &&
+			vbatt < INPUT_SRC_HIGH_VBAT_LIMIT)
+			vindpm = INPUT_SRC_VOLT_LMT_476;
 
-	if (!mutex_trylock(&chip->event_lock))
-		goto sched_task_work;
-	ret = bq24192_modify_vindpm(vindpm);
-	if (ret < 0)
-		dev_err(&chip->client->dev, "%s failed\n", __func__);
-	mutex_unlock(&chip->event_lock);
+		if (!mutex_trylock(&chip->event_lock))
+			goto sched_task_work;
+		ret = bq24192_modify_vindpm(vindpm);
+		if (ret < 0)
+			dev_err(&chip->client->dev, "%s failed\n", __func__);
+		mutex_unlock(&chip->event_lock);
+	}
 
 	/*
 	 * BQ driver depends upon the charger interrupt to send notification
