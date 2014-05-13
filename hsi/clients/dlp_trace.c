@@ -644,10 +644,11 @@ static void dlp_trace_dev_tx_timeout_cb(struct dlp_channel *ch_ctx)
  * Notes: Take care to prepare enough space in str buffer
  *        Fkt doesn't check PDU header or sequence validity!
  */
-static char *pdu_to_hd_ana(char *str, const char *format, struct hsi_msg *pdu) {
+static char *pdu_to_hd_ana(char *str, int strSize, const char *format, struct hsi_msg *pdu) {
 	u32 *ptr;
 	bool more_packets;
 	unsigned int size=0, packages=0;
+	int value;
 
 	/* Start Address & Size */
 	ptr = sg_virt(pdu->sgt.sgl);
@@ -665,7 +666,13 @@ static char *pdu_to_hd_ana(char *str, const char *format, struct hsi_msg *pdu) {
 
 	} while ((more_packets) && (packages < DLP_PACKET_IN_PDU_COUNT));
 
-	str += sprintf(str, format, packages, size);
+	value = snprintf(str, strSize, format, packages, size);
+	if (value < 0) {
+		/* Buffer size too small */
+		pr_err(DRVNAME": in pdu_to_hd_ana, str size is not big enough\n");
+	} else {
+		str += value;
+	}
 	return str;
 }
 
@@ -715,7 +722,7 @@ static void dlp_trace_dump_channel_state(struct dlp_channel *ch_ctx, struct seq_
 	i = 0;
 	list_for_each(curr, &trace_ctx->rx_msgs) {
 		pdu = list_entry(curr, struct hsi_msg, link);
-		pdu_to_hd_ana(s, "%2d Pack : %d", pdu);
+		pdu_to_hd_ana(s, sizeof(s), "%2d Pack : %d", pdu);
 		seq_printf(m, "      %02d: %s Byte\n", ++i, s);
 	}
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
