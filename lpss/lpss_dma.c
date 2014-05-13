@@ -118,7 +118,6 @@ static void lpss_dma_handler(struct lpss_dma *dma)
 		status &= ~(1 << chan->ch_id);
 		iowrite32((1 << chan->ch_id), dma->dma_base + LPSS_CLEAR_TFR);
 		lpss_dma_complete(chan, true);
-		iowrite32(UNMASK_INT(chan->ch_id), dma->dma_base + LPSS_MASK_TFR);
 	}
 
 	if (status & (0x2 << dma->ch_base)) {	/* rx chan*/
@@ -126,14 +125,11 @@ static void lpss_dma_handler(struct lpss_dma *dma)
 		status &= ~(1 << chan->ch_id);
 		iowrite32((1 << chan->ch_id), dma->dma_base + LPSS_CLEAR_TFR);
 		lpss_dma_complete(chan, true);
-		iowrite32(UNMASK_INT(chan->ch_id), dma->dma_base + LPSS_MASK_TFR);
 	}
 
 	status = ioread32(dma->dma_base + LPSS_RAW_ERR);
-	if (status) {
+	if (status)
 		dev_err(dma->dev, "%s: raw error status: %#x\n", __func__, status);
-		iowrite32(UNMASK_INT(chan->ch_id), dma->dma_base + LPSS_MASK_ERR);
-	}
 }
 
 static irqreturn_t lpss_dma_irq(int irq, void *data)
@@ -141,7 +137,6 @@ static irqreturn_t lpss_dma_irq(int irq, void *data)
 	struct lpss_dma *dma = data;
 
 	u32 tfr_status, err_status;
-	int irq_handler = 0;
 
 	if (test_bit(flag_suspend, &dma->flags))
 		return IRQ_NONE;
@@ -157,21 +152,6 @@ static irqreturn_t lpss_dma_irq(int irq, void *data)
 		return IRQ_NONE;
 
 	dev_dbg(dma->dev, "%s: trf_Status %x, Mask %x\n", __func__, tfr_status, dma->intr_mask);
-	if (tfr_status) {
-		/*need to disable intr*/
-		iowrite32((tfr_status << INT_MASK_WE),
-					dma->dma_base + LPSS_MASK_TFR);
-		irq_handler = 1;
-	}
-
-	if (err_status) {
-		iowrite32((err_status << INT_MASK_WE),
-					dma->dma_base + LPSS_MASK_ERR);
-		irq_handler = 1;
-	}
-
-	if (!irq_handler)
-		return IRQ_NONE;
 
 	lpss_dma_handler(dma);
 
