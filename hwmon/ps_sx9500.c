@@ -497,7 +497,20 @@ static ssize_t sx9500_enable_store(struct device *dev,
 
 	if (val)
 		sx9500_enable(sx9500);
-	else
+
+	return count;
+}
+
+static ssize_t sx9500_disable_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct sx9500_data *sx9500 = dev_get_drvdata(dev);
+	unsigned long val;
+
+	if (kstrtoul(buf, 0, &val))
+		return -EINVAL;
+
+	if (val)
 		sx9500_disable(sx9500);
 
 	return count;
@@ -505,9 +518,12 @@ static ssize_t sx9500_enable_store(struct device *dev,
 
 static DEVICE_ATTR(enable, S_IRUGO|S_IWUSR, sx9500_enable_show,
 		sx9500_enable_store);
+static DEVICE_ATTR(disable, S_IRUGO|S_IWUSR, sx9500_enable_show,
+		sx9500_disable_store);
 
 static struct attribute *sx9500_attributes[] = {
 	&dev_attr_enable.attr,
+	&dev_attr_disable.attr,
 #ifdef CONFIG_PS_SX9500_DEBUG
 	&dev_attr_debug.attr,
 #endif
