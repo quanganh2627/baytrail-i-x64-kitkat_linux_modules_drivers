@@ -1930,6 +1930,10 @@ void rmi4_suspend(struct rmi4_data *pdata)
 	dev_info(&client->dev, "Enter %s, touch counter=%ld, key counter=%ld",
 			__func__, pdata->touch_counter, pdata->key_counter);
 	disable_irq(pdata->irq);
+
+	rmi4_i2c_byte_read(pdata, pdata->fn01_ctrl_base_addr,
+			&pdata->fn01_ctrl_reg_saved);
+
 	retval = rmi4_i2c_set_bits(pdata,
 			pdata->fn01_ctrl_base_addr, F01_CTRL0_SLEEP);
 	if (retval < 0)
@@ -1972,17 +1976,8 @@ void rmi4_resume(struct rmi4_data *pdata)
 			msleep(50);
 	}
 	enable_irq(pdata->irq);
-retry:
-	retval = rmi4_i2c_clear_bits(pdata,
-			pdata->fn01_ctrl_base_addr, F01_CTRL0_SLEEP);
-	if (retval < 0) {
-		dev_err(&client->dev,
-				"clear F01_CTRL0_SLEEP failed, try=%d\n", try);
-		if (++try < MAX_RETRY_COUNT) {
-			msleep(10);
-			goto retry;
-		}
-	}
+	rmi4_i2c_byte_write(pdata, pdata->fn01_ctrl_base_addr,
+			pdata->fn01_ctrl_reg_saved);
 
 	/* Clear interrupts */
 	rmi4_i2c_block_read(pdata,

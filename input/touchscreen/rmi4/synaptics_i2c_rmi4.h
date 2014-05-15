@@ -178,6 +178,7 @@ struct rmi4_data {
 	u16		        fn01_ctrl_base_addr;
 	u16		        fn01_query_base_addr;
 	u16                     fn01_data_base_addr;
+	u8			fn01_ctrl_reg_saved;
 	int			current_page;
 	int			sensor_max_x;
 	int			sensor_max_y;
