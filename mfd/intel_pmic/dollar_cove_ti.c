@@ -108,11 +108,11 @@ static struct mfd_cell dollar_cove_ti_dev[] = {
 		.resources = battery_resources,
 	},
 	{
-		.name = "ti_fglib_iface",
+		.name = "intel_fuel_gauge",
 		.id = 0,
 	},
 	{
-		.name = "intel_fuel_gauge",
+		.name = "intel_fg_iface",
 		.id = 0,
 	},
 	{NULL, },
