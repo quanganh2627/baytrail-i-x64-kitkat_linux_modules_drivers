@@ -31,6 +31,9 @@
 #include <linux/input/synaptics_dsx.h>
 #include "synaptics_dsx_core.h"
 
+#define SYNP_S7300_BYTCR_ID	"S7300"
+#define SYNP_S7300_CHTCR_ID	"SYNP1000"
+
 #define SYN_I2C_RETRY_TIMES 10
 
 #define REPORT_ID_GET_BLOB 0x07
@@ -709,6 +712,13 @@ static int synaptics_rmi4_i2c_probe(struct i2c_client *client,
 
 	hw_if.board_data = &s7300_board_data;
 	s7300_board_data.irq = client->irq;
+	/* acpi id distinguish */
+	if (!strncmp(SYNP_S7300_CHTCR_ID, client->name, strlen(SYNP_S7300_CHTCR_ID))) {
+		s7300_board_data.irq_gpio =
+					acpi_get_gpio_by_index(&client->dev, 0, NULL);
+		s7300_board_data.irq = gpio_to_irq(s7300_board_data.irq_gpio);
+	}
+	dev_info(&client->dev, "acpi id: %s\n", client->name);
 
 	hw_if.bus_access = &bus_access;
 	hw_if.bl_hw_init = switch_to_rmi;
@@ -747,13 +757,15 @@ static int synaptics_rmi4_i2c_remove(struct i2c_client *client)
 
 static const struct i2c_device_id synaptics_rmi4_id_table[] = {
 	{I2C_DRIVER_NAME, 0},
-	{ "S7300", 0 },
+	{SYNP_S7300_BYTCR_ID, 0 },
+	{SYNP_S7300_CHTCR_ID, 0 },
 	{},
 };
 MODULE_DEVICE_TABLE(i2c, synaptics_rmi4_id_table);
 
 static struct acpi_device_id acpi_match[] = {
-	{ "S7300", 0 },
+	{ SYNP_S7300_BYTCR_ID, 0 },
+	{ SYNP_S7300_CHTCR_ID, 0 },
 	{ },
 };
 MODULE_DEVICE_TABLE(acpi, acpi_match);
