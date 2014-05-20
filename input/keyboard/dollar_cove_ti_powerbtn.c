@@ -94,9 +94,6 @@ static int pb_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	/* Unmask VBUS interrupt */
-	intel_mid_pmic_clearb(DC_TI_IRQ_MASK_REG, IRQ_MASK_PWRBTN);
-
 	return 0;
 }
 
