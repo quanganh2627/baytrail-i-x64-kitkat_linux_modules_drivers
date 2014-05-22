@@ -138,6 +138,7 @@ static struct rmi4_fn_ops supported_fn_ops[] = {
 		.config = rmi4_touchpad_f12_config,
 		.irq_handler = rmi4_touchpad_f12_irq_handler,
 		.remove = rmi4_touchpad_f12_remove,
+		.reset = rmi4_touchpad_f12_reset,
 	},
 	{
 		.fn_number = RMI4_BUTTON_FUNC_NUM,
@@ -446,7 +447,7 @@ int rmi4_touchpad_f12_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 	int x, y, wx, wy;
 	enum finger_state finger_status;
 	u16 data_base_addr;
-	struct rmi4_touchpad_data *touch_data;
+	struct rmi4_f12_data *f12_data;
 	struct i2c_client *client = pdata->i2c_client;
 	struct synaptics_rmi4_f12_finger_data *data;
 	struct synaptics_rmi4_f12_finger_data *finger_data;
@@ -462,7 +463,7 @@ int rmi4_touchpad_f12_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 	 * Read the required number of registers and check each 2 bit field to
 	 * determine if a finger is down.
 	 */
-	touch_data		= rfi->fn_data;
+	f12_data 		= rfi->fn_data;
 	fingers_supported	= rfi->num_of_data_points;
 	finger_registers	= (fingers_supported + 3)/4;
 	data_base_addr		= rfi->data_base_addr + rfi->data1_offset;
@@ -470,15 +471,14 @@ int rmi4_touchpad_f12_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 	/* Read all the finger registers data in one i2c read, twice i2c read
 	 * in irq handler may cause i2c controller timeout */
 	retval = rmi4_i2c_block_read(pdata, data_base_addr,
-					(unsigned char *)rfi->fn_data,
-					rfi->data_size);
-	if (retval != rfi->data_size) {
-		dev_err(&client->dev, "%s:read touch registers failed\n",
-								__func__);
+					f12_data->buffer, f12_data->size);
+	if (retval != f12_data->size) {
+		dev_err(&client->dev,
+				"%s:read touch registers failed\n", __func__);
 		return 0;
 	}
 
-	data = (struct synaptics_rmi4_f12_finger_data *)rfi->fn_data;
+	data = (struct synaptics_rmi4_f12_finger_data *)f12_data->buffer;
 
 	pdata->touch_counter++;
 	for (finger = 0; finger < fingers_supported; finger++) {
@@ -827,6 +827,7 @@ int rmi4_touchpad_f12_detect(struct rmi4_data *pdata, struct rmi4_fn *rfi,
 	struct f12_query_8 query_8;
 	struct f12_ctrl_8 ctrl_8;
 	struct f12_ctrl_23 ctrl_23;
+	struct rmi4_f12_data *f12_data;
 	unsigned char fingers_to_support = MAX_FINGERS;
 	unsigned char enable_mask;
 	unsigned char size_of_2d_data;
@@ -966,18 +967,26 @@ int rmi4_touchpad_f12_detect(struct rmi4_data *pdata, struct rmi4_fn *rfi,
 	size_of_2d_data = sizeof(struct synaptics_rmi4_f12_finger_data);
 
 	/* Allocate memory for finger data storage space */
-	rfi->data_size = rfi->num_of_data_points * size_of_2d_data;
-	rfi->fn_data = kmalloc(rfi->data_size, GFP_KERNEL);
+	f12_data = kzalloc(sizeof(*f12_data), GFP_KERNEL);
+	if (!f12_data) {
+		dev_err(&client->dev, "kzalloc f12 data failed\n");
+		return -ENOMEM;
+	}
 
-	if (!rfi->fn_data) {
-		dev_err(&client->dev, "kzalloc touchpad buffer failed\n");
+	f12_data->size = rfi->num_of_data_points * size_of_2d_data;
+	f12_data->buffer = kzalloc(f12_data->size, GFP_KERNEL);
+	if (!f12_data->buffer) {
+		dev_err(&client->dev, "kzalloc f12 data buffer failed\n");
 		retval = -ENOMEM;
 		goto alloc_buf_err;
 	}
-
+	f12_data->ctrl_28_offset = ctrl_28_offset;
+	f12_data->enable_mask = enable_mask;
+	rfi->fn_data = f12_data;
 	return 0;
 
 alloc_buf_err:
+	kfree(f12_data);
 	return retval;
 }
 
@@ -1129,9 +1138,13 @@ void rmi4_touchpad_remove(struct rmi4_fn *rfi)
 
 void rmi4_touchpad_f12_remove(struct rmi4_fn *rfi)
 {
+	struct rmi4_f12_data *f12_data;
+
 	if (!rfi->fn_data)
 		return;
-	kfree(rfi->fn_data);
+	f12_data = rfi->fn_data;
+	kfree(f12_data->buffer);
+	kfree(f12_data);
 }
 
 /**
@@ -1276,6 +1289,25 @@ int rmi4_touchpad_f12_config(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 	return retval;
 }
 
+int rmi4_touchpad_f12_reset(struct rmi4_data *pdata, struct rmi4_fn *rfi)
+{
+	int retval;
+	struct	i2c_client *client = pdata->i2c_client;
+	struct rmi4_f12_data *f12_data;
+
+	f12_data = rfi->fn_data;
+	retval = rmi4_i2c_block_write(pdata,
+			rfi->ctrl_base_addr + f12_data->ctrl_28_offset,
+			&f12_data->enable_mask,
+			sizeof(f12_data->enable_mask));
+	if (retval < 0) {
+		dev_err(&client->dev, "%s: Write control 28 failed\n", __func__);
+		return retval;
+	}
+
+	return 0;
+}
+
 static int
 rmi4_process_func(struct rmi4_data *pdata, struct rmi4_fn_desc *rmi_fd,
 						int page_start, int intr_cnt)
@@ -1325,7 +1357,7 @@ rmi4_process_func(struct rmi4_data *pdata, struct rmi4_fn_desc *rmi_fd,
 					F01_CTRL0_NOSLEEP);
 			if (retval < 0) {
 				dev_err(&client->dev,
-					"clear F01_CTRL0_SLEEP failed\n");
+					"clear F01_CTRL0_NOSLEEP failed\n");
 				return retval;
 			}
 		}
@@ -1598,13 +1630,40 @@ static int do_sw_reset(struct rmi4_data *pdata)
 		if (rfi->ops->fn_number == RMI4_DEV_CTL_FUNC_NUM) {
 			u16 addr = rfi->cmd_base_addr;
 			u8 cmd = RMI4_DEVICE_RESET_CMD;
-			dev_info(&client->dev, "%s: reset\n", __func__);
+			dev_info(&client->dev, "%s: reset, cmd_base_addr=0x%x\n",
+					__func__, addr);
 			retval = rmi4_i2c_byte_write(pdata, addr, cmd);
 			if (retval < 0) {
 				dev_err(&client->dev, "reset cmd failed.\n");
 				return retval;
 			}
 			msleep(RMI4_RESET_DELAY);
+			break;
+		}
+	}
+	retval = rmi4_i2c_set_bits(pdata, pdata->fn01_ctrl_base_addr,
+			F01_CTRL0_CONFIGURED);
+	if (retval < 0) {
+		dev_err(&client->dev, "Set F01_CONFIGURED failed\n");
+		return retval;
+	}
+	retval = rmi4_i2c_clear_bits(pdata, pdata->fn01_ctrl_base_addr,
+			F01_CTRL0_NOSLEEP);
+	if (retval < 0) {
+		dev_err(&client->dev,
+				"clear F01_CTRL0_SLEEP failed\n");
+		return retval;
+	}
+
+	fn_list = &(pdata->rmi4_mod_info.support_fn_list);
+	list_for_each_entry(rfi, fn_list, link) {
+		if (!rfi->ops->reset)
+			continue;
+		retval = rfi->ops->reset(pdata, rfi);
+		if (retval < 0) {
+			dev_err(&client->dev, "%s: fn 0x%x reset failed\n",
+					__func__, rfi->fn_number);
+			return retval;
 		}
 	}
 
@@ -1615,16 +1674,10 @@ int rmi4_dev_ctl_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 {
 	/* number of touch points - fingers down in this case */
 	int retval;
-	u16 data_base_addr;
 	u8 data;
 	struct i2c_client *client = pdata->i2c_client;
 
-	dev_info(&client->dev, "%s\n", __func__);
-
-	data_base_addr = rfi->data_base_addr;
-
-	retval = rmi4_i2c_block_read(pdata, data_base_addr,
-					&data, 1);
+	retval = rmi4_i2c_block_read(pdata, rfi->data_base_addr, &data, 1);
 	if (retval != 1) {
 		dev_err(&client->dev, "%s:read touch registers failed\n",
 								__func__);
@@ -1632,18 +1685,12 @@ int rmi4_dev_ctl_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 	}
 
 	/* Check device status & act upon */
+	dev_info(&client->dev, "%s: status data=0x%x\n", __func__, data);
 	if ((data & 0x0F)) {
-		dev_info(&client->dev, "%s: reset & init!\n", __func__);
-		/* reset & init */
 		retval = do_sw_reset(pdata);
 		if (retval) {
-			dev_err(&client->dev, "%s: Soft reset failed!\n",
-					__func__);
-			return retval;
-		}
-		retval = rmi4_i2c_query_device(pdata);
-		if (retval) {
-			dev_err(&client->dev, "rmi4 query device failed\n");
+			dev_err(&client->dev,
+					"%s: Soft reset failed!\n", __func__);
 			return retval;
 		}
 	}
