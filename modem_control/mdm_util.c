@@ -39,10 +39,10 @@ struct mdm_ctrl *mdm_drv;
  *  @value: Value to set
  *
  */
-inline void mdm_ctrl_set_opened(struct mdm_ctrl *drv, int value)
+inline void mdm_ctrl_set_opened(struct mdm_info *mdm, int value)
 {
 	/* Set the open flag */
-	drv->opened = value;
+	mdm->opened = value;
 }
 
 /**
@@ -50,13 +50,10 @@ inline void mdm_ctrl_set_opened(struct mdm_ctrl *drv, int value)
  *  @drv: Reference to the driver structure
  *
  */
-inline int mdm_ctrl_get_opened(struct mdm_ctrl *drv)
+inline int mdm_ctrl_get_opened(struct mdm_info *mdm)
 {
-	int opened;
-
-	/* Set the open flag */
-	opened = drv->opened;
-	return opened;
+	/* Get the open flag */
+	return mdm->opened;
 }
 
 /**
@@ -65,27 +62,28 @@ inline int mdm_ctrl_get_opened(struct mdm_ctrl *drv)
  */
 void mdm_ctrl_enable_flashing(unsigned long int param)
 {
-	struct mdm_ctrl *drv = (struct mdm_ctrl *)param;
+	struct mdm_info *mdm = (struct mdm_info *)param;
 
-	del_timer(&drv->flashing_timer);
-	if (mdm_ctrl_get_state(drv) != MDM_CTRL_STATE_IPC_READY) {
-		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_FW_DOWNLOAD_READY);
-	}
+	del_timer(&mdm->flashing_timer);
+	if (mdm_ctrl_get_state(mdm) != MDM_CTRL_STATE_IPC_READY)
+		mdm_ctrl_set_state(mdm, MDM_CTRL_STATE_FW_DOWNLOAD_READY);
 }
 
 /**
  *  mdm_ctrl_launch_timer - Timer launcher helper
- *  @timer: Timer to activate
+ *  @mdm: modem info
  *  @delay: Timer duration
  *  @timer_type: Timer type
  *
  *  Type can be MDM_TIMER_FLASH_ENABLE.
  *  Note: Type MDM_TIMER_FLASH_DISABLE is not used anymore.
  */
-void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
+void mdm_ctrl_launch_timer(struct mdm_info *mdm, int delay,
 			   unsigned int timer_type)
 {
-	timer->data = (unsigned long int)mdm_drv;
+	struct timer_list *timer = &mdm->flashing_timer;
+	timer->data = (unsigned long int)mdm;
+
 	switch (timer_type) {
 	case MDM_TIMER_FLASH_ENABLE:
 		timer->function = mdm_ctrl_enable_flashing;
@@ -105,48 +103,52 @@ void mdm_ctrl_launch_timer(struct timer_list *timer, int delay,
  *  @drv: Reference to the driver structure
  *
  */
-void mdm_ctrl_set_mdm_cpu(struct mdm_ctrl *drv)
+void mdm_ctrl_set_mdm_cpu(struct mdm_info *mdm)
 {
-	int board_type = drv->pdata->board_type;
+	int board_type = mdm->pdata->board_type;
+	struct mcd_base_info *pdata = mdm->pdata;
 
 	pr_info(DRVNAME ": board type: %d", board_type);
 
 	switch (board_type) {
 	case BOARD_AOB:
-		drv->pdata->mdm.init = mcd_mdm_init;
-		drv->pdata->mdm.power_on = mcd_mdm_cold_boot;
-		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
-		drv->pdata->mdm.power_off = mcd_mdm_power_off;
-		drv->pdata->mdm.cleanup = mcd_mdm_cleanup;
-		drv->pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
-		drv->pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
-		drv->pdata->cpu.init = cpu_init_gpio;
-		drv->pdata->cpu.cleanup = cpu_cleanup_gpio;
-		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state;
-		drv->pdata->cpu.get_irq_cdump = get_gpio_irq_cdump;
-		drv->pdata->cpu.get_irq_rst = get_gpio_irq_rst;
-		drv->pdata->cpu.get_gpio_rst = get_gpio_rst;
-		drv->pdata->cpu.get_gpio_pwr = get_gpio_pwr;
+		pdata->mdm.init = mcd_mdm_init;
+		if (mdm->pdata->mdm_ver == MODEM_2230)
+			pdata->mdm.power_on = mcd_mdm_cold_boot_2230;
+		else
+			pdata->mdm.power_on = mcd_mdm_cold_boot;
+		pdata->mdm.warm_reset = mcd_mdm_warm_reset;
+		pdata->mdm.power_off = mcd_mdm_power_off;
+		pdata->mdm.cleanup = mcd_mdm_cleanup;
+		pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
+		pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
+		pdata->cpu.init = cpu_init_gpio;
+		pdata->cpu.cleanup = cpu_cleanup_gpio;
+		pdata->cpu.get_mdm_state = get_gpio_mdm_state;
+		pdata->cpu.get_irq_cdump = get_gpio_irq_cdump;
+		pdata->cpu.get_irq_rst = get_gpio_irq_rst;
+		pdata->cpu.get_gpio_rst = get_gpio_rst;
+		pdata->cpu.get_gpio_pwr = get_gpio_pwr;
 		break;
 	case BOARD_NGFF:
-		drv->pdata->mdm.init = mcd_mdm_init;
-		drv->pdata->mdm.power_on = mcd_mdm_cold_boot_ngff;
-		drv->pdata->mdm.warm_reset = mcd_mdm_warm_reset;
-		drv->pdata->mdm.power_off = mcd_mdm_power_off;
-		drv->pdata->mdm.cleanup = mcd_mdm_cleanup;
-		drv->pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
-		drv->pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
-		drv->pdata->cpu.init = cpu_init_gpio_ngff;
-		drv->pdata->cpu.cleanup = cpu_cleanup_gpio_ngff;
-		drv->pdata->cpu.get_mdm_state = get_gpio_mdm_state_ngff;
-		drv->pdata->cpu.get_irq_cdump = get_gpio_irq_cdump_ngff;
-		drv->pdata->cpu.get_irq_rst = get_gpio_irq_rst_ngff;
-		drv->pdata->cpu.get_gpio_rst = get_gpio_rst;
-		drv->pdata->cpu.get_gpio_pwr = get_gpio_pwr;
+		pdata->mdm.init = mcd_mdm_init;
+		pdata->mdm.power_on = mcd_mdm_cold_boot_ngff;
+		pdata->mdm.warm_reset = mcd_mdm_warm_reset;
+		pdata->mdm.power_off = mcd_mdm_power_off;
+		pdata->mdm.cleanup = mcd_mdm_cleanup;
+		pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
+		pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
+		pdata->cpu.init = cpu_init_gpio_ngff;
+		pdata->cpu.cleanup = cpu_cleanup_gpio_ngff;
+		pdata->cpu.get_mdm_state = get_gpio_mdm_state_ngff;
+		pdata->cpu.get_irq_cdump = get_gpio_irq_cdump_ngff;
+		pdata->cpu.get_irq_rst = get_gpio_irq_rst_ngff;
+		pdata->cpu.get_gpio_rst = get_gpio_rst;
+		pdata->cpu.get_gpio_pwr = get_gpio_pwr;
 		break;
 	default:
 		pr_info(DRVNAME ": Can't retrieve conf specific functions");
-		drv->is_mdm_ctrl_disabled = true;
+		mdm->is_mdm_ctrl_disabled = true;
 		break;
 	}
 }
@@ -155,9 +157,10 @@ void mdm_ctrl_set_mdm_cpu(struct mdm_ctrl *drv)
  * configures PMIC
  * @drv: Reference to the driver structure
  */
-static void mdm_ctrl_set_pmic(struct mdm_ctrl *drv)
+static void mdm_ctrl_set_pmic(struct mdm_info *mdm)
 {
-	int pmic_type = drv->pdata->pmic_ver;
+	int pmic_type = mdm->pdata->pmic_ver;
+	struct mcd_base_info *pdata = mdm->pdata;
 
 	switch (pmic_type) {
 	case PMIC_MFLD:
@@ -165,24 +168,24 @@ static void mdm_ctrl_set_pmic(struct mdm_ctrl *drv)
 	case PMIC_BYT:
 	case PMIC_MOOR:
 	case PMIC_CHT:
-		drv->pdata->pmic.init = pmic_io_init;
-		drv->pdata->pmic.power_on_mdm = pmic_io_power_on_mdm;
-		drv->pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
-		drv->pdata->pmic.cleanup = pmic_io_cleanup;
-		drv->pdata->pmic.get_early_pwr_on = pmic_io_get_early_pwr_on;
-		drv->pdata->pmic.get_early_pwr_off = pmic_io_get_early_pwr_off;
+		pdata->pmic.init = pmic_io_init;
+		pdata->pmic.power_on_mdm = pmic_io_power_on_mdm;
+		pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
+		pdata->pmic.cleanup = pmic_io_cleanup;
+		pdata->pmic.get_early_pwr_on = pmic_io_get_early_pwr_on;
+		pdata->pmic.get_early_pwr_off = pmic_io_get_early_pwr_off;
 		break;
 	case PMIC_CLVT:
-		drv->pdata->pmic.init = pmic_io_init;
-		drv->pdata->pmic.power_on_mdm = pmic_io_power_on_ctp_mdm;
-		drv->pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
-		drv->pdata->pmic.cleanup = pmic_io_cleanup;
-		drv->pdata->pmic.get_early_pwr_on = pmic_io_get_early_pwr_on;
-		drv->pdata->pmic.get_early_pwr_off = pmic_io_get_early_pwr_off;
+		pdata->pmic.init = pmic_io_init;
+		pdata->pmic.power_on_mdm = pmic_io_power_on_ctp_mdm;
+		pdata->pmic.power_off_mdm = pmic_io_power_off_mdm;
+		pdata->pmic.cleanup = pmic_io_cleanup;
+		pdata->pmic.get_early_pwr_on = pmic_io_get_early_pwr_on;
+		pdata->pmic.get_early_pwr_off = pmic_io_get_early_pwr_off;
 		break;
 	default:
 		pr_info(DRVNAME ": Can't retrieve pmic specific functions");
-		drv->is_mdm_ctrl_disabled = true;
+		mdm->is_mdm_ctrl_disabled = true;
 		break;
 	}
 }
@@ -192,22 +195,22 @@ static void mdm_ctrl_set_pmic(struct mdm_ctrl *drv)
  *  @state : New state to set
  *
  */
-inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
+inline void mdm_ctrl_set_state(struct mdm_info *mdm, int state)
 {
 	/* Set the current modem state */
-	atomic_set(&drv->modem_state, state);
+	atomic_set(&mdm->modem_state, state);
 	if (likely(state != MDM_CTRL_STATE_UNKNOWN) &&
-	    (state & drv->polled_states)) {
+	    (state & mdm->polled_states)) {
 
-		drv->polled_state_reached = true;
+		mdm->polled_state_reached = true;
 		/* Waking up the poll work queue */
-		wake_up(&drv->wait_wq);
+		wake_up(&mdm->wait_wq);
 		pr_info(DRVNAME ": Waking up polling 0x%x\r\n", state);
 #ifdef CONFIG_HAS_WAKELOCK
 		/* Grab the wakelock for 10 ms to avoid
 		   the system going to sleep */
-		if (drv->opened)
-			wake_lock_timeout(&drv->stay_awake, msecs_to_jiffies(10));
+		if (mdm->opened)
+			wake_lock_timeout(&mdm->stay_awake, msecs_to_jiffies(10));
 #endif
 
 	}
@@ -220,9 +223,9 @@ inline void mdm_ctrl_set_state(struct mdm_ctrl *drv, int state)
  *  Note: Real current state may be different in case of self-reset
  *	  or if user has manually changed the state.
  */
-inline int mdm_ctrl_get_state(struct mdm_ctrl *drv)
+inline int mdm_ctrl_get_state(struct mdm_info *mdm)
 {
-	return atomic_read(&drv->modem_state);
+	return atomic_read(&mdm->modem_state);
 }
 
 /**
@@ -264,22 +267,53 @@ struct mcd_base_info *modem_ctrl_get_dev_data(struct platform_device *pdev)
 /**
  *  mdm_ctrl_get_device_info - Create platform and modem data.
  *  @drv: Reference to the driver structure
+ *  @pdev: Reference to platform device data
+ *  @nb_mdms: number of modems
  *
  *  Platform are build from SFI table data.
  */
 void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
-			      struct platform_device *pdev)
+			      struct platform_device *pdev,
+			      int nb_mdms)
 {
-	drv->pdata = modem_ctrl_get_dev_data(pdev);
+	drv->all_pdata = modem_ctrl_get_dev_data(pdev);
 
-	if (!drv->pdata) {
-		drv->is_mdm_ctrl_disabled = true;
-		pr_info(DRVNAME ": Disabling driver. No known device.");
+	if (!drv->all_pdata) {
+		int i;
+		for (i = 0; i < nb_mdms; i++)
+			drv->mdm[i].is_mdm_ctrl_disabled = true;
+		pr_info(DRVNAME ": Disabling driver. No known device\n");
+	}
+}
+
+/**
+ * mdm_ctrl_get_modem_data - get platform data for one modem
+ * @drv: Reference to the driver structure
+ * @minor: modem id
+ *
+ * @return 0 if successful
+ */
+int mdm_ctrl_get_modem_data(struct mdm_ctrl *drv, int minor)
+{
+	int ret = -1;
+
+	if (!drv->all_pdata) {
+		pr_err(DRVNAME ": %s platform data is NULL\n", __func__);
 		goto out;
 	}
 
-	drv->pdata->board_type = BOARD_UNSUP;
-	mdm_ctrl_set_pmic(drv);
+	drv->mdm[minor].pdata = &drv->all_pdata[minor];
+
+	if (!drv->mdm[minor].pdata->cpu_data) {
+		drv->mdm[minor].is_mdm_ctrl_disabled = true;
+		pr_info(DRVNAME " %s: Disabling modem %d. No known device\n",
+				__func__, minor);
+	} else {
+		drv->mdm[minor].pdata->board_type = BOARD_UNSUP;
+		mdm_ctrl_set_pmic(&drv->mdm[minor]);
+		ret = 0;
+	}
+
  out:
-	return;
+	return ret;
 }

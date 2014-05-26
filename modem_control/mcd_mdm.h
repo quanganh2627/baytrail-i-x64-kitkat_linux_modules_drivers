@@ -35,5 +35,6 @@ int mcd_mdm_get_cflash_delay(void *data);
 int mcd_mdm_get_wflash_delay(void *data);
 int mcd_mdm_cleanup(void *data);
 int mcd_mdm_cold_boot_ngff(void *data, int rst, int pwr_on);
+int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on);
 
 #endif				/* _MDM_IMC_H */

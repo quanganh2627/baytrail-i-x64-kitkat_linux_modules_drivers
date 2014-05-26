@@ -152,3 +152,25 @@ int mcd_mdm_cold_boot_ngff(void *data, int rst, int pwr_on)
 
 	return 0;
 }
+
+int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on)
+{
+	struct mdm_ctrl_mdm_data *mdm_data = data;
+
+	/* Toggle the RESET_BB_N */
+	gpio_set_value(rst, 0);
+
+	/* Toggle the POWER_ON */
+	usleep_range(mdm_data->pre_on_delay, mdm_data->pre_on_delay);
+	gpio_set_value(pwr_on, 0);
+
+	/* Toggle RESET_BB_N */
+	usleep_range(mdm_data->on_duration, mdm_data->on_duration);
+	gpio_set_value(rst, 1);
+
+	/* Toggle POWER_ON */
+	usleep_range(100000, 100000);
+	gpio_set_value(pwr_on, 1);
+
+	return 0;
+}
