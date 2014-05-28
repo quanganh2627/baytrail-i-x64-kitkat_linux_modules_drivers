@@ -120,7 +120,7 @@ static struct mfd_cell dollar_cove_ti_dev[] = {
 
 #define DOLLAR_COVE_IRQREGMAP(irq) \
 	[irq] = { \
-		{MIRQLVL1, irq, 1, INTEL_PMIC_REG_INV}, \
+		{MIRQLVL1, irq, 1, 0}, \
 		{IRQLVL1, irq, 1, INTEL_PMIC_REG_W1C}, \
 		{IRQLVL1, irq, 1, INTEL_PMIC_REG_W1C}, \
 	}
