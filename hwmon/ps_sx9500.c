@@ -143,7 +143,8 @@ struct reg_data {
 },
 {
 	.reg = SX9500_CPS_CTRL7_REG,
-	.val = 0x40,
+	/*.val = 0x40,*/
+	.val = 0x30,
 },
 {
 	.reg = SX9500_CPS_CTRL8_REG,
@@ -252,6 +253,11 @@ static int sx9500_enable(struct sx9500_data *sx9500)
 		get diff and compared to threshold ?*/
 		input_report_abs(sx9500->input_dev, ABS_X, 1);
 		input_sync(sx9500->input_dev);
+
+		ret = sx9500_init_chip(sx9500);
+		if (ret < 0) {
+			dev_err(&sx9500->client->dev, "init chip %d\n", ret);
+		}
 
 		/*enable cs2 sensor*/
 		ret = sx9500_read(sx9500, SX9500_CPS_CTRL0_REG, &val);
@@ -519,11 +525,6 @@ static void sx9500_init_work_func(struct work_struct *work)
 					struct sx9500_data, init_work);
 
 	SENSOR_DBG(DBG_LEVEL3, "enabled:%d", sx9500->enabled);
-
-	ret = sx9500_init_chip(sx9500);
-	if (ret < 0) {
-		dev_err(&sx9500->client->dev, "init chip %d\n", ret);
-	}
 
 	sx9500_enable(sx9500);
 }
