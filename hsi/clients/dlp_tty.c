@@ -219,7 +219,7 @@ static void _dlp_forward_tty(struct tty_struct *tty,
 			/* Get the size & address */
 			ptr++;
 			more_packets = (*ptr) & DLP_HDR_MORE_DESC;
-			data_size = DLP_HDR_DATA_SIZE((*ptr)) ;
+			data_size = DLP_HDR_DATA_SIZE((*ptr));
 			data_addr = start_addr + offset;
 
 			/* Copy the data to the TTY buffer */
@@ -841,11 +841,19 @@ static void dlp_tty_wait_until_sent(struct tty_struct *tty, int timeout)
  */
 static void dlp_tty_close(struct tty_struct *tty, struct file *filp)
 {
-	struct dlp_channel *ch_ctx = (struct dlp_channel *)tty->driver_data;
 	int need_cleanup = (tty->count == 1);
 
 	pr_debug(DRVNAME ": TTY device close request (%s, %d)\n",
 			current->comm, current->tgid);
+
+	/* Set TTY as closed to prevent RX/TX transactions */
+	if (need_cleanup)
+		tty->flow_stopped = 1;
+
+	if (filp && tty && tty->port) {
+		tty_port_close(tty->port, tty, filp);
+		tty->port = NULL;
+	}
 
 	if (unlikely(atomic_read(&dlp_drv.drv_remove_ongoing))) {
 		pr_err(DRVNAME ": %s: Driver is currently removed by the system",
@@ -853,19 +861,10 @@ static void dlp_tty_close(struct tty_struct *tty, struct file *filp)
 		return;
 	}
 
-	/* Set TTY as closed to prevent RX/TX transactions */
-	if (need_cleanup) {
+	if (need_cleanup)
 		dlp_tty_set_link_valid(1, dlp_drv.tx_timeout);
-		tty->flow_stopped = 1 ;
-	}
-
-	if (filp && ch_ctx) {
-		struct dlp_tty_context *tty_ctx = ch_ctx->ch_data;
-		tty_port_close(&tty_ctx->tty_prt, tty, filp);
-	}
 
 	/* Flush everything & Release the HSI port */
-
 	if (likely(!atomic_read(&dlp_drv.drv_remove_ongoing)) && need_cleanup) {
 		pr_debug(DRVNAME": Flushing the HSI controller\n");
 		hsi_flush(dlp_drv.client);
