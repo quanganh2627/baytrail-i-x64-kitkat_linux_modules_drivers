@@ -1,7 +1,7 @@
 /*
- * ST Driver
+ * Intel Shared Transport Driver
  *
- * Copyright (C) 2013 Intel Corporation
+ * Copyright (C) 2013 -2014 Intel Corporation
  *
  *
  * This program is free software; you can redistribute it and/or modify
@@ -31,73 +31,23 @@
 #include <linux/skbuff.h>
 #include <linux/lbf_ldisc.h>
 #include <linux/poll.h>
+#include <linux/gpio.h>
+#include <linux/platform_device.h>
 
-#define LL_SLEEP_ACK    0xF1
-#define LL_WAKE_UP_ACK  0xF0
 
-/*---- HCI data types ------------*/
-#define HCI_COMMAND_PKT 0x01
-#define HCI_ACLDATA_PKT 0x02
-#define HCI_SCODATA_PKT 0x03
-#define HCI_EVENT_PKT   0x04
 
-/* ---- HCI Packet structures ---- */
-#define HCI_COMMAND_HDR_SIZE    3
-#define HCI_EVENT_HDR_SIZE      2
-#define HCI_ACL_HDR_SIZE	4
-#define HCI_SCO_HDR_SIZE	3
-
-#define INVALID -1
-#define HCI_COMMAND_COMPLETE_EVENT      0x0E
-#define HCI_INTERRUPT_EVENT	     0xFF
-#define HCI_COMMAND_STATUS_EVT	  0x0F
-#define FMR_DEBUG_EVENT		 0x2B
-
-/*----------- FMR Command ----*/
-#define FMR_WRITE       0xFC58
-#define FMR_READ	0xFC59
-#define FMR_SET_POWER   0xFC5A
-#define FMR_SET_AUDIO   0xFC5B
-#define FMR_IRQ_CONFIRM 0xFC5C
-#define FMR_TOP_WRITE   0xFC5D
-#define FMR_TOP_READ    0xFC5E
-
-#define STREAM_TO_UINT16(u16, p) { (p) += 4; u16 = ((unsigned int)(*(p)) + \
-					(((unsigned int)(*((p) + 1))) << 8)); }
-#define MAX_BT_CHNL_IDS 4
-
-/* ----- HCI receiver states ---- */
-#define LBF_W4_H4_HDR   0
-#define LBF_W4_PKT_HDR  1
-#define LBF_W4_DATA     2
-
-#define N_INTEL_LDISC_BUF_SIZE	  4096
-#define TTY_THRESHOLD_THROTTLE	  128 /* now based on remaining room */
-#define TTY_THRESHOLD_UNTHROTTLE	128
-
-enum proto_type {
-	LNP_BT,
-	LNP_FM = 5,
-};
-
-static unsigned int lbf_ldisc_running = -1;
 
 /*------ Forward Declaration-----*/
 struct sk_buff *lbf_dequeue(void);
 static int lbf_tty_write(struct tty_struct *tty, const unsigned char *data,
 				int count);
 static void lbf_enqueue(struct sk_buff *skb);
+static void bt_rfkill_set_power(unsigned long blocked);
+static void lbf_update_set_room(struct tty_struct *tty);
+static void lbf_ldisc_fw_download_complete(unsigned long);
+static int lbf_ldisc_fw_download_init(void);
 
-struct st_proto_s {
-	enum proto_type type;
-	unsigned char chnl_id;
-	unsigned char hdr_len;
-	unsigned char offset_len_in_hdr;
-	unsigned char len_size;
-	unsigned char reserve;
-};
-
-static struct st_proto_s lnp_st_proto[6] = {
+static struct st_proto_s lbf_st_proto[6] = {
 		{ .chnl_id = INVALID, /* ACL */
 		.hdr_len = INVALID, .offset_len_in_hdr = INVALID,
 				.len_size = INVALID, .reserve = INVALID, },
@@ -122,23 +72,23 @@ struct lbf_q_tx {
 	struct sk_buff *tx_skb;
 	spinlock_t lock;
 	struct mutex writelock;
+	struct mutex fwdownloadlock;
 	struct tty_struct *tty;
 } lbf_q_tx;
 
 static struct lbf_q_tx *lbf_tx;
+static struct fm_ld_drv_register *fm;
 
-static struct fm_ld_drv_register *fm[1];
 
-static int fw_isregister;
-
-struct lnp_uart {
+struct lbf_uart {
 
 	const struct firmware *fw;
 	unsigned int ld_installed;
 	unsigned int lbf_rcv_state; /* Packet receive state information */
 	unsigned int fmr_evt_rcvd;
 	unsigned int lbf_ldisc_running;
-
+	unsigned long rx_state;
+	unsigned long rx_count;
 	char *read_buf;
 	int read_head;
 	int read_cnt;
@@ -146,15 +96,11 @@ struct lnp_uart {
 	wait_queue_t wait;
 	wait_queue_head_t read_wait;
 	struct mutex atomic_read_lock;
-	struct mutex  lock;
-
-	unsigned long rx_state;
+	struct mutex tx_lock;
 	struct tty_struct *tty;
 	spinlock_t rx_lock;
 	struct sk_buff *rx_skb;
-	unsigned long rx_count;
 	struct fm_ld_drv_register *pfm_ld_drv_register;
-
 	unsigned short rx_chnl;
 	unsigned short type;
 	unsigned short bytes_pending;
@@ -162,9 +108,19 @@ struct lnp_uart {
 
 };
 
-static void n_tty_set_room(struct tty_struct *tty);
+struct bcm_bt_lpm {
+	unsigned int gpio_enable_bt;
+	struct device *tty_dev;
+} bt_lpm;
 
-static void check_unthrottle(struct tty_struct *tty)
+/* Static variable */
+
+static int fw_isregister;
+static int fw_download_state;
+static unsigned int lbf_ldisc_running = INVALID;
+static int bt_enable_state = DISABLE;
+
+static inline void check_unthrottle(struct tty_struct *tty)
 {
 	if (tty->count)
 		tty_unthrottle(tty);
@@ -172,19 +128,19 @@ static void check_unthrottle(struct tty_struct *tty)
 
 static void reset_buffer_flags(struct tty_struct *tty)
 {
-	struct lnp_uart *plbf_ldisc;
+	struct lbf_uart *lbf_ldisc;
 	pr_info("-> %s\n", __func__);
-	plbf_ldisc = tty->disc_data;
-	mutex_lock(&plbf_ldisc->lock);
-	plbf_ldisc->read_head = plbf_ldisc->read_cnt = plbf_ldisc->read_tail
+	lbf_ldisc = tty->disc_data;
+	mutex_lock(&lbf_ldisc->tx_lock);
+	lbf_ldisc->read_head = lbf_ldisc->read_cnt = lbf_ldisc->read_tail
 			= 0;
-	mutex_unlock(&plbf_ldisc->lock);
-	n_tty_set_room(tty);
+	mutex_unlock(&lbf_ldisc->tx_lock);
+	lbf_update_set_room(tty);
 	check_unthrottle(tty);
 
 }
 
-int lbf_tx_wakeup(struct lnp_uart *plnp_uart)
+int lbf_tx_wakeup(struct lbf_uart *lbf_uart)
 {
 	struct sk_buff *skb;
 	int len = 0;
@@ -215,9 +171,9 @@ int lbf_tx_wakeup(struct lnp_uart *plnp_uart)
  */
 int lbf_tty_write(struct tty_struct *tty, const unsigned char *data, int count)
 {
-	struct lnp_uart *plnp_uart;
-	plnp_uart = tty->disc_data;
-	return plnp_uart->tty->ops->write(tty, data, count);
+	struct lbf_uart *lbf_uart;
+	lbf_uart = tty->disc_data;
+	return lbf_uart->tty->ops->write(tty, data, count);
 }
 
 long lbf_write(struct sk_buff *skb)
@@ -252,7 +208,7 @@ long register_fmdrv_to_ld_driv(struct fm_ld_drv_register *fm_ld_drv_reg)
 {
 	unsigned long flags;
 	long err = 0;
-	fm[0] = NULL;
+	fm = NULL;
 	pr_info("-> %s\n", __func__);
 
 	if (lbf_ldisc_running == 1) {
@@ -267,13 +223,13 @@ long register_fmdrv_to_ld_driv(struct fm_ld_drv_register *fm_ld_drv_reg)
 		}
 		spin_lock_irqsave(&lbf_tx->lock, flags);
 		fm_ld_drv_reg->fm_cmd_write = lbf_write;
-		fm[0] = fm_ld_drv_reg;
+		fm = fm_ld_drv_reg;
 		fw_isregister = 1;
 		spin_unlock_irqrestore(&lbf_tx->lock, flags);
 
-		if (fm[0]) {
-			if (likely(fm[0]->ld_drv_reg_complete_cb != NULL)) {
-				fm[0]->ld_drv_reg_complete_cb(fm[0]->priv_data,
+		if (fm) {
+			if (likely(fm->ld_drv_reg_complete_cb != NULL)) {
+				fm->ld_drv_reg_complete_cb(fm->priv_data,
 						0);
 				pr_info("Registration called");
 
@@ -293,7 +249,7 @@ static void lbf_ldisc_flush_buffer(struct tty_struct *tty)
 	unsigned long flags;
 	pr_info("-> %s\n", __func__);
 	reset_buffer_flags(tty);
-	n_tty_set_room(tty);
+	lbf_update_set_room(tty);
 
 	if (tty->link) {
 		spin_lock_irqsave(&tty->ctrl_lock, flags);
@@ -350,7 +306,7 @@ void lbf_enqueue(struct sk_buff *skb)
 static int lbf_ldisc_open(struct tty_struct *tty)
 {
 
-	struct lnp_uart *lnp_uart;
+	struct lbf_uart *lbf_uart;
 	pr_info("-> %s\n", __func__);
 	if (tty->disc_data) {
 		pr_info("%s ldiscdata exist\n ", __func__);
@@ -363,9 +319,9 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 		return -EOPNOTSUPP;
 	}
 
-	lnp_uart = kzalloc(sizeof(struct lnp_uart), GFP_KERNEL);
-	if (!lnp_uart) {
-		pr_info(" kzalloc for lnp_uart failed\n ");
+	lbf_uart = kzalloc(sizeof(struct lbf_uart), GFP_KERNEL);
+	if (!lbf_uart) {
+		pr_info(" kzalloc for lbf_uart failed\n ");
 		tty_unregister_ldisc(N_INTEL_LDISC);
 		return -ENOMEM;
 	}
@@ -373,26 +329,26 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	lbf_tx = kzalloc(sizeof(struct lbf_q_tx), GFP_KERNEL);
 	if (!lbf_tx) {
 		pr_info(" kzalloc for lbf_tx failed\n ");
-		kfree(lnp_uart);
+		kfree(lbf_uart);
 
 		tty_unregister_ldisc(N_INTEL_LDISC);
 		return -ENOMEM;
 	}
 
-	tty->disc_data = lnp_uart;
-	lnp_uart->tty = tty;
+	tty->disc_data = lbf_uart;
+	lbf_uart->tty = tty;
 	lbf_tx->tty = tty;
 	skb_queue_head_init(&lbf_tx->txq);
 	skb_queue_head_init(&lbf_tx->tx_waitq);
 	/* don't do an wakeup for now */
 	clear_bit(TTY_DO_WRITE_WAKEUP, &tty->flags);
 
-	if (likely(!lnp_uart->read_buf)) {
-		lnp_uart->read_buf
+	if (likely(!lbf_uart->read_buf)) {
+		lbf_uart->read_buf
 				= kzalloc(N_INTEL_LDISC_BUF_SIZE, GFP_KERNEL);
 
-		if (!lnp_uart->read_buf) {
-			kfree(lnp_uart);
+		if (!lbf_uart->read_buf) {
+			kfree(lbf_uart);
 
 			kfree(lbf_tx);
 
@@ -402,14 +358,15 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	}
 
 	tty->receive_room = 65536;
-	spin_lock_init(&lnp_uart->rx_lock);
+	spin_lock_init(&lbf_uart->rx_lock);
 	spin_lock_init(&lbf_tx->lock);
-	mutex_init(&lnp_uart->lock);
+	mutex_init(&lbf_uart->tx_lock);
 	mutex_init(&lbf_tx->writelock);
+	mutex_init(&lbf_tx->fwdownloadlock);
 
-	set_bit(TTY_DO_WRITE_WAKEUP, &lnp_uart->tty->flags);
-	init_waitqueue_head(&lnp_uart->read_wait);
-	mutex_init(&lnp_uart->atomic_read_lock);
+	set_bit(TTY_DO_WRITE_WAKEUP, &lbf_uart->tty->flags);
+	init_waitqueue_head(&lbf_uart->read_wait);
+	mutex_init(&lbf_uart->atomic_read_lock);
 	lbf_ldisc_running = 1;
 	/* Flush any pending characters in the driver and line discipline. */
 	reset_buffer_flags(tty);
@@ -429,22 +386,23 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 
 static void lbf_ldisc_close(struct tty_struct *tty)
 {
-	struct lnp_uart *plnp_uart = (void *) tty->disc_data;
+	struct lbf_uart *lbf_uart = (void *) tty->disc_data;
 	tty->disc_data = NULL; /* Detach from the tty */
 	pr_info("-> %s\n", __func__);
 
 	skb_queue_purge(&lbf_tx->txq);
 	skb_queue_purge(&lbf_tx->tx_waitq);
-	plnp_uart->rx_count = 0;
-	plnp_uart->rx_state = LBF_W4_H4_HDR;
+	lbf_uart->rx_count = 0;
+	lbf_uart->rx_state = LBF_W4_H4_HDR;
 
-	kfree_skb(plnp_uart->rx_skb);
-	kfree(plnp_uart->read_buf);
-	plnp_uart->rx_skb = NULL;
+	kfree_skb(lbf_uart->rx_skb);
+	kfree(lbf_uart->read_buf);
+	lbf_uart->rx_skb = NULL;
 	lbf_ldisc_running = -1;
+	bt_rfkill_set_power(DISABLE);
 
 	kfree(lbf_tx);
-	kfree(plnp_uart);
+	kfree(lbf_uart);
 }
 
 /* lbf_ldisc_wakeup()
@@ -458,10 +416,10 @@ static void lbf_ldisc_close(struct tty_struct *tty)
 static void lbf_ldisc_wakeup(struct tty_struct *tty)
 {
 
-	struct lnp_uart *plnp_uart = (void *) tty->disc_data;
-	pr_info("--> lnp_ldisc_wakeup");
+	struct lbf_uart *lbf_uart = (void *) tty->disc_data;
+	pr_info("--> lbf_ldisc_wakeup");
 
-	clear_bit(TTY_DO_WRITE_WAKEUP, &plnp_uart->tty->flags);
+	clear_bit(TTY_DO_WRITE_WAKEUP, &lbf_uart->tty->flags);
 
 	/*lbf_tx_wakeup(NULL);*/
 
@@ -474,51 +432,40 @@ static void lbf_ldisc_wakeup(struct tty_struct *tty)
  * for all headers
  */
 
-static int select_proto(int type)
+static inline int select_proto(int type)
 {
-	int j, proto = INVALID;
-	/*The structure lnp_st_proto we have allocated has 6 member
-	according to H4 Header except 0 & 1. 5 is for FM Packet */
-	for (j = 2; j < 6; j++) {
-		if (type == (j)) {
-			proto = j;
-			break;
-		}
-	}
-
-	return proto;
+	return (type >= 2 && type <= 6) ? type : INVALID;
 }
 
 /* st_send_frame()
  * push the skb received to relevant
  * protocol stacks
  * Arguments : tty pointer to associated tty instance data
- lnp_uart : Disc data for tty
+ lbf_uart : Disc data for tty
  chnl_id : id to either BT or FMR
  * Return Type: void
  */
-static void st_send_frame(struct tty_struct *tty, struct lnp_uart *lnp_uart)
+static void st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 {
 	unsigned int i = 0;
-	int chnl_id1 = LNP_BT;
+	int chnl_id = LBF_BT;
 	unsigned char *buff;
-	unsigned long flags = 0;
 	unsigned int opcode = 0;
 	unsigned int count = 0;
 
-	if (unlikely(lnp_uart == NULL || lnp_uart->rx_skb == NULL)) {
+	if (unlikely(lbf_uart == NULL || lbf_uart->rx_skb == NULL)) {
 		pr_info(" No channel registered, no data to send?");
 		return;
 	}
-	buff = &lnp_uart->rx_skb->data[0];
-	count = lnp_uart->rx_skb->len;
+	buff = &lbf_uart->rx_skb->data[0];
+	count = lbf_uart->rx_skb->len;
 	STREAM_TO_UINT16(opcode, buff);
 	pr_info("opcode : 0x%x event code: 0x%x registered", opcode,
-			 lnp_uart->rx_skb->data[1]);
-	/* for (i = lnp_uart->rx_skb->len, j = 0; i > 0; i--, j++)
-	 printk (KERN_ERR " --%d : 0x%x " ,j ,lnp_uart->rx_skb->data[j]);*/
+			 lbf_uart->rx_skb->data[1]);
+	/* for (i = lbf_uart->rx_skb->len, j = 0; i > 0; i--, j++)
+	 printk (KERN_ERR " --%d : 0x%x " ,j ,lbf_uart->rx_skb->data[j]);*/
 
-	if (HCI_COMMAND_COMPLETE_EVENT == lnp_uart->rx_skb->data[1]) {
+	if (HCI_COMMAND_COMPLETE_EVENT == lbf_uart->rx_skb->data[1]) {
 		switch (opcode) {
 		case FMR_IRQ_CONFIRM:
 		case FMR_SET_POWER:
@@ -527,124 +474,158 @@ static void st_send_frame(struct tty_struct *tty, struct lnp_uart *lnp_uart)
 		case FMR_SET_AUDIO:
 		case FMR_TOP_READ:
 		case FMR_TOP_WRITE:
-			chnl_id1 = LNP_FM;
+			chnl_id = LBF_FM;
 			pr_info("Its FM event ");
 			break;
 		default:
-			chnl_id1 = LNP_BT;
+			chnl_id = LBF_BT;
 			pr_info("Its BT event ");
 			break;
 		}
 	}
-	if (HCI_INTERRUPT_EVENT == lnp_uart->rx_skb->data[1]
-			&& (lnp_uart->rx_skb->data[3] == FMR_DEBUG_EVENT))
-		chnl_id1 = LNP_FM;
+	if (HCI_INTERRUPT_EVENT == lbf_uart->rx_skb->data[1]
+			&& (lbf_uart->rx_skb->data[3] == FMR_DEBUG_EVENT))
+		chnl_id = LBF_FM;
 
-	if (chnl_id1 == LNP_FM) {
-		if (likely(fm[0])) {
-			if (likely(fm[0]->fm_cmd_handler != NULL)) {
-				if (unlikely(fm[0]->fm_cmd_handler(fm[0]->
-					priv_data, lnp_uart->rx_skb) != 0))
+	if (chnl_id == LBF_FM) {
+		if (likely(fm)) {
+			if (likely(fm->fm_cmd_handler != NULL)) {
+				if (unlikely(fm->fm_cmd_handler(fm->
+					priv_data, lbf_uart->rx_skb) != 0))
 					pr_info("proto stack %d recv failed"
-						, chnl_id1);
+						, chnl_id);
 			}
 		}
 	else
 		pr_info("fm is NULL ");
-	} else if (chnl_id1 == LNP_BT) {
+	} else if (chnl_id == LBF_BT) {
 		pr_info(" Added in buffer inside count %d readhead %d ", count
-			, lnp_uart->read_head);
-		spin_lock_irqsave(&lbf_tx->lock, flags);
-		i = min3(N_INTEL_LDISC_BUF_SIZE - lnp_uart->read_cnt,
-				N_INTEL_LDISC_BUF_SIZE - lnp_uart->read_head,
-				(int)lnp_uart->rx_skb->len);
-		memcpy(lnp_uart->read_buf + lnp_uart->read_head,
-			 &lnp_uart->rx_skb->data[0], i);
-		lnp_uart->read_head =
-			(lnp_uart->read_head + i) & (N_INTEL_LDISC_BUF_SIZE-1);
-		lnp_uart->read_cnt += i;
-		spin_unlock_irqrestore(&lbf_tx->lock, flags);
+			, lbf_uart->read_head);
+		i = min3((N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_cnt),
+				N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_head,
+				(int)lbf_uart->rx_skb->len);
+		memcpy(lbf_uart->read_buf + lbf_uart->read_head,
+			 &lbf_uart->rx_skb->data[0], i);
+		lbf_uart->read_head =
+			(lbf_uart->read_head + i) & (N_INTEL_LDISC_BUF_SIZE-1);
+		lbf_uart->read_cnt += i;
 		count = count - i;
 
 		if (unlikely(count)) {
 			pr_info(" Added in buffer inside count %d readhead %d"
-				, count , lnp_uart->read_head);
-			spin_lock_irqsave(&lbf_tx->lock, flags);
-			i = min3(N_INTEL_LDISC_BUF_SIZE - lnp_uart->read_cnt,
-				N_INTEL_LDISC_BUF_SIZE - lnp_uart->read_head,
+				, count , lbf_uart->read_head);
+			i = min3((N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_cnt),
+				(N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_head),
 				(int)count);
-			memcpy(lnp_uart->read_buf + lnp_uart->read_head,
-			&lnp_uart->rx_skb->data[lnp_uart->rx_skb->len - count],
+			memcpy(lbf_uart->read_buf + lbf_uart->read_head,
+			&lbf_uart->rx_skb->data[lbf_uart->rx_skb->len - count],
 				i);
-			lnp_uart->read_head =
-			(lnp_uart->read_head + i) & (N_INTEL_LDISC_BUF_SIZE-1);
-			lnp_uart->read_cnt += i;
-			spin_unlock_irqrestore(&lbf_tx->lock, flags);
+			lbf_uart->read_head =
+			(lbf_uart->read_head + i) & (N_INTEL_LDISC_BUF_SIZE-1);
+			lbf_uart->read_cnt += i;
 		}
-	/*printk(KERN_DEBUG " After Added in buffer lnp_uart->read_cnt %d
-	 readhead %d ", lnp_uart->read_cnt , lnp_uart->read_head);*/
 	}
 
-	if (lnp_uart->rx_skb) {
-		kfree_skb(lnp_uart->rx_skb);
-		lnp_uart->rx_skb = NULL;
+	if (lbf_uart->rx_skb) {
+		kfree_skb(lbf_uart->rx_skb);
+		lbf_uart->rx_skb = NULL;
 	}
-	lnp_uart->rx_state = LBF_W4_H4_HDR;
-	lnp_uart->rx_count = 0;
-	lnp_uart->rx_chnl = 0;
-	lnp_uart->bytes_pending = 0;
+	lbf_uart->rx_state = LBF_W4_H4_HDR;
+	lbf_uart->rx_count = 0;
+	lbf_uart->rx_chnl = 0;
+	lbf_uart->bytes_pending = 0;
+}
+
+/* lbf_ldisc_fw_download_init()
+ * lock the Mutex to block the IOCTL on 2nd call
+ * Return Type: void
+ */
+static int lbf_ldisc_fw_download_init(void)
+{
+	unsigned long ret = -1;
+	pr_info("-> B%s\n", __func__);
+	if (mutex_lock_interruptible(&lbf_tx->fwdownloadlock))
+		return -ERESTARTSYS;
+	pr_info("-> A%s fw_download_state : %d\n", __func__ , fw_download_state);
+	if (bt_enable_state == DISABLE) {
+		bt_rfkill_set_power(ENABLE);
+		ret = DO_FW_DL;
+	} else {
+		if (fw_download_state == FW_FAILED)
+			ret = FW_FAILED;
+		else if (fw_download_state == FW_SUCCESS)
+			ret = DO_STACK_INIT;
+	}
+	pr_info("<- %s\n", __func__);
+	return ret;
+}
+
+/* lbf_ldisc_fw_download_complete()
+ * unlock the Mutex to unblock the IOCTL on 2nd call
+ * Return Type: void
+ */
+static void lbf_ldisc_fw_download_complete(unsigned long arg)
+{
+	if (arg == FW_SUCCESS)
+		fw_download_state = FW_SUCCESS;
+	else if (arg == FW_FAILED) {
+		fw_download_state = FW_FAILED;
+		bt_rfkill_set_power(DISABLE);
+		bt_rfkill_set_power(ENABLE);
+	}
+	mutex_unlock(&lbf_tx->fwdownloadlock);
 }
 
 /* st_check_data_len()
  * push the skb received to relevant
  * protocol stacks
  * Arguments : tty pointer to associated tty instance data
- lnp_uart : Disc data for tty
- len : lenn of data
+ *lbf_uart : Disc data for tty
+ *len : lenn of data
  * Return Type: void
  */
 
-static inline int st_check_data_len(struct lnp_uart *lnp_uart, int len)
+static inline int st_check_data_len(struct lbf_uart *lbf_uart, int len)
 {
-	int room = skb_tailroom(lnp_uart->rx_skb);
+	int room = skb_tailroom(lbf_uart->rx_skb);
 
 	if (!len) {
 		/* Received packet has only packet header and
 		 * has zero length payload. So, ask ST CORE to
 		 * forward the packet to protocol driver (BT/FM/GPS)
 		 */
-		st_send_frame(lnp_uart->tty, lnp_uart);
+		st_send_frame(lbf_uart->tty, lbf_uart);
 
 	} else if (len > room) {
 		/* Received packet's payload length is larger.
 		 * We can't accommodate it in created skb.
 		 */
 		pr_info("Data length is too large len %d room %d", len, room);
-		kfree_skb(lnp_uart->rx_skb);
+		kfree_skb(lbf_uart->rx_skb);
 	} else {
 		/* Packet header has non-zero payload length and
 		 * we have enough space in created skb. Lets read
 		 * payload data */
 
-		lnp_uart->rx_state = LBF_W4_DATA;
-		lnp_uart->rx_count = len;
+		lbf_uart->rx_state = LBF_W4_DATA;
+		lbf_uart->rx_count = len;
 
 		return len;
 	}
 
 	/* Change LDISC state to continue to process next
 	 * packet */
-	lnp_uart->rx_state = LBF_W4_H4_HDR;
-	lnp_uart->rx_skb = NULL;
-	lnp_uart->rx_count = 0;
-	lnp_uart->rx_chnl = 0;
-	lnp_uart->bytes_pending = 0;
+	lbf_uart->rx_state = LBF_W4_H4_HDR;
+	lbf_uart->rx_skb = NULL;
+	lbf_uart->rx_count = 0;
+	lbf_uart->rx_chnl = 0;
+	lbf_uart->bytes_pending = 0;
 
 	return 0;
 }
 
 /**
- * n_tty_set__room - receive space
+ * lbf_update_set_room - receive space
  * @tty: terminal
  *
  * Called by the driver to find out how much data it is
@@ -653,18 +634,15 @@ static inline int st_check_data_len(struct lnp_uart *lnp_uart, int len)
  * "instant".
  */
 
-static void n_tty_set_room(struct tty_struct *tty)
+static void lbf_update_set_room(struct tty_struct *tty)
 {
-	/* tty->read_cnt is not read locked ? */
-
-	struct lnp_uart *p_lnp_uart = (struct lnp_uart *) tty->disc_data;
-	int left = N_INTEL_LDISC_BUF_SIZE - p_lnp_uart->read_cnt - 1;
+	struct lbf_uart *lbf_uart = (struct lbf_uart *) tty->disc_data;
+	int left = N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_cnt - 1;
 	int old_left;
 
 	old_left = tty->receive_room;
 	tty->receive_room = left;
 
-	/* Did this open up the receive buffer? We may need to flip */
 	if (left && !old_left) {
 		WARN_RATELIMIT(tty->port->itty == NULL,
 				"scheduling with invalid itty\n");
@@ -678,7 +656,7 @@ static void n_tty_set_room(struct tty_struct *tty)
 	}
 }
 
-static int packet_state(int exp_count, int recv_count)
+static inline int packet_state(int exp_count, int recv_count)
 {
 	int status = 0;
 	if (exp_count > recv_count)
@@ -709,35 +687,35 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 	unsigned short payload_len = 0;
 	int len = 0, type = 0, i = 0;
 	unsigned char *plen;
-	struct lnp_uart *p_lnp_uart = (struct lnp_uart *) tty->disc_data;
+	struct lbf_uart *lbf_uart = (struct lbf_uart *) tty->disc_data;
 	unsigned long flags;
 
 	pr_info("-> %s\n", __func__);
 	print_hex_dump(KERN_DEBUG, ">in>", DUMP_PREFIX_NONE, 16, 1, cp, count,
 			0);
 	ptr = (unsigned char *) cp;
-	if (unlikely(ptr == NULL) || unlikely(p_lnp_uart == NULL)) {
+	if (unlikely(ptr == NULL) || unlikely(lbf_uart == NULL)) {
 		pr_info(" received null from TTY ");
 		return;
 	}
-	spin_lock_irqsave(&p_lnp_uart->rx_lock, flags);
+	spin_lock_irqsave(&lbf_uart->rx_lock, flags);
 
-	pr_info("-> %s count: %d p_lnp_uart->rx_state: %ld\n", __func__ , count,
-		 p_lnp_uart->rx_state);
+	pr_info("-> %s count: %d lbf_uart->rx_state: %ld\n", __func__ , count,
+		 lbf_uart->rx_state);
 
 	while (count) {
-		if (likely(p_lnp_uart->bytes_pending)) {
-			len = min_t(unsigned int, p_lnp_uart->bytes_pending,
+		if (likely(lbf_uart->bytes_pending)) {
+			len = min_t(unsigned int, lbf_uart->bytes_pending,
 				 count);
-			p_lnp_uart->rx_count = p_lnp_uart->bytes_pending;
-			memcpy(skb_put(p_lnp_uart->rx_skb, len),
+			lbf_uart->rx_count = lbf_uart->bytes_pending;
+			memcpy(skb_put(lbf_uart->rx_skb, len),
 					ptr, len);
-		} else if ((p_lnp_uart->rx_count)) {
-			len = min_t(unsigned int, p_lnp_uart->rx_count, count);
-			memcpy(skb_put(p_lnp_uart->rx_skb, len), ptr, len);
+		} else if ((lbf_uart->rx_count)) {
+			len = min_t(unsigned int, lbf_uart->rx_count, count);
+			memcpy(skb_put(lbf_uart->rx_skb, len), ptr, len);
 		}
 
-		switch (p_lnp_uart->rx_state) {
+		switch (lbf_uart->rx_state) {
 		case LBF_W4_H4_HDR:
 			if (*ptr == 0xFF) {
 				pr_info(" Discard a byte 0x%x\n" , *ptr);
@@ -756,14 +734,14 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				type = *ptr;
 				proto = select_proto(type);
 				if (proto != INVALID) {
-					p_lnp_uart->rx_skb = alloc_skb(1700,
+					lbf_uart->rx_skb = alloc_skb(1700,
 						GFP_ATOMIC);
-					if (!p_lnp_uart->rx_skb)
+					if (!lbf_uart->rx_skb)
 						return;
-					p_lnp_uart->rx_chnl = type;
-					p_lnp_uart->rx_state = LBF_W4_PKT_HDR;
-					p_lnp_uart->rx_count =
-				lnp_st_proto[p_lnp_uart->rx_chnl].hdr_len + 1;
+					lbf_uart->rx_chnl = type;
+					lbf_uart->rx_state = LBF_W4_PKT_HDR;
+					lbf_uart->rx_count =
+				lbf_st_proto[lbf_uart->rx_chnl].hdr_len + 1;
 				} else {
 					pr_info("Invalid header type: 0x%x\n",
 					 type);
@@ -775,61 +753,62 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 			break;
 
 		case LBF_W4_DATA:
-			pkt_status = packet_state(p_lnp_uart->rx_count, count);
+			pkt_status = packet_state(lbf_uart->rx_count, count);
 			count -= len;
 			ptr += len;
 			i = 0;
-			p_lnp_uart->rx_count -= len;
+			lbf_uart->rx_count -= len;
 			if (!pkt_status) {
 				pr_info("\n---------Complete pkt received-----"
 						"--------\n");
-				p_lnp_uart->rx_state = LBF_W4_H4_HDR;
-				st_send_frame(tty, p_lnp_uart);
-				p_lnp_uart->bytes_pending = 0;
-				p_lnp_uart->rx_count = 0;
-				p_lnp_uart->rx_skb = NULL;
+				lbf_uart->rx_state = LBF_W4_H4_HDR;
+				st_send_frame(tty, lbf_uart);
+				lbf_uart->bytes_pending = 0;
+				lbf_uart->rx_count = 0;
+				lbf_uart->rx_skb = NULL;
 			} else {
-				p_lnp_uart->bytes_pending = pkt_status;
+				lbf_uart->bytes_pending = pkt_status;
 				count = 0;
 			}
 			continue;
 
 		case LBF_W4_PKT_HDR:
-			pkt_status = packet_state(p_lnp_uart->rx_count, count);
-			pr_info("%s: p_lnp_uart->rx_count %ld\n", __func__,
-				p_lnp_uart->rx_count);
+			pkt_status = packet_state(lbf_uart->rx_count, count);
+			pr_info("%s: lbf_uart->rx_count %ld\n", __func__,
+				lbf_uart->rx_count);
 			count -= len;
 			ptr += len;
-			p_lnp_uart->rx_count -= len;
+			lbf_uart->rx_count -= len;
 			if (pkt_status) {
-				p_lnp_uart->bytes_pending = pkt_status;
+				lbf_uart->bytes_pending = pkt_status;
 				count = 0;
 			} else {
-				plen = &p_lnp_uart->rx_skb->data
-			[lnp_st_proto[p_lnp_uart->rx_chnl].offset_len_in_hdr];
-				p_lnp_uart->bytes_pending = pkt_status;
-				if (lnp_st_proto[p_lnp_uart->rx_chnl].len_size
+				plen = &lbf_uart->rx_skb->data
+			[lbf_st_proto[lbf_uart->rx_chnl].offset_len_in_hdr];
+				lbf_uart->bytes_pending = pkt_status;
+				if (lbf_st_proto[lbf_uart->rx_chnl].len_size
 					== 1)
 					payload_len = *(unsigned char *)plen;
-				else if (lnp_st_proto[p_lnp_uart->rx_chnl].len_size == 2)
+				else if (lbf_st_proto[lbf_uart->rx_chnl].
+						len_size == 2)
 					payload_len =
 					__le16_to_cpu(*(unsigned short *)plen);
 				else
 					pr_info("%s: invalid length "
 						"for id %d\n", __func__, proto);
 
-				st_check_data_len(p_lnp_uart, payload_len);
+				st_check_data_len(lbf_uart, payload_len);
 				}
 			continue;
 		} /* end of switch rx_state*/
 	} /* end of while*/
 
-	spin_unlock_irqrestore(&p_lnp_uart->rx_lock, flags);
-	n_tty_set_room(tty);
+	spin_unlock_irqrestore(&lbf_uart->rx_lock, flags);
+	lbf_update_set_room(tty);
 
-	if (waitqueue_active(&p_lnp_uart->read_wait)) {
+	if (waitqueue_active(&lbf_uart->read_wait)) {
 		pr_info("-> %s waitqueue_active\n", __func__);
-		wake_up_interruptible(&p_lnp_uart->read_wait);
+		wake_up_interruptible(&lbf_uart->read_wait);
 	}
 
 	if (tty->receive_room < TTY_THRESHOLD_THROTTLE)
@@ -858,9 +837,16 @@ static int lbf_ldisc_ioctl(struct tty_struct *tty, struct file *file,
 	int err = 0;
 	pr_info("-> %s\n", __func__);
 	switch (cmd) {
+	case BT_FW_DOWNLOAD_INIT:
+		err = lbf_ldisc_fw_download_init();
+		break;
+	case BT_FW_DOWNLOAD_COMPLETE:
+		lbf_ldisc_fw_download_complete(arg);
+		break;
 	default:
 		err = n_tty_ioctl_helper(tty, file, cmd, arg);
 	}
+	pr_info("<- %s\n", __func__);
 	return err;
 }
 
@@ -880,25 +866,23 @@ static int copy_from_read_buf(struct tty_struct *tty,
 		unsigned char __user **b,
 		size_t *nr)
 {
-	int retval;
+	int retval = 0;
 	size_t n;
-	unsigned long flags;
-	struct lnp_uart *p_lnp_uart = (struct lnp_uart *)tty->disc_data;
-	retval = 0;
-	spin_lock_irqsave(&lbf_tx->lock, flags);
-	n = min3(p_lnp_uart->read_cnt,
-		 N_INTEL_LDISC_BUF_SIZE - p_lnp_uart->read_tail, (int)*nr);
-	spin_unlock_irqrestore(&lbf_tx->lock, flags);
+	struct lbf_uart *lbf_ldisc = (struct lbf_uart *)tty->disc_data;
+	mutex_lock(&lbf_ldisc->tx_lock);
+	n = min3(lbf_ldisc->read_cnt,
+		 (N_INTEL_LDISC_BUF_SIZE - lbf_ldisc->read_tail), (int)*nr);
+	mutex_unlock(&lbf_ldisc->tx_lock);
 	if (n) {
 		retval =
-		copy_to_user(*b, &p_lnp_uart->read_buf[p_lnp_uart->read_tail],
+		copy_to_user(*b, &lbf_ldisc->read_buf[lbf_ldisc->read_tail],
 			n);
 		n -= retval;
-		spin_lock_irqsave(&lbf_tx->lock, flags);
-		p_lnp_uart->read_tail =
-		(p_lnp_uart->read_tail + n) & (N_INTEL_LDISC_BUF_SIZE-1);
-		p_lnp_uart->read_cnt -= n;
-		spin_unlock_irqrestore(&lbf_tx->lock, flags);
+		mutex_lock(&lbf_ldisc->tx_lock);
+		lbf_ldisc->read_tail =
+		(lbf_ldisc->read_tail + n) & (N_INTEL_LDISC_BUF_SIZE-1);
+		lbf_ldisc->read_cnt -= n;
+		mutex_unlock(&lbf_ldisc->tx_lock);
 		*b += n;
 	}
 	return n;
@@ -910,7 +894,7 @@ static int copy_from_read_buf(struct tty_struct *tty,
  *
  * Arguments:
  *
- * tty pointer to tty instance data
+ * tty pointer to tty instance datan
  * file pointer to open file object for device
  * buf buf to copy to user space
  * nr number of bytes to be read
@@ -925,27 +909,27 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 	ssize_t size;
 	int retval = 0;
 	int state = -1;
-	struct lnp_uart *p_lnp_uart = (struct lnp_uart *)tty->disc_data;
+	struct lbf_uart *lbf_uart = (struct lbf_uart *)tty->disc_data;
 	pr_info("-> %s\n", __func__);
-	init_waitqueue_entry(&p_lnp_uart->wait, current);
+	init_waitqueue_entry(&lbf_uart->wait, current);
 
-	if (!p_lnp_uart->read_cnt) {
+	if (!lbf_uart->read_cnt) {
 		if (file->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 		else {
 			if (mutex_lock_interruptible(
-				&p_lnp_uart->atomic_read_lock))
+				&lbf_uart->atomic_read_lock))
 				return -ERESTARTSYS;
 			else
 				state = 0;
 			}
 	}
 
-	n_tty_set_room(tty);
+	lbf_update_set_room(tty);
 
-	add_wait_queue(&p_lnp_uart->read_wait, &p_lnp_uart->wait);
+	add_wait_queue(&lbf_uart->read_wait, &lbf_uart->wait);
 	while (nr) {
-		if (p_lnp_uart->read_cnt > 0) {
+		if (lbf_uart->read_cnt > 0) {
 			int copied;
 			__set_current_state(TASK_RUNNING);
 			/* The copy function takes the read lock and handles
@@ -954,9 +938,9 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 			copied += copy_from_read_buf(tty, &b, &nr);
 			if (copied) {
 				retval = 0;
-				if (p_lnp_uart->read_cnt <=
+				if (lbf_uart->read_cnt <=
 					TTY_THRESHOLD_UNTHROTTLE) {
-					n_tty_set_room(tty);
+					lbf_update_set_room(tty);
 					check_unthrottle(tty);
 				}
 			break;
@@ -969,23 +953,23 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 	}
 
 	if (state == 0)
-	       mutex_unlock(&p_lnp_uart->atomic_read_lock);
+	       mutex_unlock(&lbf_uart->atomic_read_lock);
 
 
 	__set_current_state(TASK_RUNNING);
-	remove_wait_queue(&p_lnp_uart->read_wait, &p_lnp_uart->wait);
+	remove_wait_queue(&lbf_uart->read_wait, &lbf_uart->wait);
 
 	size = b - buf;
 	if (size)
 		retval = size;
-	n_tty_set_room(tty);
+	lbf_update_set_room(tty);
 	pr_info("<- %s\n", __func__);
 	return retval;
 }
 
 /* lbf_ldisc_write()
  *
- * Process IOCTL system call for the tty device.
+ * Process Write system call from user Space.
  *
  * Arguments:
  *
@@ -1018,19 +1002,30 @@ static ssize_t lbf_ldisc_write(struct tty_struct *tty, struct file *file,
 	return len;
 }
 
+/* lbf_ldisc_poll()
+ *
+ * Process POLL system call for the tty device.
+ *
+ * Arguments:
+ *
+ * tty pointer to tty instance data
+ * file pointer to open file object for device
+ *
+ * Return Value: mask of events registered with this poll call
+ */
 static unsigned int lbf_ldisc_poll(struct tty_struct *tty, struct file *file,
 		poll_table *wait)
 {
 	unsigned int mask = 0;
-	struct lnp_uart *p_lnp_uart = (struct lnp_uart *) tty->disc_data;
+	struct lbf_uart *lbf_uart = (struct lbf_uart *) tty->disc_data;
 
 	pr_info("-> %s\n", __func__);
 
-	if (p_lnp_uart->read_cnt > 0)
+	if (lbf_uart->read_cnt > 0)
 		mask |= POLLIN | POLLRDNORM;
 	else {
-		poll_wait(file, &p_lnp_uart->read_wait, wait);
-		if (p_lnp_uart->read_cnt > 0)
+		poll_wait(file, &lbf_uart->read_wait, wait);
+		if (lbf_uart->read_cnt > 0)
 			mask |= POLLIN | POLLRDNORM;
 		if (tty->packet && tty->link->ctrl_status)
 			mask |= POLLPRI | POLLIN | POLLRDNORM;
@@ -1047,8 +1042,18 @@ static unsigned int lbf_ldisc_poll(struct tty_struct *tty, struct file *file,
 	return mask;
 }
 
-#define RELEVANT_IFLAG(iflag) ((iflag) & (IGNBRK|BRKINT|IGNPAR|PARMRK|INPCK))
-
+/* lbf_ldisc_set_termios()
+ *
+ * It notifies the line discpline that a change has been made to the
+ * termios structure
+ *
+ * Arguments:
+ *
+ * tty pointer to tty instance data
+ * file pointer to open file object for device
+ *
+ * Return Value: void
+ */
 static void lbf_ldisc_set_termios(struct tty_struct *tty, struct ktermios *old)
 {
 	unsigned int cflag;
@@ -1061,53 +1066,167 @@ static void lbf_ldisc_set_termios(struct tty_struct *tty, struct ktermios *old)
 		pr_info(" - RTS/CTS is disabled\n");
 }
 
-static int __init lnp_uart_init(void)
+
+static int intel_bluetooth_pdata_probe(struct platform_device *pdev)
 {
-	static struct tty_ldisc_ops lbf_ldisc;
-	int err;
+	struct bcm_bt_lpm_platform_data *pdata = pdev->dev.platform_data;
+	pr_info("%s\n", __func__);
+	if (pdata == NULL) {
+		pr_err("Cannot register bcm_bt_lpm drivers, pdata is NULL\n");
+		return -EINVAL;
+	}
+
+	if (!gpio_is_valid(pdata->gpio_enable)) {
+		pr_err("%s: gpio not valid\n", __func__);
+		return -EINVAL;
+	}
+
+	bt_lpm.gpio_enable_bt = pdata->gpio_enable;
+	return 0;
+}
+
+static void bt_rfkill_set_power(unsigned long blocked)
+{
+	pr_info("%s blocked: %lu\n", __func__, blocked);
+	if (ENABLE == blocked) {
+		gpio_set_value(bt_lpm.gpio_enable_bt, 1);
+		pr_err("%s: turn BT on\n", __func__);
+		bt_enable_state = ENABLE;
+	} else if (DISABLE == blocked) {
+		gpio_set_value(bt_lpm.gpio_enable_bt, 0);
+		pr_err("%s: turn BT off\n", __func__);
+		bt_enable_state = DISABLE;
+	}
+}
+
+
+static int intel_lpm_bluetooth_probe(struct platform_device *pdev)
+{
+	int default_state = 0;	/* off */
+	int ret = 0;
+
+	pr_info("%s\n", __func__);
+	if (pdev == NULL)
+		pr_err("%s pdev NULL", __func__);
+	else
+		bt_lpm.tty_dev = &pdev->dev;
+
+	ret = intel_bluetooth_pdata_probe(pdev);
+
+	if (ret < 0) {
+		pr_err("%s: Cannot register platform data\n", __func__);
+		goto err_data_probe;
+	}
+
+	ret = gpio_request(bt_lpm.gpio_enable_bt, pdev->name);
+	if (ret < 0) {
+		pr_err("%s: Unable to request gpio %d\n", __func__,
+				bt_lpm.gpio_enable_bt);
+		goto err_gpio_enable_req;
+	}
+
+	ret = gpio_direction_output(bt_lpm.gpio_enable_bt, 0);
+	if (ret < 0) {
+		pr_err("%s: Unable to set int direction for gpio %d\n",
+			__func__, bt_lpm.gpio_enable_bt);
+		goto err_gpio_enable_dir;
+	}
+
+	pr_err("OFF : %s: gpio_enable=%d\n", __func__, bt_lpm.gpio_enable_bt);
+
+	bt_rfkill_set_power(default_state);
+
+	return ret;
+
+err_gpio_enable_dir:
+	gpio_free(bt_lpm.gpio_enable_bt);
+err_gpio_enable_req:
+err_data_probe:
+	return ret;
+}
+
+static int intel_lpm_bluetooth_remove(struct platform_device *pdev)
+{
+	pr_err("%s\n", __func__);
+	gpio_free(bt_lpm.gpio_enable_bt);
+	return 0;
+}
+
+/*Line discipline op*/
+static struct tty_ldisc_ops lbf_ldisc = {
+	.magic = TTY_LDISC_MAGIC,
+	.name = "n_ld",
+	.open = lbf_ldisc_open,
+	.close = lbf_ldisc_close,
+	.read = lbf_ldisc_read,
+	.write = lbf_ldisc_write,
+	.ioctl = lbf_ldisc_ioctl,
+	.poll = lbf_ldisc_poll,
+	.receive_buf = lbf_ldisc_receive,
+	.write_wakeup = lbf_ldisc_wakeup,
+	.flush_buffer = lbf_ldisc_flush_buffer,
+	.set_termios = lbf_ldisc_set_termios,
+	.owner = THIS_MODULE
+};
+
+static struct platform_driver intel_bluetooth_platform_driver = {
+	.probe = intel_lpm_bluetooth_probe,
+	.remove = intel_lpm_bluetooth_remove,
+	.suspend = NULL,
+	.resume = NULL,
+	.driver = {
+		.name = "bcm_bt_lpm",
+		.owner = THIS_MODULE,
+		},
+};
+
+static int __init lbf_uart_init(void)
+{
+	int err = 0;
 
 	pr_info("-> %s\n", __func__);
+
+	err = platform_driver_register(&intel_bluetooth_platform_driver);
+	if (err) {
+		pr_err("Registration failed. (%d)", err);
+		goto err_platform_register;
+	} else
+		pr_info("%s: Plarform registration succeded\n", __func__);
 
 	/* Register the tty discipline */
 
-	memset(&lbf_ldisc, 0, sizeof(lbf_ldisc));
-	lbf_ldisc.magic = TTY_LDISC_MAGIC;
-	lbf_ldisc.name = "n_ld";
-	lbf_ldisc.open = lbf_ldisc_open;
-	lbf_ldisc.close = lbf_ldisc_close;
-	lbf_ldisc.read = lbf_ldisc_read;
-	lbf_ldisc.write = lbf_ldisc_write;
-	lbf_ldisc.ioctl = lbf_ldisc_ioctl;
-	lbf_ldisc.poll = lbf_ldisc_poll;
-	lbf_ldisc.receive_buf = lbf_ldisc_receive;
-	lbf_ldisc.write_wakeup = lbf_ldisc_wakeup;
-	lbf_ldisc.flush_buffer = lbf_ldisc_flush_buffer;
-	lbf_ldisc.set_termios = lbf_ldisc_set_termios;
-
-	lbf_ldisc.owner = THIS_MODULE;
-
 	err = tty_register_ldisc(N_INTEL_LDISC, &lbf_ldisc);
-	if (err)
-		pr_info("registration failed. (%d)", err);
-	else
+	if (err) {
+		pr_err("Line Discipline Registration failed. (%d)", err);
+		goto err_tty_register;
+	} else
 		pr_info("%s: N_INTEL_LDISC registration succeded\n", __func__);
 
 	pr_info("<- %s\n", __func__);
+
+	return err;
+
+err_tty_register:
+	platform_driver_unregister(&intel_bluetooth_platform_driver);
+err_platform_register:
 	return err;
 }
 
-static void __exit lnp_uart_exit(void)
+static void __exit lbf_uart_exit(void)
 {
 	int err;
 	pr_info("-> %s\n", __func__);
+
 	/* Release tty registration of line discipline */
 	err = tty_unregister_ldisc(N_INTEL_LDISC);
 	if (err)
-		pr_info("Can't unregister N_INTEL_LDISC line discipline (%d)",
+		pr_err("Can't unregister N_INTEL_LDISC line discipline (%d)",
 			 err);
-		pr_info("<- %s\n", __func__);
+	platform_driver_unregister(&intel_bluetooth_platform_driver);
+
+	pr_info("<- %s\n", __func__);
 }
 
-module_init(lnp_uart_init);
-module_exit(lnp_uart_exit);
+module_init(lbf_uart_init);
+module_exit(lbf_uart_exit);
 MODULE_LICENSE("GPL");
