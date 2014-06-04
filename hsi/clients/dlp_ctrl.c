@@ -683,7 +683,9 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 		pr_err(DRVNAME ": hsi_ch:%d, cmd:0x%X => TX timeout\n",
 			dlp_cmd->params.channel, dlp_cmd->params.id);
 
-		tx_msg->context = NULL;
+		/* No need to call the complete sending call back,
+		 * because of failure */
+		tx_msg->complete = NULL;
 		ret = -EIO;
 		/* free only the cmd, because
 		 * the message is already in the controller fifo.
@@ -698,7 +700,6 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 		pr_err(DRVNAME ": Failed to send cmd:0x%X\n",
 				dlp_cmd->params.id);
 
-		tx_msg->context = NULL;
 		ret = -EIO;
 		/* free only the command because
 		 * the message has been already freed by the complete_tx
@@ -1024,8 +1025,8 @@ int dlp_ctrl_close_channel(struct dlp_channel *ch_ctx)
 	ch_ctx->credits = 0;
 
 	/* Reset the RX/TX seq_num */
-	ch_ctx->rx.seq_num = 0 ;
-	ch_ctx->tx.seq_num = 0 ;
+	ch_ctx->rx.seq_num = 0;
+	ch_ctx->tx.seq_num = 0;
 
 	/* Check if the channel was correctly opened */
 	state = dlp_ctrl_get_channel_state(ch_ctx->hsi_channel);
@@ -1103,7 +1104,7 @@ int dlp_ctrl_send_ack_nack(struct dlp_channel *ch_ctx)
 						params->channel, response);
 
 			/* Respnse sent => clear the saved command */
-			hsi_ch->open_conn = 0 ;
+			hsi_ch->open_conn = 0;
 		}
 	}
 
@@ -1125,7 +1126,7 @@ void dlp_ctrl_clean_stored_cmd(void)
 	/* Get any saved OPEN_CONN params */
 	for (i = 0; i < DLP_CHANNEL_COUNT; i++) {
 		hsi_ch = &dlp_drv.channels_hsi[i];
-		hsi_ch->open_conn = 0 ;
+		hsi_ch->open_conn = 0;
 	}
 }
 
