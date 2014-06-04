@@ -1385,7 +1385,6 @@ static int dlp_tty_ctx_cleanup(struct dlp_channel *ch_ctx)
 		hsi_flush(dlp_drv.client);
 
 		tty_vhangup(tty);
-		tty->port = NULL;
 		tty_kref_put(tty);
 	}
 
