@@ -55,11 +55,11 @@ static void mdm_ctrl_handle_hangup(struct work_struct *work)
 	/* Check the hangup reason */
 	modem_rst = drv->hangup_causes;
 
-	if (modem_rst & MDM_CTRL_HU_RESET)
-		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_WARM_BOOT);
-
 	if (modem_rst & MDM_CTRL_HU_COREDUMP)
 		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_COREDUMP);
+
+	if (modem_rst & MDM_CTRL_HU_RESET)
+		mdm_ctrl_set_state(drv, MDM_CTRL_STATE_WARM_BOOT);
 
 	pr_info(DRVNAME ": %s (reasons: 0x%X)\n", __func__, drv->hangup_causes);
 }
