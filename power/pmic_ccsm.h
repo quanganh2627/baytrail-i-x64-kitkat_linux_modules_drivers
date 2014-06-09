@@ -383,6 +383,7 @@ struct pmic_chrgr_drv_context {
 	struct work_struct evt_work;
 	struct mutex evt_queue_lock;
 	struct wake_lock wakelock;
+	struct wake_lock otg_wa_wakelock;
 };
 
 struct pmic_event {

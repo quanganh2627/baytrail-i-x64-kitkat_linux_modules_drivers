@@ -757,13 +757,30 @@ int pmic_handle_otgmode(bool enable)
 		return 0;
 	}
 
-	if (enable)
+	if (enable) {
 		ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
 				CHGRCTRL1_OTGMODE_MASK,
 				CHGRCTRL1_OTGMODE_MASK);
-	else
+
+		/* ShadyCove PMIC doesn’t kick charger-WDT during host-mode.
+		 * Driver does this regularly as a w/a. But, during suspend,
+		 * since this driver code doesn’t run, VBUS drops, DUT wakes
+		 * up, and re-enumerates again.
+		 * Hence, during host-mode, driver shall hold a wakelock.
+		 */
+		dev_info(chc.dev, "Hold wakelock for host-mode WDT-kick\n");
+		if (!wake_lock_active(&chc.otg_wa_wakelock)) {
+			wake_lock(&chc.otg_wa_wakelock);
+		}
+	} else {
 		ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
 				0x0, CHGRCTRL1_OTGMODE_MASK);
+
+		dev_info(chc.dev, "Release wakelock for host-mode WDT-kick\n");
+		if (wake_lock_active(&chc.otg_wa_wakelock)) {
+			wake_unlock(&chc.otg_wa_wakelock);
+		}
+	}
 
 	/* If access is blocked return success to avoid additional
 	*  error handling at client side
@@ -1981,6 +1998,8 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 	INIT_LIST_HEAD(&chc.evt_queue);
 	mutex_init(&chc.evt_queue_lock);
 	wake_lock_init(&chc.wakelock, WAKE_LOCK_SUSPEND, "pmic_wakelock");
+	wake_lock_init(&chc.otg_wa_wakelock, WAKE_LOCK_SUSPEND,
+			"pmic_otg_wa_wakelock");
 
 	/* register interrupt */
 	retval = request_threaded_irq(chc.irq, pmic_isr,
@@ -2066,6 +2085,7 @@ static int pmic_chrgr_remove(struct platform_device *pdev)
 	if (chc) {
 		pmic_chrgr_do_exit_ops(chc);
 		wake_lock_destroy(&chc->wakelock);
+		wake_lock_destroy(&chc->otg_wa_wakelock);
 		free_irq(chc->irq, chc);
 		iounmap(chc->pmic_intr_iomap);
 		kfree(chc->sfi_bcprof);
