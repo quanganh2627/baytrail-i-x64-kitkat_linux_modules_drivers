@@ -27,7 +27,7 @@
 #include "./pmic.h"
 #include <linux/gpio.h>
 
-enum pmic_chip_type {CCOVE, DCOVE};
+enum pmic_chip_type {CCOVE, DCOVE, WCOVE};
 
 static LIST_HEAD(pdata_list);
 struct cell_dev_pdata {
@@ -231,6 +231,7 @@ static int pmic_regmap_write(struct intel_pmic_regmap *map, int val)
 		return -ENXIO;
 	if (IS_PMIC_REG_INV(map))
 		val = ~val;
+
 	mutex_lock(&pmic->io_lock);
 	if (cache_offset == map->offset) {
 		if (cache_flags != map->flags) {
@@ -263,9 +264,9 @@ static int pmic_regmap_write(struct intel_pmic_regmap *map, int val)
 		cache_read_val = cache_write_val;
 err:
 	dev_dbg(pmic->dev, "[%s]: offset=%x, shift=%x, mask=%x, flags=%x\n",
-		map->offset, map->shift, map->mask, map->flags);
+		__func__, map->offset, map->shift, map->mask, map->flags);
 	dev_dbg(pmic->dev, "[%s]: cache_read=%x, cache_write=%x, ret=%x\n",
-		cache_read_val, cache_write_val, ret);
+		__func__, cache_read_val, cache_write_val, ret);
 	mutex_unlock(&pmic->io_lock);
 	return ret;
 }
@@ -310,9 +311,9 @@ static int pmic_regmap_read(struct intel_pmic_regmap *map)
 		cache_write_val = cache_read_val;
 err:
 	dev_dbg(pmic->dev, "[%s]: offset=%x, shift=%x, mask=%x, flags=%x\n",
-		map->offset, map->shift, map->mask, map->flags);
+		__func__, map->offset, map->shift, map->mask, map->flags);
 	dev_dbg(pmic->dev, "[%s]: cache_read=%x, cache_write=%x, ret=%x\n",
-		cache_read_val, cache_write_val, ret);
+		__func__, cache_read_val, cache_write_val, ret);
 	mutex_unlock(&pmic->io_lock);
 	return ret;
 }
@@ -322,6 +323,9 @@ static void pmic_irq_enable(struct irq_data *data)
 	clear_bit((data->irq - pmic->irq_base) % 32,
 		&(pmic->irq_mask[(data->irq - pmic->irq_base) / 32]));
 	pmic->irq_need_update = 1;
+
+	dev_dbg(pmic->dev, "[%s]: irq_mask = %x", __func__,
+				pmic->irq_mask[(data->irq - pmic->irq_base)/32]);
 }
 
 static void pmic_irq_disable(struct irq_data *data)
@@ -329,19 +333,25 @@ static void pmic_irq_disable(struct irq_data *data)
 	set_bit((data->irq - pmic->irq_base) % 32,
 		&(pmic->irq_mask[(data->irq - pmic->irq_base) / 32]));
 	pmic->irq_need_update = 1;
+	dev_dbg(pmic->dev, "[%s]: irq_mask = %x", __func__,
+				pmic->irq_mask[(data->irq - pmic->irq_base)/32]);
 }
 
 static void pmic_irq_sync_unlock(struct irq_data *data)
 {
+	struct intel_pmic_regmap *map;
+
+	dev_dbg(pmic->dev, "[%s]: irq_mask = %x", __func__,
+				pmic->irq_mask[(data->irq - pmic->irq_base)/32]);
 	if (pmic->irq_need_update) {
+		map = &pmic->irq_regmap[(data->irq - pmic->irq_base)].mask;
+
 		if (test_bit((data->irq - pmic->irq_base) % 32,
-			&(pmic->irq_mask[(data->irq
-			- pmic->irq_base) / 32])))
-			pmic_regmap_write(&pmic->irq_regmap[(data->irq
-				- pmic->irq_base)].mask, 1);
+			&(pmic->irq_mask[(data->irq - pmic->irq_base) / 32])))
+			pmic_regmap_write(map, map->mask);
 		else
-			pmic_regmap_write(&pmic->irq_regmap[(data->irq
-				- pmic->irq_base)].mask, 0);
+			pmic_regmap_write(map, 0);
+
 		pmic->irq_need_update = 0;
 		pmic_regmap_flush();
 	}
@@ -367,7 +377,8 @@ static irqreturn_t pmic_irq_thread(int irq, void *data)
 		if (test_bit(i % 32, &(pmic->irq_mask[i / 32])))
 			continue;
 		if (pmic_regmap_read(&pmic->irq_regmap[i].status)) {
-			pmic_regmap_write(&pmic->irq_regmap[i].ack, 1);
+			pmic_regmap_write(&pmic->irq_regmap[i].ack,
+				pmic->irq_regmap[i].ack.mask);
 			handle_nested_irq(pmic->irq_base + i);
 		}
 	}
@@ -389,15 +400,21 @@ static int pmic_irq_init(void)
 	int cur_irq;
 	int ret;
 	int i;
+	struct intel_pmic_regmap *map;
 
 	/* Mostly, it can help to increase cache hit if merge same register
 	   access in one loop */
 	for (i = 0; i < pmic->irq_num; i++) {
-		pmic_regmap_write(&pmic->irq_regmap[i].mask, 1);
-		set_bit(i % 32, &(pmic->irq_mask[i / 32]));
+		map = &pmic->irq_regmap[i].mask;
+		if (IS_PMIC_REG_VALID(map)) {
+			pmic_regmap_write(map, map->mask);
+			set_bit(i % 32, &(pmic->irq_mask[i / 32]));
+		}
 	}
 	for (i = 0; i < pmic->irq_num; i++) {
-		pmic_regmap_write(&pmic->irq_regmap[i].ack, 1);
+		map = &pmic->irq_regmap[i].ack;
+		if (IS_PMIC_REG_VALID(map))
+			pmic_regmap_write(map, map->mask);
 	}
 	pmic_regmap_flush();
 
