@@ -241,7 +241,6 @@ void dlp_get_device_info(struct dlp_driver *drv,
 		pr_err(DRVNAME ": Disabling driver. No known device.");
 	}
 
- out:
 	return;
 }
 
@@ -1287,11 +1286,6 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 		if (state != DLP_CH_STATE_OPENED) {
 			pr_err(DRVNAME ": Can't push PDU for CH%d => invalid state: %d\n",
 					ch_ctx->ch_id, state);
-			/* Don't set back credit value as modem could have
-			 * updated credit in the meantime. It's better getting
-			 * one credit less than risking a protocol violation.
-			 * Correct credit value will be updated later by modem.
-			 */
 			err = -EACCES;
 			goto out;
 		}
@@ -1303,14 +1297,18 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 			mod_timer(&dlp_drv.timer[ch_ctx->ch_id],
 				  jiffies + usecs_to_jiffies(DLP_HANGUP_DELAY));
 		}
-	} else {
-		unsigned int ctrl_len;
+	} else
 		pr_err(DRVNAME ": hsi_async(ctrl_push) failed (%d)", err);
 
+out:
+	if (err) {
 		/* Failed to send pdu, set back counters values;
 		 * excepted credit value as modem could have updated
-		 * credit value in the meantime.
+		 * credit value in the meantime. It's better getting
+		 * one credit less than risking a protocol violation.
+		 * Correct credit value will be updated later by modem.
 		 */
+		unsigned int ctrl_len;
 		write_lock_irqsave(&xfer_ctx->lock, flags);
 		xfer_ctx->room += lost_room;
 		xfer_ctx->ctrl_len--;
@@ -1323,7 +1321,6 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 			del_timer_sync(&dlp_drv.timer[ch_ctx->ch_id]);
 	}
 
-out:
 	return err;
 }
 
