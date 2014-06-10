@@ -841,18 +841,21 @@ static void dlp_tty_wait_until_sent(struct tty_struct *tty, int timeout)
  */
 static void dlp_tty_close(struct tty_struct *tty, struct file *filp)
 {
-	int need_cleanup = (tty->count == 1);
+	int need_cleanup = 0;
+	if (tty) {
+		need_cleanup = (tty->count == 1);
 
-	pr_debug(DRVNAME ": TTY device close request (%s, %d)\n",
-			current->comm, current->tgid);
+		pr_debug(DRVNAME ": TTY device close request (%s, %d)\n",
+				current->comm, current->tgid);
 
-	/* Set TTY as closed to prevent RX/TX transactions */
-	if (need_cleanup)
-		tty->flow_stopped = 1;
+		/* Set TTY as closed to prevent RX/TX transactions */
+		if (need_cleanup)
+			tty->flow_stopped = 1;
 
-	if (filp && tty && tty->port) {
-		tty_port_close(tty->port, tty, filp);
-		tty->port = NULL;
+		if (filp && tty->port) {
+			tty_port_close(tty->port, tty, filp);
+			tty->port = NULL;
+		}
 	}
 
 	if (unlikely(atomic_read(&dlp_drv.drv_remove_ongoing))) {
