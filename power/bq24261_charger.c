@@ -398,12 +398,15 @@ static inline void bq24261_dump_regs(bool dump_master)
 	int ret;
 	int bat_cur, bat_volt;
 	struct bq24261_charger *chip;
+	char buf[1024] = {0};
+	int used = 0;
 
 	if (!bq24261_client)
 		return;
 
 	chip = i2c_get_clientdata(bq24261_client);
 
+	dev_info(&bq24261_client->dev, "*======================*\n");
 	ret = get_battery_current(&bat_cur);
 	if (ret)
 		dev_err(&bq24261_client->dev,
@@ -421,18 +424,18 @@ static inline void bq24261_dump_regs(bool dump_master)
 			(bat_volt/1000));
 
 
-	dev_info(&bq24261_client->dev, "BQ24261 Register dump\n");
+	dev_info(&bq24261_client->dev, "BQ24261 Register dump:\n");
 
-	dev_info(&bq24261_client->dev, "*======================*\n");
 	for (i = 0; i < 7; ++i) {
 		ret = bq24261_read_reg(bq24261_client, i);
 		if (ret < 0)
 			dev_err(&bq24261_client->dev,
 				"Error in reading REG 0x%X\n", i);
 		else
-			dev_info(&bq24261_client->dev,
-				"0x%X=0x%X ", i, ret);
+			used += snprintf(buf + used, sizeof(buf) - used,
+					" 0x%X=0x%X,", i, ret);
 	}
+	dev_info(&bq24261_client->dev, "%s\n", buf);
 	dev_info(&bq24261_client->dev, "*======================*\n");
 
 	if (chip->pdata->dump_master_regs && dump_master)
@@ -588,6 +591,7 @@ static inline int bq24261_enable_charging(
 	u8 reg_val;
 	bool is_ready;
 
+	dev_dbg(&chip->client->dev, "%s=%d\n", __func__, val);
 	ret = bq24261_read_reg(chip->client,
 					BQ24261_STAT_CTRL0_ADDR);
 	if (ret < 0) {
@@ -598,20 +602,25 @@ static inline int bq24261_enable_charging(
 	is_ready =  (ret & BQ24261_STAT_MASK) != BQ24261_STAT_FAULT;
 
 	/* If status is fault, wait for READY before enabling the charging */
-	if (!is_ready) {
+	if (!is_ready && val) {
 		ret = wait_event_timeout(chip->wait_ready,
-			(chip->chrgr_stat != BQ24261_CHRGR_STAT_READY),
+			(chip->chrgr_stat == BQ24261_CHRGR_STAT_READY),
 				HZ);
 		dev_info(&chip->client->dev,
 			"chrgr_stat=%x\n", chip->chrgr_stat);
 		if (ret == 0) {
 			dev_err(&chip->client->dev,
-				"Waiting for Charger Ready Failed.Enabling charging anyway\n");
+				"ChgrReady timeout, enable charging anyway\n");
 		}
 	}
 
-	if (chip->pdata->enable_charging)
-		chip->pdata->enable_charging(val);
+	if (chip->pdata->enable_charging) {
+		ret = chip->pdata->enable_charging(val);
+		if (ret) {
+			dev_err(&chip->client->dev,
+				"Error(%d) in master enable-charging\n", ret);
+		}
+	}
 
 	if (val) {
 		reg_val = (~BQ24261_CE_DISABLE & BQ24261_CE_MASK);
@@ -631,7 +640,16 @@ static inline int bq24261_enable_charging(
 		return ret;
 
 	bq24261_set_iterm(chip, chip->iterm);
-	return bq24261_tmr_ntc_init(chip);
+	ret = bq24261_tmr_ntc_init(chip);
+	if (ret) {
+		dev_err(&chip->client->dev,
+			"Error(%d) in tmr_ntc_init\n", ret);
+	}
+
+	dev_info(&chip->client->dev, "Completed %s=%d\n", __func__, val);
+	bq24261_dump_regs(false);
+
+	return ret;
 }
 
 static inline int bq24261_reset_timer(struct bq24261_charger *chip)
@@ -650,6 +668,7 @@ static inline int bq24261_enable_charger(
 	u8 reg_val;
 	int ret;
 
+	dev_dbg(&chip->client->dev, "%s=%d\n", __func__, val);
 	reg_val = val ? (~BQ24261_HZ_ENABLE & BQ24261_HZ_MASK)  :
 			BQ24261_HZ_ENABLE;
 
@@ -666,7 +685,7 @@ static inline int bq24261_set_cc(struct bq24261_charger *chip, int cc)
 	u8 reg_val;
 	int ret;
 
-	dev_dbg(&chip->client->dev, "cc=%d\n", cc);
+	dev_dbg(&chip->client->dev, "%s=%d\n", __func__, cc);
 	if (chip->pdata->set_cc) {
 		ret = chip->pdata->set_cc(cc);
 		if (unlikely(ret))
@@ -687,10 +706,10 @@ static inline int bq24261_set_cc(struct bq24261_charger *chip, int cc)
 				BQ24261_LOW_CHG_MASK, reg_val);
 	}
 
-	/* Return from here since the cc setting will be done
-	   by platform specific hardware */
-	if (chip->pdata->set_cc)
-		return ret;
+	/* cc setting will be done by platform specific hardware
+	 * but, in case of error-conditions or if the setting fails,
+	 * the following will be a fail-safe mechanism.
+	 */
 
 	bq24261_cc_to_reg(cc, &reg_val);
 
@@ -705,6 +724,7 @@ static inline int bq24261_set_cv(struct bq24261_charger *chip, int cv)
 	u8 reg_val;
 	u8 vindpm_val = 0x0;
 
+	dev_dbg(&chip->client->dev, "%s=%d\n", __func__, cv);
 	/*
 	* Setting VINDPM value as per the battery voltage
 	*  VBatt           Vindpm     Register Setting
@@ -735,8 +755,12 @@ static inline int bq24261_set_cv(struct bq24261_charger *chip, int cv)
 	}
 
 	if (chip->pdata->set_cv)
-		return chip->pdata->set_cv(cv);
+		chip->pdata->set_cv(cv);
 
+	/* cv setting will be done by platform specific hardware
+	 * but, in case of error-conditions or if the setting fails,
+	 * the following will be a fail-safe mechanism.
+	 */
 	bq24261_cv_to_reg(cv, &reg_val);
 
 	return bq24261_read_modify_reg(chip->client, BQ24261_BATT_VOL_CTRL_ADDR,
@@ -747,6 +771,7 @@ static inline int bq24261_set_inlmt(struct bq24261_charger *chip, int inlmt)
 {
 	u8 reg_val;
 
+	dev_dbg(&chip->client->dev, "%s=%d\n", __func__, inlmt);
 	if (chip->pdata->set_inlmt)
 		return chip->pdata->set_inlmt(inlmt);
 
@@ -969,6 +994,17 @@ static int bq24261_usb_set_property(struct power_supply *psy,
 		chip->online = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_ENABLE_CHARGING:
+
+		/* Reset charging to avoid issues of not starting
+		 * charging when we're recovering from fault-cases.
+		 */
+		if (val->intval) {
+			dev_info(&chip->client->dev, "Charging reset");
+			ret = bq24261_enable_charging(chip, false);
+			if (ret)
+				dev_err(&chip->client->dev,
+					"Error(%d) in charging reset", ret);
+		}
 
 		ret = bq24261_enable_charging(chip, val->intval);
 

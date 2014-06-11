@@ -669,6 +669,27 @@ static void pmic_debugfs_exit(void)
 }
 #endif
 
+static void pmic_get_bat_zone(int *bat_zone)
+{
+	u8 data = 0;
+	u16 addr = 0;
+	int vendor_id, ret;
+
+	vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+	if (vendor_id == BASINCOVE_VENDORID)
+		addr = THRMBATZONE_ADDR_BC;
+	else if (vendor_id == SHADYCOVE_VENDORID)
+		addr = THRMBATZONE_ADDR_SC;
+
+	ret = intel_scu_ipc_ioread8(addr, &data);
+	if (ret) {
+		dev_err(chc.dev, "Error:%d in reading battery zone\n", ret);
+		return;
+	}
+
+	*bat_zone = (data & THRMBATZONE_MASK);
+}
+
 static void pmic_bat_zone_changed(void)
 {
 	int retval;
@@ -678,21 +699,9 @@ static void pmic_bat_zone_changed(void)
 	struct power_supply *psy_bat;
 	int vendor_id;
 
-	vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
-	if (vendor_id == BASINCOVE_VENDORID)
-		addr = THRMBATZONE_ADDR_BC;
-	else if (vendor_id == SHADYCOVE_VENDORID)
-		addr = THRMBATZONE_ADDR_SC;
-
-	retval = intel_scu_ipc_ioread8(addr, &data);
-	if (retval) {
-		dev_err(chc.dev, "Error in reading battery zone\n");
-		return;
-	}
-
-	cur_zone = data & THRMBATZONE_MASK;
+	pmic_get_bat_zone(&cur_zone);
 	dev_info(chc.dev, "Battery Zone changed. Current zone is %d\n",
-			(data & THRMBATZONE_MASK));
+			cur_zone);
 
 	/* if current zone is the top and bottom zones then report OVERHEAT
 	 */
@@ -896,8 +905,11 @@ int pmic_set_cc(int new_cc)
 	int temp_mon_ranges;
 	int new_cc1;
 	int ret;
-	int i;
+	int i, cur_zone;
 	u8 reg_val = 0;
+
+	pmic_get_bat_zone(&cur_zone);
+	dev_info(chc.dev, "%s: Battery Zone:%d\n", __func__, cur_zone);
 
 	/* No need to write PMIC if CC = 0 */
 	if (!new_cc)
@@ -935,8 +947,11 @@ int pmic_set_cv(int new_cv)
 	int temp_mon_ranges;
 	int new_cv1;
 	int ret;
-	int i;
+	int i, cur_zone;
 	u8 reg_val = 0;
+
+	pmic_get_bat_zone(&cur_zone);
+	dev_info(chc.dev, "%s: Battery Zone:%d\n", __func__, cur_zone);
 
 	/* No need to write PMIC if CV = 0 */
 	if (!new_cv)
