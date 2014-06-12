@@ -16,7 +16,7 @@ static void tp2e_probe_generic_event(void *cb_data,
 				     char *submitter_name, char *ev_name,
 				     char *data0, char *data1, char *data2,
 				     char *data3, char *data4, char *data5,
-				     char *filelist)
+				     char *filelist, unsigned int add_steps)
 {
 	enum ct_ev_type ev_type;
 
@@ -38,7 +38,7 @@ static void tp2e_probe_generic_event(void *cb_data,
 		break;
 	}
 	kct_log(ev_type, submitter_name, ev_name, 0, data0, data1, data2,
-		data3, data4, data5, filelist);
+		data3, data4, data5, filelist, add_steps);
 }
 
 #endif /* _TP2E_PROBE_GENERIC_EVENT_H_ */
