@@ -672,7 +672,9 @@ static int dlp_flash_ctx_cleanup(struct dlp_channel *ch_ctx)
 	/* empty rx list*/
 	while (!list_empty(&flash_ctx->rx_msgs)) {
 		msg = dlp_boot_rx_dequeue(ch_ctx);
-		dlp_pdu_free(msg, msg->channel);
+		if (msg != NULL) {
+			dlp_pdu_free(msg, msg->channel);
+		}
 	}
 
 	/* Unregister/Delete char device & class */
