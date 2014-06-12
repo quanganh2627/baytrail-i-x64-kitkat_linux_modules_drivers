@@ -34,7 +34,7 @@
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
 
-#define RECEIVE_ROOM 65536
+#define RECEIVE_ROOM 4096
 
 
 /*------ Forward Declaration-----*/
@@ -43,9 +43,10 @@ static int lbf_tty_write(struct tty_struct *tty, const unsigned char *data,
 				int count);
 static void lbf_enqueue(struct sk_buff *skb);
 static void bt_rfkill_set_power(unsigned long blocked);
-static void lbf_update_set_room(struct tty_struct *tty);
+static void lbf_update_set_room(struct tty_struct *tty, signed int cnt);
 static void lbf_ldisc_fw_download_complete(unsigned long);
 static int lbf_ldisc_fw_download_init(void);
+static unsigned int lbf_ldisc_get_read_cnt(void);
 
 static struct st_proto_s lbf_st_proto[6] = {
 		{ .chnl_id = INVALID, /* ACL */
@@ -101,7 +102,8 @@ struct lbf_uart {
 	wait_queue_t wait;
 	wait_queue_head_t read_wait;
 	struct mutex atomic_read_lock;
-	struct mutex tx_lock;
+	spinlock_t tx_lock;
+	spinlock_t tx_update_lock;
 	struct tty_struct *tty;
 	spinlock_t rx_lock;
 	struct sk_buff *rx_skb;
@@ -136,11 +138,11 @@ static void reset_buffer_flags(struct tty_struct *tty)
 	struct lbf_uart *lbf_ldisc;
 	pr_info("-> %s\n", __func__);
 	lbf_ldisc = tty->disc_data;
-	mutex_lock(&lbf_ldisc->tx_lock);
+	spin_lock(&lbf_ldisc->tx_lock);
 	lbf_ldisc->read_head = lbf_ldisc->read_cnt = lbf_ldisc->read_tail
 			= 0;
-	mutex_unlock(&lbf_ldisc->tx_lock);
-	lbf_update_set_room(tty);
+	spin_unlock(&lbf_ldisc->tx_lock);
+	lbf_update_set_room(tty, 0);
 	check_unthrottle(tty);
 
 }
@@ -281,7 +283,7 @@ static void lbf_ldisc_flush_buffer(struct tty_struct *tty)
 	unsigned long flags;
 	pr_info("-> %s\n", __func__);
 	reset_buffer_flags(tty);
-	lbf_update_set_room(tty);
+	lbf_update_set_room(tty, 0);
 
 	if (tty->link) {
 		spin_lock_irqsave(&tty->ctrl_lock, flags);
@@ -396,7 +398,9 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	spin_lock_init(&lbf_tx->lock);
 	mutex_init(&lbf_tx->tx_wakeup);
 	INIT_WORK(&lbf_tx->tx_wakeup_work, lbf_tx_wakeup_work);
-	mutex_init(&lbf_uart->tx_lock);
+	spin_lock_init(&lbf_uart->tx_lock);
+	spin_lock_init(&lbf_uart->tx_update_lock);
+
 	mutex_init(&lbf_tx->writelock);
 	mutex_init(&lbf_tx->fwdownloadlock);
 
@@ -540,30 +544,40 @@ static void st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 	else
 		pr_info("fm is NULL ");
 	} else if (chnl_id == LBF_BT) {
-		pr_info(" Added in buffer inside count %d readhead %d ", count
-			, lbf_uart->read_head);
+		pr_info(" Added in buffer inside count %d readhead %d read_cnt: %d\n", count
+			, lbf_uart->read_head, lbf_uart->read_cnt);
+		spin_lock(&lbf_uart->tx_lock);
 		i = min3((N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_cnt),
 				N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_head,
 				(int)lbf_uart->rx_skb->len);
+		spin_unlock(&lbf_uart->tx_lock);
 		memcpy(lbf_uart->read_buf + lbf_uart->read_head,
 			 &lbf_uart->rx_skb->data[0], i);
+		spin_lock(&lbf_uart->tx_lock);
 		lbf_uart->read_head =
 			(lbf_uart->read_head + i) & (N_INTEL_LDISC_BUF_SIZE-1);
 		lbf_uart->read_cnt += i;
+		spin_unlock(&lbf_uart->tx_lock);
 		count = count - i;
+		pr_info("count: %d, i:%d read_cnt:%d\n", count, i, lbf_uart->read_cnt);
 
 		if (unlikely(count)) {
-			pr_info(" Added in buffer inside count %d readhead %d"
+			pr_info(" Added in buffer inside count %d readhead %d\n"
 				, count , lbf_uart->read_head);
+			spin_lock(&lbf_uart->tx_lock);
 			i = min3((N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_cnt),
 				(N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_head),
 				(int)count);
+			spin_unlock(&lbf_uart->tx_lock);
 			memcpy(lbf_uart->read_buf + lbf_uart->read_head,
 			&lbf_uart->rx_skb->data[lbf_uart->rx_skb->len - count],
 				i);
+			spin_lock(&lbf_uart->tx_lock);
 			lbf_uart->read_head =
 			(lbf_uart->read_head + i) & (N_INTEL_LDISC_BUF_SIZE-1);
 			lbf_uart->read_cnt += i;
+			spin_unlock(&lbf_uart->tx_lock);
+			pr_info("count: %d , i:%d read_cnt:%d\n", count, i, lbf_uart->read_cnt);
 		}
 	}
 
@@ -675,15 +689,21 @@ static inline int st_check_data_len(struct lbf_uart *lbf_uart, int len)
  * "instant".
  */
 
-static void lbf_update_set_room(struct tty_struct *tty)
+static void lbf_update_set_room(struct tty_struct *tty, signed int cnt)
 {
 	struct lbf_uart *lbf_uart = (struct lbf_uart *) tty->disc_data;
-	int left = N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_cnt - 1;
+
+	spin_lock(&lbf_uart->tx_update_lock);
+	int left = tty->receive_room + cnt;
 	int old_left;
 
+	if (left < 0)
+		tty->receive_room = 0;
 	old_left = tty->receive_room;
 	tty->receive_room = left;
+	spin_unlock(&lbf_uart->tx_update_lock);
 
+	pr_info("-> %s, tty_receive:%d cnt: %d\n", __func__, tty->receive_room, cnt);
 	if (left && !old_left) {
 		WARN_RATELIMIT(tty->port->itty == NULL,
 				"scheduling with invalid itty\n");
@@ -728,12 +748,13 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 	unsigned short payload_len = 0;
 	int len = 0, type = 0, i = 0;
 	unsigned char *plen;
+	int rcv_count = count;
 	struct lbf_uart *lbf_uart = (struct lbf_uart *) tty->disc_data;
 	unsigned long flags;
 
 	pr_info("-> %s\n", __func__);
-	print_hex_dump(KERN_DEBUG, ">in>", DUMP_PREFIX_NONE, 16, 1, cp, count,
-			0);
+	/*print_hex_dump(KERN_DEBUG, ">in>", DUMP_PREFIX_NONE, 16, 1, cp, count,
+			0);*/
 	ptr = (unsigned char *) cp;
 	if (unlikely(ptr == NULL) || unlikely(lbf_uart == NULL)) {
 		pr_info(" received null from TTY ");
@@ -847,7 +868,10 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 	} /* end of while*/
 
 	spin_unlock_irqrestore(&lbf_uart->rx_lock, flags);
-	lbf_update_set_room(tty);
+
+	lbf_update_set_room(tty, (-1)*rcv_count);
+
+
 
 	if (waitqueue_active(&lbf_uart->read_wait)) {
 		pr_info("-> %s waitqueue_active\n", __func__);
@@ -912,23 +936,32 @@ static int copy_from_read_buf(struct tty_struct *tty,
 	int retval = 0;
 	size_t n;
 	struct lbf_uart *lbf_ldisc = (struct lbf_uart *)tty->disc_data;
-	mutex_lock(&lbf_ldisc->tx_lock);
+	spin_lock(&lbf_ldisc->tx_lock);
 	n = min3(lbf_ldisc->read_cnt,
 		 (N_INTEL_LDISC_BUF_SIZE - lbf_ldisc->read_tail), (int)*nr);
-	mutex_unlock(&lbf_ldisc->tx_lock);
+	spin_unlock(&lbf_ldisc->tx_lock);
 	if (n) {
 		retval =
-		copy_to_user(*b, &lbf_ldisc->read_buf[lbf_ldisc->read_tail],
-			n);
+		copy_to_user(*b, &lbf_ldisc->read_buf[lbf_ldisc->read_tail], n);
 		n -= retval;
-		mutex_lock(&lbf_ldisc->tx_lock);
+		spin_lock(&lbf_ldisc->tx_lock);;
 		lbf_ldisc->read_tail =
 		(lbf_ldisc->read_tail + n) & (N_INTEL_LDISC_BUF_SIZE-1);
 		lbf_ldisc->read_cnt -= n;
-		mutex_unlock(&lbf_ldisc->tx_lock);
+		spin_unlock(&lbf_ldisc->tx_lock);
 		*b += n;
 	}
 	return n;
+}
+
+static unsigned int lbf_ldisc_get_read_cnt(void)
+{
+	int read_cnt = 0;
+	struct lbf_uart *lbf_ldisc = (struct lbf_uart *)lbf_tx->tty->disc_data;
+	spin_lock(&lbf_ldisc->tx_lock);
+	read_cnt = lbf_ldisc->read_cnt;
+	spin_unlock(&lbf_ldisc->tx_lock);
+	return read_cnt;
 }
 
 /* lbf_ldisc_read()
@@ -956,7 +989,7 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 	pr_info("-> %s\n", __func__);
 	init_waitqueue_entry(&lbf_uart->wait, current);
 
-	if (!lbf_uart->read_cnt) {
+	if (!lbf_ldisc_get_read_cnt()) {
 		if (file->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 		else {
@@ -968,11 +1001,9 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 			}
 	}
 
-	lbf_update_set_room(tty);
-
 	add_wait_queue(&lbf_uart->read_wait, &lbf_uart->wait);
 	while (nr) {
-		if (lbf_uart->read_cnt > 0) {
+		if (lbf_ldisc_get_read_cnt() > 0) {
 			int copied;
 			__set_current_state(TASK_RUNNING);
 			/* The copy function takes the read lock and handles
@@ -983,7 +1014,6 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 				retval = 0;
 				if (lbf_uart->read_cnt <=
 					TTY_THRESHOLD_UNTHROTTLE) {
-					lbf_update_set_room(tty);
 					check_unthrottle(tty);
 				}
 			break;
@@ -1002,10 +1032,16 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 	__set_current_state(TASK_RUNNING);
 	remove_wait_queue(&lbf_uart->read_wait, &lbf_uart->wait);
 
+
+
 	size = b - buf;
 	if (size)
 		retval = size;
-	lbf_update_set_room(tty);
+
+	lbf_update_set_room(tty, retval);
+
+	/*print_hex_dump(KERN_DEBUG, ">user>", DUMP_PREFIX_NONE, 16, 1, buf, retval,
+			0);*/
 	pr_info("<- %s\n", __func__);
 	return retval;
 }
@@ -1031,8 +1067,8 @@ static ssize_t lbf_ldisc_write(struct tty_struct *tty, struct file *file,
 
 	pr_info("-> %s\n", __func__);
 
-	/*print_hex_dump(KERN_DEBUG, "<out<", DUMP_PREFIX_NONE, 16, 1, data,
-			count, 0);*/
+	print_hex_dump(KERN_DEBUG, "<BT<", DUMP_PREFIX_NONE, 16, 1, data,
+			count, 0);
 
 	if (!skb)
 		return -ENOMEM;
