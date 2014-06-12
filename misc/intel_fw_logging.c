@@ -1634,7 +1634,7 @@ static irqreturn_t recoverable_faberror_thread(int irq, void *ignored)
 					"Fabric", "Recov",
 					sData0, sData1, sData2,
 					sData3, sData4, sData5,
-					"/proc/ipanic_fabric_recv_err");
+					"/proc/ipanic_fabric_recv_err", 0);
 #else
 		pr_info("SCU IRQ: TP2E not enabled\n");
 #endif
