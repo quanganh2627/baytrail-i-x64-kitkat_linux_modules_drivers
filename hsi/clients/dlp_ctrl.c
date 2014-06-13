@@ -515,19 +515,33 @@ static void dlp_ctrl_complete_rx(struct hsi_msg *msg)
 		spin_lock_irqsave(&ctrl_ctx->open_lock, flags);
 		state = dlp_ctrl_get_channel_state(hsi_channel);
 		if ((state != DLP_CH_STATE_OPENING) && (state != DLP_CH_STATE_OPENED)) {
-			struct dlp_hsi_channel *hsi_ch;
-
-			hsi_ch = &dlp_drv.channels_hsi[hsi_channel];
-			memcpy(&hsi_ch->open_conn, &params, sizeof(params));
-			spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
-
-			response = -1;
-
 			pr_debug(DRVNAME ": HSI CH%d OPEN_CONN received (postponed) when state is %d\n",
 					params.channel, state);
-			goto push_rx;
-		} else
-			spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
+			/* Only CHANEL_TRACE can support this */
+			if (ch_ctx->ch_id == DLP_CHANNEL_TRACE) {
+				struct dlp_hsi_channel *hsi_ch;
+
+				hsi_ch = &dlp_drv.channels_hsi[hsi_channel];
+				memcpy(&hsi_ch->open_conn, &params, sizeof(params));
+				spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
+
+				response = -1;
+				goto push_rx;
+			} else {
+				/* OPEN_CONN => NACK (Unexpected open when closed) */
+				spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
+
+				pr_debug(DRVNAME ": Not allowed for this channel => answer NAK\n");
+				response = DLP_CMD_NACK;
+				/* Set the response params */
+				tx_params.data1 = params.id;
+				tx_params.data2 = 0;
+				struct dlp_command_params *params_pt = &params;
+				tx_params.data3 = CMD_ID_ERR(params_pt, EDLP_ERR_CH_ALREADY_CLOSED);
+				break;
+			}
+		}
+		spin_unlock_irqrestore(&ctrl_ctx->open_lock, flags);
 
 		pr_debug(DRVNAME ": HSI CH%d OPEN_CONN received (size: %d)\n",
 					params.channel,
