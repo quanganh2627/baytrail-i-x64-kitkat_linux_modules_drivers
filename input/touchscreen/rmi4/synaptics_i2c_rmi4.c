@@ -624,6 +624,9 @@ static irqreturn_t rmi4_irq_thread(int irq, void *data)
 						rfi->ops->irq_handler)
 			rfi->ops->irq_handler(pdata, rfi);
 	}
+#ifdef CONFIG_DEBUG_FS
+	pdata->tc->irq++;
+#endif
 	return IRQ_HANDLED;
 }
 
@@ -1468,6 +1471,9 @@ static int do_init_reset(struct rmi4_data *pdata)
 		return retval;
 	}
 	pdata->touch_type = retval;
+#ifdef CONFIG_DEBUG_FS
+	pdata->tc->reset++;
+#endif
 
 	return 0;
 }
@@ -1613,6 +1619,10 @@ static int rmi4_i2c_query_device(struct rmi4_data *pdata)
 			goto failed;
 		}
 	}
+#ifdef CONFIG_DEBUG_FS
+	pdata->tc->present++;
+	pdata->tc->correct++;
+#endif
 	return 0;
 failed:
 	return retval;
@@ -1667,6 +1677,9 @@ static int do_sw_reset(struct rmi4_data *pdata)
 		}
 	}
 
+#ifdef CONFIG_DEBUG_FS
+	pdata->tc->reset++;
+#endif
 	return 0;
 }
 
@@ -2253,6 +2266,119 @@ static const struct file_operations rmi4_debugfs_raw_senor_data_fops = {
 	.release		= single_release,
 };
 
+static int rmi4_debugfs_coverage_show(struct seq_file *seq, void *unused)
+{
+	return 0;
+}
+
+static ssize_t rmi4_debugfs_coverage_read(struct file *file, char __user *usrbuf,
+		size_t count, loff_t *ppos)
+{
+	struct seq_file *seq;
+	struct rmi4_data *rmi4;
+	struct device *dev;
+	char buf[1024];
+	size_t size;
+
+	if (*ppos > 0)
+		return 0;
+
+	seq = (struct seq_file *)file->private_data;
+	if (!seq) {
+		pr_err("rmi4_ts:%s Failed to get seq_file\n", __func__);
+		return -EFAULT;
+	}
+
+	rmi4 = (struct rmi4_data *)seq->private;
+	if (!rmi4) {
+		pr_err("rmi4_ts:%s Failed to get private data\n", __func__);
+		return -EFAULT;
+	}
+
+	dev = &rmi4->i2c_client->dev;
+	size = 0;
+
+	size = sprintf(buf, "%s.present %d\n", DRIVER_NAME, rmi4->tc->present);
+	size += sprintf(buf + size, "%s.correct %d\n", DRIVER_NAME, rmi4->tc->correct);
+	size += sprintf(buf + size, "%s.reset %d\n", DRIVER_NAME, rmi4->tc->reset);
+	size += sprintf(buf + size, "%s.irq %d\n", DRIVER_NAME, rmi4->tc->irq);
+
+	if (copy_to_user(usrbuf, buf, size)) {
+		dev_err(dev, "%s: copy_to_user failed\n", __func__);
+		return -EFAULT;
+	}
+
+	*ppos = *ppos + size;
+	return size;
+}
+
+static int rmi4_debugfs_coverage_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, rmi4_debugfs_coverage_show,
+			inode->i_private);
+}
+
+static const struct file_operations rmi4_debugfs_coverage_fops = {
+	.owner		= THIS_MODULE,
+	.open		= rmi4_debugfs_coverage_open,
+	.read		= rmi4_debugfs_coverage_read,
+	.release	= single_release,
+};
+
+static ssize_t rmi4_debugfs_exercise_coverage_write(struct file *file,
+		const char __user *buf, size_t count, loff_t *ppos)
+{
+	struct seq_file *seq;
+	struct rmi4_data *rmi4;
+	int gpio;
+
+	if (count > sizeof(buf) || count > 2)
+		return -EINVAL;
+
+	if (buf[0] != '1')
+		return -EFAULT;
+
+	seq = (struct seq_file *)file->private_data;
+	if (!seq) {
+		pr_err("rmi4_ts:%s Failed to get seq_file\n", __func__);
+		return -EFAULT;
+	}
+
+	rmi4 = (struct rmi4_data *)seq->private;
+	if (!rmi4) {
+		pr_err("rmi4_ts: Failed to get private data\n");
+		return -EFAULT;
+	}
+
+	/* Reset the touch controller using the gpio */
+	gpio = rmi4->board->rst_gpio_number;
+
+	gpio_set_value(gpio, 0);
+	msleep(RMI4_RESET_DELAY);
+	gpio_set_value(gpio, 1);
+	/* Longer delay is needed here */
+	msleep(RMI4_RESET_DELAY * 6);
+
+	return count;
+}
+static int rmi4_debugfs_exercise_coverage_show(struct seq_file *seq, void *unused)
+{
+	return 0;
+}
+
+static int rmi4_debugfs_exercise_coverage_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, rmi4_debugfs_exercise_coverage_show,
+			inode->i_private);
+}
+
+static const struct file_operations rmi4_debugfs_exercise_coverage_fops = {
+	.owner		= THIS_MODULE,
+	.open		= rmi4_debugfs_exercise_coverage_open,
+	.write		= rmi4_debugfs_exercise_coverage_write,
+	.release	= single_release,
+};
+
 static void rmi4_debugfs_remove(void)
 {
 	debugfs_remove_recursive(rmi4_debugfs_root);
@@ -2273,9 +2399,24 @@ static int rmi4_debugfs_create(struct rmi4_data *rmi4_data)
 		return -ENOMEM;
 	} else {
 		entry = debugfs_create_file("raw_sensor_data",
-				S_IRUGO | S_IWUSR, rmi4_debugfs_root,
+				S_IRUGO, rmi4_debugfs_root,
 				(void *)rmi4_data,
 				&rmi4_debugfs_raw_senor_data_fops);
+
+		if (!entry)
+			goto err_dbgfs;
+
+		entry = debugfs_create_file("coverage", S_IRUGO,
+				rmi4_debugfs_root, (void *)rmi4_data,
+				&rmi4_debugfs_coverage_fops);
+
+		if (!entry)
+			goto err_dbgfs;
+
+		entry = debugfs_create_file("exercise",
+				S_IWUSR,
+				rmi4_debugfs_root, (void *)rmi4_data,
+				&rmi4_debugfs_exercise_coverage_fops);
 
 		if (!entry)
 			goto err_dbgfs;
@@ -2323,7 +2464,15 @@ static int rmi4_probe(struct i2c_client *client,
 		dev_err(&client->dev, "%s: no memory allocated\n", __func__);
 		return -ENOMEM;
 	}
-
+#ifdef CONFIG_DEBUG_FS
+	rmi4_data->tc = kzalloc(sizeof(struct rmi4_test_coverage), GFP_KERNEL);
+	if (!rmi4_data->tc) {
+		dev_err(&client->dev,
+			"%s: Couldn't allocate memory for test coverage\n",
+			__func__);
+		goto err_rmi4_tc;
+	}
+#endif
 	rmi4_data->input_ts_dev = input_allocate_device();
 	if (rmi4_data->input_ts_dev == NULL) {
 		dev_err(&client->dev, "ts input device alloc failed\n");
@@ -2507,6 +2656,10 @@ err_regulator:
 err_input_key:
 	if (rmi4_data->input_ts_dev)
 		input_free_device(rmi4_data->input_ts_dev);
+#ifdef CONFIG_DEBUG_FS
+err_rmi4_tc:
+	kfree(rmi4_data->tc);
+#endif
 err_input_ts:
 	kfree(rmi4_data);
 

@@ -197,6 +197,7 @@ struct rmi4_data {
 #ifdef CONFIG_DEBUG_FS
 	u8 num_rx;
 	u8 num_tx;
+	struct rmi4_test_coverage *tc;
 #endif
 };
 
@@ -269,6 +270,14 @@ struct rmi4_ana_data {
 	u8 *buffer;
 	int status;
 	int size;
+};
+
+struct rmi4_test_coverage {
+/*	char fw_version; */
+	u32 present;
+	u32 correct;
+	u32 reset;
+	u32 irq;
 };
 #endif
 
