@@ -1144,6 +1144,7 @@ i2c_dw_xfer_msg(struct dw_i2c_dev *dev)
 	u32 buf_len = dev->tx_buf_len;
 	u8 *buf = dev->tx_buf;
 	unsigned long flags;
+	bool need_restart = false;
 
 	intr_mask = DW_IC_INTR_DEFAULT_MASK;
 
@@ -1182,6 +1183,14 @@ i2c_dw_xfer_msg(struct dw_i2c_dev *dev)
 			/* new i2c_msg */
 			buf = msgs[dev->msg_write_idx].buf;
 			buf_len = msgs[dev->msg_write_idx].len;
+
+			/* If both IC_EMPTYFIFO_HOLD_MASTER_EN and
+			 * IC_RESTART_EN are set, we must manually
+			 * set restart bit between messages.
+			 */
+			if ((dev->master_cfg & DW_IC_CON_RESTART_EN) &&
+					(dev->msg_write_idx > 0))
+				need_restart = true;
 		}
 
 		tx_limit = dev->tx_fifo_depth - dw_readl(dev, DW_IC_TXFLR);
@@ -1191,6 +1200,12 @@ i2c_dw_xfer_msg(struct dw_i2c_dev *dev)
 			cmd = (dev->enable_stop && buf_len == 1
 				&& dev->msg_write_idx == dev->msgs_num - 1) ?
 				DW_IC_CMD_STOP : 0;
+
+			if (need_restart) {
+				cmd |= BIT(10);
+				need_restart = false;
+			}
+
 			if (msgs[dev->msg_write_idx].flags & I2C_M_RD) {
 				dw_writel(dev, cmd | 0x100, DW_IC_DATA_CMD);
 				rx_limit--;
