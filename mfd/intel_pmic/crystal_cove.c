@@ -84,6 +84,16 @@ static struct resource bcu_resources[] = {
 		.flags = IORESOURCE_IRQ,
 	},
 };
+#ifdef CONFIG_MPS2617B_CHARGER
+static struct resource chgr_resources[] = {
+	{
+		.name  = "CHGR",
+		.start = CHGR_IRQ,
+		.end   = CHGR_IRQ,
+		.flags = IORESOURCE_IRQ,
+	},
+};
+#endif
 static struct mfd_cell crystal_cove_dev[] = {
 	{
 		.name = "crystal_cove_pwrsrc",
@@ -115,6 +125,15 @@ static struct mfd_cell crystal_cove_dev[] = {
 		.num_resources = ARRAY_SIZE(gpio_resources),
 		.resources = gpio_resources,
 	},
+#ifdef CONFIG_MPS2617B_CHARGER
+	{
+		.name = "crystal_cove_chgr",
+		.id = 0,
+		.num_resources = ARRAY_SIZE(chgr_resources),
+		.resources = chgr_resources,
+
+	},
+#endif
 	{NULL, },
 };
 
