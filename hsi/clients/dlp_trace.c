@@ -78,6 +78,7 @@ struct dlp_trace_ctx {
 	unsigned long proc_byte;
 	unsigned int dropped_pkt;
 	unsigned long dropped_byte;
+	unsigned int bad_sig_pkt;
 	atomic_t rx_pdu_count;
 };
 
@@ -177,15 +178,16 @@ static void dlp_trace_complete_rx(struct hsi_msg *msg)
 				msg->status);
 		goto push_again;
 	} else if (!DLP_HEADER_VALID_SIGNATURE(header[0])) {
-		pr_err("\n" DRVNAME ": Invalid PDU signature 0x%x\n",
+		if (!trace_ctx->bad_sig_pkt) {
+			pr_err("\n" DRVNAME ": Invalid PDU signature 0x%x\n",
 				header[0]);
 
-		/* Dump the first 64 bytes */
-		print_hex_dump(KERN_DEBUG,
+			/* Dump the first 64 bytes */
+			print_hex_dump(KERN_DEBUG,
 				DRVNAME"_LOG", DUMP_PREFIX_OFFSET,
-				16, 4,
-				header, 64, 1);
-
+				16, 4, header, 64, 1);
+		}
+		trace_ctx->bad_sig_pkt += 1;
 		goto push_again;
 	}
 
@@ -274,6 +276,7 @@ static int dlp_trace_dev_open(struct inode *inode, struct file *filp)
 	trace_ctx->proc_pkt = trace_ctx->proc_byte = 0;
 	trace_ctx->dropped_pkt = 0;
 	trace_ctx->dropped_byte = 0;
+	trace_ctx->bad_sig_pkt = 0;
 	trace_ctx->rx_msgs_count_max = 0;
 
 	/* remove old data from wait queue */
@@ -716,6 +719,7 @@ static void dlp_trace_dump_channel_state(struct dlp_channel *ch_ctx, struct seq_
 	seq_printf(m, "   proc_net    : %lu Byte\n", trace_ctx->proc_byte);
 	seq_printf(m, "   drop_pkt    : %d\n", trace_ctx->dropped_pkt);
 	seq_printf(m, "   drop_net    : %lu Byte\n", trace_ctx->dropped_byte);
+	seq_printf(m, "   bad_sig_pkt : %d\n", trace_ctx->bad_sig_pkt);
 	seq_printf(m, "   pdu_size    : %d\n", ch_ctx->rx.pdu_size);
 
 	seq_printf(m, "   Waiting PDUs:\n");
