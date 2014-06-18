@@ -490,7 +490,8 @@ static ssize_t dlp_flash_dev_write(struct file *filp,
 	ret = hsi_async(tx_msg->cl, tx_msg);
 	if (ret) {
 		pr_err(DRVNAME ": hsi_async(TX) failed (ret:%d)\n", ret);
-		ret = -EIO;
+		if (ret != -EACCES)
+			ret = -EIO;
 		goto free_tx;
 	}
 
