@@ -475,47 +475,36 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	long ret = 0;
 	unsigned int mdm_state;
 	unsigned int param;
+	struct mdm_ctrl_cfg cfg;
 
 	pr_info(DRVNAME ": ioctl request 0x%x received on %d\n", cmd, minor);
 
 	if (!mcd_is_initialized(mdm)) {
-		switch (cmd) {
-		case MDM_CTRL_SET_BOARD:
-			ret = copy_from_user(&param, (void *)arg, sizeof(param));
+		if (cmd == MDM_CTRL_SET_CFG) {
+			ret = copy_from_user(&cfg, (void *)arg, sizeof(cfg));
 			if (ret < 0) {
 				pr_info(DRVNAME ": copy from user failed ret = %ld\n",
 					ret);
 				goto out;
 			}
-			mdm->pdata->board_type = param;
+
+			/* The modem family must be set first */
+			mcd_set_mdm(mdm->pdata, cfg.type);
+			mdm->pdata->board_type = cfg.board;
+
 			mdm_ctrl_set_mdm_cpu(mdm);
 			mcd_finalize_cpu_data(mdm->pdata);
-			break;
 
-		case MDM_CTRL_SET_MDM:
-			ret = copy_from_user(&param, (void *)arg, sizeof(param));
-			if (ret < 0) {
-				pr_info(DRVNAME ": copy from user failed ret = %ld\n",
-					ret);
-				goto out;
-			}
-			pr_info(DRVNAME ": modem family: %d", param);
-			mcd_set_mdm(mdm->pdata, param);
-			break;
-
-		default:
+			ret = mcd_init(mdm);
+			if (!ret)
+				pr_info(DRVNAME ": modem (board: %d, family: %d)", cfg.board, cfg.type);
+			else
+				mdm->is_mdm_ctrl_disabled = true;
+		} else {
 			pr_err(DRVNAME ": Provide modem and board type first");
 			ret = -EINVAL;
-			goto out;
-		}
-		if (mcd_is_initialized(mdm)) {
-			if (mcd_init(mdm)) {
-				mdm->is_mdm_ctrl_disabled = true;
-				ret = -EINVAL;
-			}
 		}
 		goto out;
-
 	}
 
 	mdm_state = mdm_ctrl_get_state(mdm);
@@ -649,6 +638,11 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 
 		pr_info(DRVNAME ": states polled = 0x%x\n",
 			mdm->polled_states);
+		break;
+
+	case MDM_CTRL_SET_CFG:
+		pr_info(DRVNAME ": already configured\n");
+		ret = -EBUSY;
 		break;
 
 	default:
