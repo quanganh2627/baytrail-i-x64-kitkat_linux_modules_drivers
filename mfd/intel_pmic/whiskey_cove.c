@@ -25,6 +25,7 @@
 #include <asm/intel_vlv2.h>
 #include <linux/version.h>
 #include "./pmic.h"
+#include <linux/regulator/intel_whiskey_cove_pmic.h>
 
 #define WHISKEY_COVE_IRQ_NUM	17
 
@@ -204,6 +205,18 @@ static struct mfd_cell whiskey_cove_dev[] = {
 	{
 		.name = "sw_fuel_gauge_ha",
 		.id = 0,
+		.num_resources = 0,
+		.resources = NULL,
+	},
+	{
+		.name = "wcove_regulator",
+		.id = WCOVE_ID_V3P3SD + 1,
+		.num_resources = 0,
+		.resources = NULL,
+	},
+	{
+		.name = "wcove_regulator",
+		.id = WCOVE_ID_VSDIO + 1,
 		.num_resources = 0,
 		.resources = NULL,
 	},
