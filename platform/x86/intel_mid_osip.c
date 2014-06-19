@@ -228,6 +228,29 @@ bd_put:
 	return 0;
 }
 
+/* find OSII index for a given OS attribute */
+
+static int get_osii_index_cb(struct OSIP_header *osip, void *data)
+{
+	int attr = *(int *)data;
+	int i;
+
+	*(int *)data = 0;
+	for (i = 0; i < osip->num_pointers; i++) {
+		if ((osip->desc[i].attribute & ~0x1) == (attr & ~0x1) && i < MAX_OSII) {
+			*(int *)data = i;
+			break;
+		}
+	}
+	return 0;
+}
+static int get_osii_index(int attribute)
+{
+	int data = attribute;
+
+	access_osip_record(get_osii_index_cb, (void *)(&data));
+	return data;
+}
 
 #ifdef CONFIG_INTEL_SCU_IPC
 /*
@@ -332,11 +355,11 @@ static int osip_reboot_target_call(const char *target, int id)
 		/* If device is already in RECOVERY we must be able */
 		/* to reboot in MOS if given target is MOS or POS.  */
 		pr_warn("[REBOOT] %s, restoring OSIP\n", __func__);
-		access_osip_record(osip_restore, (void *)0);
+		access_osip_record(osip_restore, (void *)(get_osii_index(SIGNED_MOS_ATTR)));
 	}
 	if (id == SIGNED_RECOVERY_ATTR && ret_ipc >= 0) {
 		pr_warn("[REBOOT] %s, invalidating osip\n", __func__);
-		access_osip_record(osip_invalidate, (void *)0);
+		access_osip_record(osip_invalidate, (void *)(get_osii_index(SIGNED_MOS_ATTR)));
 	}
 	return NOTIFY_DONE;
 }
@@ -587,30 +610,6 @@ static const struct file_operations osip_decode_fops = {
 	.llseek         = seq_lseek,
 	.release        = single_release,
 };
-
-/* find OSII index for a given OS attribute */
-
-static int get_osii_index_cb(struct OSIP_header *osip, void *data)
-{
-	int attr = *(int *)data;
-	int i;
-
-	*(int *)data = 0;
-	for (i = 0; i < osip->num_pointers; i++) {
-		if ((osip->desc[i].attribute & ~0x1) == (attr & ~0x1) && i < MAX_OSII) {
-			*(int *)data = i;
-			break;
-		}
-	}
-	return 0;
-}
-static int get_osii_index(int attribute)
-{
-	int data = attribute;
-
-	access_osip_record(get_osii_index_cb, (void *)(&data));
-	return data;
-}
 
 static struct dentry *osip_dir;
 static void create_debugfs_files(void)
