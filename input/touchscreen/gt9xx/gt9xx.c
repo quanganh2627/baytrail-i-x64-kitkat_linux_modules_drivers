@@ -49,6 +49,7 @@
 #endif
 
 static const char *goodix_ts_name = "goodix_ts";
+static const char *goodix_ts_phys = "input/ts";
 static struct workqueue_struct *goodix_wq;
 struct i2c_client * i2c_connect_client = NULL;
 u8 config[GTP_CONFIG_MAX_LENGTH + GTP_ADDR_LENGTH] =
@@ -1396,7 +1397,6 @@ static int gtp_request_irq(struct goodix_ts_data *ts)
 static int gtp_request_input_dev(struct goodix_ts_data *ts)
 {
 	int ret = -1;
-	s8 phys[32];
 	struct i2c_client *client = ts->client;
 
 #if GTP_HAVE_TOUCH_KEY
@@ -1450,9 +1450,8 @@ static int gtp_request_input_dev(struct goodix_ts_data *ts)
 	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_MT_TRACKING_ID, 0, 255, 0, 0);
 
-	sprintf(phys, "input/ts");
 	ts->input_dev->name = goodix_ts_name;
-	ts->input_dev->phys = phys;
+	ts->input_dev->phys = goodix_ts_phys;
 	ts->input_dev->id.bustype = BUS_I2C;
 	ts->input_dev->id.vendor = 0xDEAD;
 	ts->input_dev->id.product = 0xBEEF;
