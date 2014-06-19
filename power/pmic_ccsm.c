@@ -684,6 +684,8 @@ static void pmic_get_bat_zone(int *bat_zone)
 	ret = intel_scu_ipc_ioread8(addr, &data);
 	if (ret) {
 		dev_err(chc.dev, "Error:%d in reading battery zone\n", ret);
+		/* Return undetermined zone in case of IPC failure */
+		*bat_zone = PMIC_BZONE_UNKNOWN;
 		return;
 	}
 
@@ -707,6 +709,8 @@ static void pmic_bat_zone_changed(void)
 	 */
 	if ((cur_zone == PMIC_BZONE_LOW) || (cur_zone == PMIC_BZONE_HIGH))
 		chc.health = POWER_SUPPLY_HEALTH_OVERHEAT;
+	else if (cur_zone == PMIC_BZONE_UNKNOWN)
+		chc.health = POWER_SUPPLY_HEALTH_UNKNOWN;
 	else
 		chc.health = POWER_SUPPLY_HEALTH_GOOD;
 

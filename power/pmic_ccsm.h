@@ -53,6 +53,7 @@
 
 #define PMIC_BZONE_LOW 0
 #define PMIC_BZONE_HIGH 5
+#define PMIC_BZONE_UNKNOWN 7
 
 #define IRQLVL1_ADDR			0x01
 #define IRQLVL1_MASK_ADDR		0x0c
