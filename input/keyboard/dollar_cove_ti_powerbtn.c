@@ -37,22 +37,38 @@
 
 static struct input_dev *pb_input;
 static int pwrbtn_irq;
+static int force_trigger;
 
 static irqreturn_t pb_isr(int irq, void *dev_id)
 {
 	int ret;
+	int state;
 
 	ret = intel_mid_pmic_readb(DC_TI_SIRQ_REG);
 	if (ret < 0) {
-		pr_err("[%s] power button SIRQ REG read fail %s\n",
+		pr_err("[%s] power button SIRQ REG read fail %d\n",
 						pb_input->name, ret);
 		return IRQ_NONE;
 	}
 
-	input_event(pb_input, EV_KEY, KEY_POWER, !(ret & SIRQ_PWRBTN_REL));
-	input_sync(pb_input);
-	pr_info("[%s] power button %s\n", pb_input->name,
-			(ret & SIRQ_PWRBTN_REL) ? "released" : "pressed");
+	state = ret & SIRQ_PWRBTN_REL;
+
+	if (force_trigger && state) {
+		/* If we lost the press interrupt when short pressing
+		 * power button to wake up board from S3, simulate one.
+		 */
+		input_event(pb_input, EV_KEY, KEY_POWER, 1);
+		input_sync(pb_input);
+		input_event(pb_input, EV_KEY, KEY_POWER, 0);
+		input_sync(pb_input);
+	} else {
+		input_event(pb_input, EV_KEY, KEY_POWER, !state);
+		input_sync(pb_input);
+		pr_info("[%s] power button %s\n", pb_input->name, state ? "released" : "pressed");
+	}
+
+	if (force_trigger)
+		force_trigger = 0;
 
 	return IRQ_HANDLED;
 }
@@ -104,10 +120,21 @@ static int pb_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static int pb_resume_noirq(struct device *dev)
+{
+	force_trigger = 1;
+	return 0;
+}
+
+static const struct dev_pm_ops pb_pm_ops = {
+	.resume_noirq	= pb_resume_noirq,
+};
+
 static struct platform_driver pb_driver = {
 	.driver = {
 		.name = DRIVER_NAME,
 		.owner = THIS_MODULE,
+		.pm = &pb_pm_ops,
 	},
 	.probe	= pb_probe,
 	.remove	= pb_remove,
