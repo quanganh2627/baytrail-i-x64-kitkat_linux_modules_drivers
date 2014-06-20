@@ -43,6 +43,8 @@
 #include <linux/delay.h>
 #include <linux/mdm_ctrl_board.h>
 
+#include "mdm_util.h"
+
 /**
  * mdm_ctrl_configure_gpio - Configure GPIOs
  * @gpio: GPIO to configure
@@ -187,18 +189,15 @@ int cpu_init_gpio_ngff(void *data)
 	if (ret)
 		goto out;
 
-	/* Configure the WWAN_DISABLE gpio */
-	ret = mdm_ctrl_configure_gpio(cpu_data->gpio_wwan_disable, 1, 1,
-		"WWAN_DISABLE");
+	ret = mdm_ctrl_configure_gpio(GPIO_RST_USBHUB, 1, 1, "USB_HUB_reset");
+
+	pr_info(DRVNAME ": GPIO (rst_bbn: %d, rst_usb_hub: %d)\n",
+		cpu_data->gpio_rst_bbn,GPIO_RST_USBHUB);
 
 	if (ret)
 		goto free_ctx1;
 
-	pr_info(DRVNAME ": GPIO (rst_bbn: %d, wwan_disable: %d,)\n",
-		cpu_data->gpio_rst_bbn, cpu_data->gpio_wwan_disable);
-
 	return 0;
-
  free_ctx1:
 	gpio_free(cpu_data->gpio_rst_bbn);
  out:
@@ -209,8 +208,8 @@ int cpu_cleanup_gpio_ngff(void *data)
 {
 	struct mdm_ctrl_cpu_data *cpu_data = data;
 
-	gpio_free(cpu_data->gpio_rst_out);
-	gpio_free(cpu_data->gpio_wwan_disable);
+	gpio_free(cpu_data->gpio_rst_bbn);
+	gpio_free(GPIO_RST_USBHUB);
 
 	return 0;
 }

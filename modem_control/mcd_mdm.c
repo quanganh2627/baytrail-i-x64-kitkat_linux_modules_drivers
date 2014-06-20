@@ -136,11 +136,19 @@ int mcd_mdm_cleanup(void *data)
  *  @drv: Reference to the driver structure
  *
  *  - Set to HIGH the RESET_BB_N
+ *  - reset USB hub
  */
 int mcd_mdm_cold_boot_ngff(void *data, int rst, int pwr_on)
 {
+
 	/* Toggle the RESET_BB_N */
 	gpio_set_value(rst, 1);
+
+	/* reset the USB hub here*/
+	usleep_range(1000,1001);
+	gpio_set_value(GPIO_RST_USBHUB,0);
+	usleep_range(1000,1001);
+	gpio_set_value(GPIO_RST_USBHUB,1);
 
 	return 0;
 }

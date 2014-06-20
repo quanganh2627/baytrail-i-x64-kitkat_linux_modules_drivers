@@ -53,6 +53,7 @@
 #ifndef _MDM_UTIL_H
 #define _MDM_UTIL_H
 
+#define GPIO_RST_USBHUB 11
 /**
  * struct mdm_ctrl - Modem boot driver
  *
