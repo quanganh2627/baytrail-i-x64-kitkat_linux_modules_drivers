@@ -443,15 +443,19 @@ static void dlp_tty_complete_rx(struct hsi_msg *pdu)
 	dlp_hsi_controller_pop(xfer_ctx);
 	write_unlock_irqrestore(&xfer_ctx->lock, flags);
 
+	if (pdu->status != HSI_STATUS_ERROR)
+		dlp_fifo_wait_push(xfer_ctx, pdu);
+	else {
+		pr_debug(DRVNAME ": TTY: CH%d RX PDU ignored\n",
+						xfer_ctx->channel->ch_id);
+		goto recycle;
+	}
 #ifdef CONFIG_HSI_DLP_TTY_STATS
 	xfer_ctx->tty_stats.data_sz += pdu->actual_len;
 	xfer_ctx->tty_stats.pdus_cnt++;
 	if (!xfer_ctx->ctrl_len)
 		xfer_ctx->tty_stats.overflow_cnt++;
 #endif
-
-	dlp_fifo_wait_push(xfer_ctx, pdu);
-
 	queue_work(dlp_drv.rx_wq, &tty_ctx->do_tty_forward);
 	return;
 
