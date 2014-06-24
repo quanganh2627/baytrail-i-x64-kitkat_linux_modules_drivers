@@ -5,11 +5,11 @@
  *
  * Copyright (C) 2012 Alexandra Chin <alexandra.chin@tw.synaptics.com>
  * Copyright (C) 2012 Scott Lin <scott.lin@tw.synaptics.com>
- * Copyright (C) 2014 Leo Yan <leo.yan@intel.com>
  *
  * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -24,15 +24,10 @@
 #include <linux/delay.h>
 #include <linux/input.h>
 #include <linux/gpio.h>
-#include <linux/acpi.h>
-#include <linux/acpi_gpio.h>
 #include <linux/types.h>
 #include <linux/platform_device.h>
 #include <linux/input/synaptics_dsx.h>
 #include "synaptics_dsx_core.h"
-
-#define SYNP_S7300_BYTCR_ID	"S7300"
-#define SYNP_S7300_CHTCR_ID	"SYNP1000"
 
 #define SYN_I2C_RETRY_TIMES 10
 
@@ -68,20 +63,6 @@
 
 #define FINGER_MODE 0x00
 #define RMI_MODE 0x02
-
-#define DSX_HID_DEVICE_DESCRIPTOR_ADDR 0x0020
-#define HID_WRITE_CMD_LEN 2
-#define HID_READ_CMD_LEN 4
-#define MASK_BLOB_SIZE 0x03
-#define GPIO_MAX_RETRY 10
-
-#define S7300_GPIO_DEF -1
-#define S7300_IRQ_GPIO 133
-#define S7300_POWER_DELAY_MS 100
-#define S7300_RESET_DELAY_MS 160
-#define S7300_RESET_ACTIVE_MS 20
-#define S7300_BYTE_DELAY_US 20
-#define S7300_BLOCK_DELAY_US 20
 
 struct hid_report_info {
 	unsigned char get_blob_id;
@@ -122,23 +103,9 @@ struct i2c_rw_buffer {
 
 static struct i2c_rw_buffer buffer;
 
-static struct synaptics_dsx_board_data s7300_board_data = {
-	.irq_flags = IRQ_TYPE_EDGE_FALLING | IRQF_ONESHOT,
-	.irq_gpio = S7300_IRQ_GPIO,
-	.power_gpio = S7300_GPIO_DEF,
-	.reset_gpio = S7300_GPIO_DEF,
-	.power_delay_ms = S7300_POWER_DELAY_MS,
-	.reset_delay_ms = S7300_RESET_DELAY_MS,
-	.reset_active_ms = S7300_RESET_ACTIVE_MS,
-	.byte_delay_us = S7300_BYTE_DELAY_US,
-	.block_delay_us = S7300_BLOCK_DELAY_US,
-	.device_descriptor_addr = DSX_HID_DEVICE_DESCRIPTOR_ADDR,
-};
-
 static int do_i2c_transfer(struct i2c_client *client, struct i2c_msg *msg)
 {
 	unsigned char retry;
-	static bool dump = true;
 
 	for (retry = 0; retry < SYN_I2C_RETRY_TIMES; retry++) {
 		if (i2c_transfer(client->adapter, msg, 1) == 1)
@@ -146,10 +113,7 @@ static int do_i2c_transfer(struct i2c_client *client, struct i2c_msg *msg)
 		dev_err(&client->dev,
 				"%s: I2C retry %d\n",
 				__func__, retry + 1);
-		if (dump) {
-			dump = false;
-			dump_stack();
-		}
+		msleep(20);
 	}
 
 	if (retry == SYN_I2C_RETRY_TIMES) {
@@ -218,7 +182,7 @@ static void traverse_report_descriptor(unsigned int *index)
 	unsigned char size;
 	unsigned char *buf = buffer.read;
 
-	size = buf[*index] & MASK_BLOB_SIZE;
+	size = buf[*index] & MASK_2BIT;
 	switch (size) {
 	case 0: /* 0 bytes */
 		*index += 1;
@@ -313,9 +277,9 @@ static int parse_report_descriptor(struct synaptics_rmi4_data *rmi4_data)
 	unsigned char *buf;
 	struct i2c_client *i2c = to_i2c_client(rmi4_data->pdev->dev.parent);
 
-	buffer.write[0] = hid_dd.report_descriptor_index & 0xff;
+	buffer.write[0] = hid_dd.report_descriptor_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.report_descriptor_index >> 8;
-	retval = generic_write(i2c, sizeof(hid_dd.report_descriptor_index));
+	retval = generic_write(i2c, 2);
 	if (retval < 0)
 		return retval;
 	retval = generic_read(i2c, hid_dd.report_descriptor_length);
@@ -346,19 +310,15 @@ static int switch_to_rmi(struct synaptics_rmi4_data *rmi4_data)
 
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	retval = check_buffer(&buffer.write, &buffer.write_size, 11);
-	if (retval < 0) {
-		dev_err(&i2c->dev, "%s: check buffer failed\n", __func__);
-		goto exit;
-	}
+	check_buffer(&buffer.write, &buffer.write_size, 11);
 
 	/* set rmi mode */
-	buffer.write[0] = hid_dd.command_register_index & 0xff;
+	buffer.write[0] = hid_dd.command_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.command_register_index >> 8;
 	buffer.write[2] = (FEATURE_REPORT_TYPE << 4) | hid_report.set_mode_id;
 	buffer.write[3] = SET_REPORT_COMMAND;
 	buffer.write[4] = hid_report.set_mode_id;
-	buffer.write[5] = hid_dd.data_register_index & 0xff;
+	buffer.write[5] = hid_dd.data_register_index & MASK_8BIT;
 	buffer.write[6] = hid_dd.data_register_index >> 8;
 	buffer.write[7] = 0x04;
 	buffer.write[8] = 0x00;
@@ -367,7 +327,6 @@ static int switch_to_rmi(struct synaptics_rmi4_data *rmi4_data)
 
 	retval = generic_write(i2c, 11);
 
-exit:
 	mutex_unlock(&rmi4_data->rmi4_io_ctrl_mutex);
 
 	return retval;
@@ -381,25 +340,21 @@ static int check_report_mode(struct synaptics_rmi4_data *rmi4_data)
 
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	retval = check_buffer(&buffer.write, &buffer.write_size, 7);
-	if (retval < 0) {
-		dev_err(&i2c->dev, "%s: check buffer failed\n", __func__);
-		goto exit;
-	}
+	check_buffer(&buffer.write, &buffer.write_size, 7);
 
-	buffer.write[0] = hid_dd.command_register_index & 0xff;
+	buffer.write[0] = hid_dd.command_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.command_register_index >> 8;
 	buffer.write[2] = (FEATURE_REPORT_TYPE << 4) | hid_report.set_mode_id;
 	buffer.write[3] = GET_REPORT_COMMAND;
 	buffer.write[4] = hid_report.set_mode_id;
-	buffer.write[5] = hid_dd.data_register_index & 0xff;
+	buffer.write[5] = hid_dd.data_register_index & MASK_8BIT;
 	buffer.write[6] = hid_dd.data_register_index >> 8;
 
 	retval = generic_write(i2c, 7);
 	if (retval < 0)
 		goto exit;
 
-	retval = generic_read(i2c, sizeof(report_size));
+	retval = generic_read(i2c, 2);
 	if (retval < 0)
 		goto exit;
 
@@ -414,7 +369,7 @@ static int check_report_mode(struct synaptics_rmi4_data *rmi4_data)
 		goto exit;
 
 	retval = buffer.read[3];
-	dev_info(rmi4_data->pdev->dev.parent,
+	dev_dbg(rmi4_data->pdev->dev.parent,
 			"%s: Report mode = %d\n",
 			__func__, retval);
 
@@ -426,23 +381,19 @@ exit:
 
 static int hid_i2c_init(struct synaptics_rmi4_data *rmi4_data)
 {
-	int retval, retry = 0;
+	int retval;
 	struct i2c_client *i2c = to_i2c_client(rmi4_data->pdev->dev.parent);
 	const struct synaptics_dsx_board_data *bdata =
 			rmi4_data->hw_if->board_data;
 
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	retval = check_buffer(&buffer.write, &buffer.write_size, 6);
-	if (retval < 0) {
-		dev_err(&i2c->dev, "%s: check buffer failed\n", __func__);
-		goto exit;
-	}
+	check_buffer(&buffer.write, &buffer.write_size, 6);
 
 	/* read device descriptor */
-	buffer.write[0] = bdata->device_descriptor_addr & 0xff;
+	buffer.write[0] = bdata->device_descriptor_addr & MASK_8BIT;
 	buffer.write[1] = bdata->device_descriptor_addr >> 8;
-	retval = generic_write(i2c, sizeof(bdata->device_descriptor_addr));
+	retval = generic_write(i2c, 2);
 	if (retval < 0)
 		goto exit;
 	retval = generic_read(i2c, sizeof(hid_dd));
@@ -455,7 +406,7 @@ static int hid_i2c_init(struct synaptics_rmi4_data *rmi4_data)
 		goto exit;
 
 	/* set power */
-	buffer.write[0] = hid_dd.command_register_index & 0xff;
+	buffer.write[0] = hid_dd.command_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.command_register_index >> 8;
 	buffer.write[2] = 0x00;
 	buffer.write[3] = SET_POWER_COMMAND;
@@ -464,7 +415,7 @@ static int hid_i2c_init(struct synaptics_rmi4_data *rmi4_data)
 		goto exit;
 
 	/* reset */
-	buffer.write[0] = hid_dd.command_register_index & 0xff;
+	buffer.write[0] = hid_dd.command_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.command_register_index >> 8;
 	buffer.write[2] = 0x00;
 	buffer.write[3] = RESET_COMMAND;
@@ -472,32 +423,26 @@ static int hid_i2c_init(struct synaptics_rmi4_data *rmi4_data)
 	if (retval < 0)
 		goto exit;
 
-	while (gpio_get_value(bdata->irq_gpio) && ++retry < GPIO_MAX_RETRY)
-		msleep(bdata->reset_active_ms);
-
-	if (retry == GPIO_MAX_RETRY) {
-		dev_warn(rmi4_data->pdev->dev.parent,
-				"%s: Get gpio value failed.\n", __func__);
-	}
-
+	while (gpio_get_value(bdata->irq_gpio))
+		msleep(20);
 
 	retval = generic_read(i2c, hid_dd.input_report_max_length);
 	if (retval < 0)
 		goto exit;
 
 	/* get blob */
-	buffer.write[0] = hid_dd.command_register_index & 0xff;
+	buffer.write[0] = hid_dd.command_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.command_register_index >> 8;
 	buffer.write[2] = (FEATURE_REPORT_TYPE << 4) | hid_report.get_blob_id;
 	buffer.write[3] = 0x02;
-	buffer.write[4] = hid_dd.data_register_index & 0xff;
+	buffer.write[4] = hid_dd.data_register_index & MASK_8BIT;
 	buffer.write[5] = hid_dd.data_register_index >> 8;
 
 	retval = generic_write(i2c, 6);
 	if (retval < 0)
 		goto exit;
 
-	msleep(bdata->reset_active_ms);
+	msleep(20);
 
 	retval = generic_read(i2c, hid_report.blob_size + 3);
 	if (retval < 0)
@@ -530,45 +475,33 @@ static int synaptics_rmi4_i2c_read(struct synaptics_rmi4_data *rmi4_data,
 		{
 			.addr = i2c->addr,
 			.flags = 0,
-			.len = hid_dd.output_report_max_length +
-							HID_WRITE_CMD_LEN,
+			.len = hid_dd.output_report_max_length + 2,
 		},
 		{
 			.addr = i2c->addr,
 			.flags = I2C_M_RD,
-			.len = length + HID_READ_CMD_LEN,
+			.len = length + 4,
 		},
 	};
 
 recover:
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	retval = check_buffer(&buffer.write, &buffer.write_size,
-			hid_dd.output_report_max_length + HID_WRITE_CMD_LEN);
-	if (retval < 0) {
-		dev_err(&i2c->dev, "%s: check buffer failed\n", __func__);
-		goto exit;
-	}
-
+	check_buffer(&buffer.write, &buffer.write_size,
+			hid_dd.output_report_max_length + 2);
 	msg[0].buf = buffer.write;
-	buffer.write[0] = hid_dd.output_register_index & 0xff;
+	buffer.write[0] = hid_dd.output_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.output_register_index >> 8;
-	buffer.write[2] = hid_dd.output_report_max_length & 0xff;
+	buffer.write[2] = hid_dd.output_report_max_length & MASK_8BIT;
 	buffer.write[3] = hid_dd.output_report_max_length >> 8;
 	buffer.write[4] = hid_report.read_addr_id;
 	buffer.write[5] = 0x00;
-	buffer.write[6] = addr & 0xff;
+	buffer.write[6] = addr & MASK_8BIT;
 	buffer.write[7] = addr >> 8;
-	buffer.write[8] = length & 0xff;
+	buffer.write[8] = length & MASK_8BIT;
 	buffer.write[9] = length >> 8;
 
-	retval = check_buffer(&buffer.read, &buffer.read_size,
-						length + HID_READ_CMD_LEN);
-	if (retval < 0) {
-		dev_err(&i2c->dev, "%s: check buffer failed\n", __func__);
-		goto exit;
-	}
-
+	check_buffer(&buffer.read, &buffer.read_size, length + 4);
 	msg[1].buf = buffer.read;
 
 	retval = do_i2c_transfer(i2c, &msg[0]);
@@ -635,23 +568,18 @@ static int synaptics_rmi4_i2c_write(struct synaptics_rmi4_data *rmi4_data,
 recover:
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	retval = check_buffer(&buffer.write, &buffer.write_size, msg_length);
-	if (retval < 0) {
-		dev_err(&i2c->dev, "%s: check buffer failed\n", __func__);
-		goto exit;
-	}
-
+	check_buffer(&buffer.write, &buffer.write_size, msg_length);
 	msg[0].len = msg_length;
 	msg[0].buf = buffer.write;
-	buffer.write[0] = hid_dd.output_register_index & 0xff;
+	buffer.write[0] = hid_dd.output_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.output_register_index >> 8;
-	buffer.write[2] = hid_dd.output_report_max_length & 0xff;
+	buffer.write[2] = hid_dd.output_report_max_length & MASK_8BIT;
 	buffer.write[3] = hid_dd.output_report_max_length >> 8;
 	buffer.write[4] = hid_report.write_id;
 	buffer.write[5] = 0x00;
-	buffer.write[6] = addr & 0xff;
+	buffer.write[6] = addr & MASK_8BIT;
 	buffer.write[7] = addr >> 8;
-	buffer.write[8] = length & 0xff;
+	buffer.write[8] = length & MASK_8BIT;
 	buffer.write[9] = length >> 8;
 	memcpy(&buffer.write[10], &data[0], length);
 
@@ -659,7 +587,6 @@ recover:
 	if (retval == 0)
 		retval = length;
 
-exit:
 	mutex_unlock(&rmi4_data->rmi4_io_ctrl_mutex);
 
 	if ((retval != length) && (recover == 1)) {
@@ -686,6 +613,8 @@ static struct platform_device *synaptics_dsx_i2c_device;
 
 static void synaptics_rmi4_i2c_dev_release(struct device *dev)
 {
+	kfree(synaptics_dsx_i2c_device);
+
 	return;
 }
 
@@ -702,24 +631,17 @@ static int synaptics_rmi4_i2c_probe(struct i2c_client *client,
 		return -EIO;
 	}
 
-	synaptics_dsx_i2c_device = devm_kzalloc(&client->dev,
-				sizeof(struct platform_device), GFP_KERNEL);
+	synaptics_dsx_i2c_device = kzalloc(
+			sizeof(struct platform_device),
+			GFP_KERNEL);
 	if (!synaptics_dsx_i2c_device) {
 		dev_err(&client->dev,
-				"%s: Failed to allocate memory\n", __func__);
+				"%s: Failed to allocate memory for synaptics_dsx_i2c_device\n",
+				__func__);
 		return -ENOMEM;
 	}
 
-	hw_if.board_data = &s7300_board_data;
-	s7300_board_data.irq = client->irq;
-	/* acpi id distinguish */
-	if (!strncmp(SYNP_S7300_CHTCR_ID, client->name, strlen(SYNP_S7300_CHTCR_ID))) {
-		s7300_board_data.irq_gpio =
-					acpi_get_gpio_by_index(&client->dev, 0, NULL);
-		s7300_board_data.irq = gpio_to_irq(s7300_board_data.irq_gpio);
-	}
-	dev_info(&client->dev, "acpi id: %s\n", client->name);
-
+	hw_if.board_data = client->dev.platform_data;
 	hw_if.bus_access = &bus_access;
 	hw_if.bl_hw_init = switch_to_rmi;
 	hw_if.ui_hw_init = hid_i2c_init;
@@ -757,27 +679,17 @@ static int synaptics_rmi4_i2c_remove(struct i2c_client *client)
 
 static const struct i2c_device_id synaptics_rmi4_id_table[] = {
 	{I2C_DRIVER_NAME, 0},
-	{SYNP_S7300_BYTCR_ID, 0 },
-	{SYNP_S7300_CHTCR_ID, 0 },
 	{},
 };
 MODULE_DEVICE_TABLE(i2c, synaptics_rmi4_id_table);
-
-static struct acpi_device_id acpi_match[] = {
-	{ SYNP_S7300_BYTCR_ID, 0 },
-	{ SYNP_S7300_CHTCR_ID, 0 },
-	{ },
-};
-MODULE_DEVICE_TABLE(acpi, acpi_match);
 
 static struct i2c_driver synaptics_rmi4_i2c_driver = {
 	.driver = {
 		.name = I2C_DRIVER_NAME,
 		.owner = THIS_MODULE,
-		.acpi_match_table = ACPI_PTR(acpi_match),
 	},
 	.probe = synaptics_rmi4_i2c_probe,
-	.remove = synaptics_rmi4_i2c_remove,
+	.remove = __devexit_p(synaptics_rmi4_i2c_remove),
 	.id_table = synaptics_rmi4_id_table,
 };
 
