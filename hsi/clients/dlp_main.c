@@ -1266,15 +1266,14 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 		err = -EAGAIN;
 		goto out;
 	}
-
-	/* Decrease counters values */
-	if (pdu->ttype == HSI_MSG_WRITE) {
+	if (pdu->ttype == HSI_MSG_WRITE)
 		xfer_ctx->channel->credits--;
-		xfer_ctx->seq_num++;
-	}
 	spin_unlock_irqrestore(&ch_ctx->lock, flags);
 
 	write_lock_irqsave(&xfer_ctx->lock, flags);
+	/* Increase seq_num value */
+	if (pdu->ttype == HSI_MSG_WRITE)
+		xfer_ctx->seq_num++;
 	xfer_ctx->room -= lost_room;
 	xfer_ctx->ctrl_len++;
 	write_unlock_irqrestore(&xfer_ctx->lock, flags);
