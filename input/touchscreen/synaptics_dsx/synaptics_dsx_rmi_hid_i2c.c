@@ -24,10 +24,15 @@
 #include <linux/delay.h>
 #include <linux/input.h>
 #include <linux/gpio.h>
+#include <linux/acpi.h>
+#include <linux/acpi_gpio.h>
 #include <linux/types.h>
 #include <linux/platform_device.h>
 #include <linux/input/synaptics_dsx.h>
 #include "synaptics_dsx_core.h"
+
+#define SYNP_S7300_BYTCR_ID	"S7300"
+#define SYNP_S7300_CHTCR_ID	"SYNP1000"
 
 #define SYN_I2C_RETRY_TIMES 10
 
@@ -63,6 +68,33 @@
 
 #define FINGER_MODE 0x00
 #define RMI_MODE 0x02
+
+#define DSX_HID_DEVICE_DESCRIPTOR_ADDR 0x0020
+#define HID_WRITE_CMD_LEN 2
+#define HID_READ_CMD_LEN 4
+#define MASK_BLOB_SIZE 0x03
+#define GPIO_MAX_RETRY 10
+
+#define S7300_GPIO_DEF -1
+#define S7300_IRQ_GPIO 133
+#define S7300_POWER_DELAY_MS 100
+#define S7300_RESET_DELAY_MS 160
+#define S7300_RESET_ACTIVE_MS 20
+#define S7300_BYTE_DELAY_US 20
+#define S7300_BLOCK_DELAY_US 20
+#define DSX_MAX_Y_FOR_2D -1 /* set to -1 if no virtual buttons */
+static unsigned int cap_button_codes[] = {};
+static unsigned int vir_button_codes[] = {};
+
+static struct synaptics_dsx_button_map cap_button_map = {
+	.nbuttons = ARRAY_SIZE(cap_button_codes),
+	.map = cap_button_codes,
+};
+
+static struct synaptics_dsx_button_map vir_button_map = {
+	.nbuttons = ARRAY_SIZE(vir_button_codes) / 5,
+	.map = vir_button_codes,
+};
 
 struct hid_report_info {
 	unsigned char get_blob_id;
@@ -102,6 +134,22 @@ struct i2c_rw_buffer {
 };
 
 static struct i2c_rw_buffer buffer;
+
+static struct synaptics_dsx_board_data s7300_board_data = {
+	.irq_flags = IRQ_TYPE_EDGE_FALLING | IRQF_ONESHOT,
+	.irq_gpio = S7300_IRQ_GPIO,
+	.power_gpio = S7300_GPIO_DEF,
+	.reset_gpio = S7300_GPIO_DEF,
+	.power_delay_ms = S7300_POWER_DELAY_MS,
+	.reset_delay_ms = S7300_RESET_DELAY_MS,
+	.reset_active_ms = S7300_RESET_ACTIVE_MS,
+	.byte_delay_us = S7300_BYTE_DELAY_US,
+	.block_delay_us = S7300_BLOCK_DELAY_US,
+	.max_y_for_2d = DSX_MAX_Y_FOR_2D,
+	.cap_button_map = &cap_button_map,
+	.vir_button_map = &vir_button_map,
+	.device_descriptor_addr = DSX_HID_DEVICE_DESCRIPTOR_ADDR,
+};
 
 static int do_i2c_transfer(struct i2c_client *client, struct i2c_msg *msg)
 {
@@ -641,7 +689,16 @@ static int synaptics_rmi4_i2c_probe(struct i2c_client *client,
 		return -ENOMEM;
 	}
 
-	hw_if.board_data = client->dev.platform_data;
+	hw_if.board_data = &s7300_board_data;
+	s7300_board_data.irq = client->irq;
+	/* acpi id distinguish */
+	if (!strncmp(SYNP_S7300_CHTCR_ID, client->name, strlen(SYNP_S7300_CHTCR_ID))) {
+		s7300_board_data.irq_gpio =
+					acpi_get_gpio_by_index(&client->dev, 0, NULL);
+		s7300_board_data.irq = gpio_to_irq(s7300_board_data.irq_gpio);
+	}
+	dev_info(&client->dev, "acpi id: %s\n", client->name);
+
 	hw_if.bus_access = &bus_access;
 	hw_if.bl_hw_init = switch_to_rmi;
 	hw_if.ui_hw_init = hid_i2c_init;
@@ -679,17 +736,27 @@ static int synaptics_rmi4_i2c_remove(struct i2c_client *client)
 
 static const struct i2c_device_id synaptics_rmi4_id_table[] = {
 	{I2C_DRIVER_NAME, 0},
+	{SYNP_S7300_BYTCR_ID, 0 },
+	{SYNP_S7300_CHTCR_ID, 0 },
 	{},
 };
 MODULE_DEVICE_TABLE(i2c, synaptics_rmi4_id_table);
+
+static struct acpi_device_id acpi_match[] = {
+	{ SYNP_S7300_BYTCR_ID, 0 },
+	{ SYNP_S7300_CHTCR_ID, 0 },
+	{ },
+};
+MODULE_DEVICE_TABLE(acpi, acpi_match);
 
 static struct i2c_driver synaptics_rmi4_i2c_driver = {
 	.driver = {
 		.name = I2C_DRIVER_NAME,
 		.owner = THIS_MODULE,
+		.acpi_match_table = ACPI_PTR(acpi_match),
 	},
 	.probe = synaptics_rmi4_i2c_probe,
-	.remove = __devexit_p(synaptics_rmi4_i2c_remove),
+	.remove = synaptics_rmi4_i2c_remove,
 	.id_table = synaptics_rmi4_id_table,
 };
 

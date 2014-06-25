@@ -401,6 +401,8 @@ static int synaptics_rmi4_i2c_probe(struct i2c_client *client,
 	}
 #else
 	hw_if.board_data = client->dev.platform_data;
+	if (hw_if.board_data->irq_gpio > -1)
+		hw_if.board_data->irq = gpio_to_irq(hw_if.board_data->irq_gpio);
 #endif
 
 	hw_if.bus_access = &bus_access;
@@ -432,6 +434,7 @@ static int synaptics_rmi4_i2c_remove(struct i2c_client *client)
 
 static const struct i2c_device_id synaptics_rmi4_id_table[] = {
 	{I2C_DRIVER_NAME, 0},
+	{"synaptics_3402", 0},
 	{},
 };
 MODULE_DEVICE_TABLE(i2c, synaptics_rmi4_id_table);
