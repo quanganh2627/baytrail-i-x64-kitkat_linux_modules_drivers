@@ -1287,7 +1287,7 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 			pr_err(DRVNAME ": Can't push PDU for CH%d => invalid state: %d\n",
 					ch_ctx->ch_id, state);
 			err = -EACCES;
-			goto out;
+			goto out_restore_counts;
 		}
 	}
 
@@ -1300,7 +1300,7 @@ int dlp_hsi_controller_push(struct dlp_xfer_ctx *xfer_ctx, struct hsi_msg *pdu)
 	} else
 		pr_err(DRVNAME ": hsi_async(ctrl_push) failed (%d)", err);
 
-out:
+out_restore_counts:
 	if (err) {
 		/* Failed to send pdu, set back counters values;
 		 * excepted credit value as modem could have updated
@@ -1321,6 +1321,7 @@ out:
 			del_timer_sync(&dlp_drv.timer[ch_ctx->ch_id]);
 	}
 
+out:
 	return err;
 }
 
