@@ -740,7 +740,6 @@ static int dlp_ctrl_cmd_send(struct dlp_channel *ch_ctx,
 		pr_err(DRVNAME ": hsi_ch:%d, cmd:0x%X => RX timeout\n",
 			dlp_cmd->params.channel, dlp_cmd->params.id);
 
-		tx_msg->context = NULL;
 		ret = -EIO;
 		goto free_cmd;
 	}
