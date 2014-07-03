@@ -519,13 +519,28 @@ out:
 static unsigned int dlp_flash_dev_poll(struct file *filp,
 		struct poll_table_struct *pt)
 {
-	struct dlp_channel *ch_ctx = filp->private_data;
-	struct dlp_flash_ctx *flash_ctx = ch_ctx->ch_data;
+	struct dlp_channel *ch_ctx;
+	struct dlp_flash_ctx *flash_ctx;
 	unsigned long flags;
 	unsigned int ret = 0;
 
+	if (unlikely(atomic_read(&dlp_drv.drv_remove_ongoing))) {
+		pr_err(DRVNAME ": %s: Driver is currently removed by the system",
+				__func__);
+		ret = POLLHUP;
+		return ret;
+	}
+	ch_ctx = filp->private_data;
+	flash_ctx = ch_ctx->ch_data;
+
 	poll_wait(filp, &flash_ctx->read_wq, pt);
 
+	if (unlikely(atomic_read(&dlp_drv.drv_remove_ongoing))) {
+		pr_err(DRVNAME ": %s: Driver is currently removed by the system",
+				__func__);
+		ret = POLLHUP;
+		return ret;
+	}
 	/* Have some data to read ? */
 	spin_lock_irqsave(&ch_ctx->lock, flags);
 	if (!list_empty(&flash_ctx->rx_msgs))

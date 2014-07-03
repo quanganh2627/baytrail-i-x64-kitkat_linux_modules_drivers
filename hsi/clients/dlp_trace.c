@@ -585,10 +585,19 @@ static ssize_t dlp_trace_dev_write(struct file *filp,
 static unsigned int dlp_trace_dev_poll(struct file *filp,
 		struct poll_table_struct *pt)
 {
-	struct dlp_channel *ch_ctx = filp->private_data;
-	struct dlp_trace_ctx *trace_ctx = ch_ctx->ch_data;
+	struct dlp_channel *ch_ctx;
+	struct dlp_trace_ctx *trace_ctx;
 	unsigned long flags;
 	unsigned int ret = 0;
+
+	if (unlikely(atomic_read(&dlp_drv.drv_remove_ongoing))) {
+		pr_err(DRVNAME ": %s: Driver is currently removed by the system",
+				__func__);
+		ret = POLLHUP;
+		goto out;
+	}
+	ch_ctx = filp->private_data;
+	trace_ctx = ch_ctx->ch_data;
 
 	/* if the channel is hang-up/closed no reason to wait*/
 	spin_lock_irqsave(&ch_ctx->lock, flags);
@@ -601,6 +610,12 @@ static unsigned int dlp_trace_dev_poll(struct file *filp,
 
 	poll_wait(filp, &trace_ctx->read_wq, pt);
 
+	if (unlikely(atomic_read(&dlp_drv.drv_remove_ongoing))) {
+		pr_err(DRVNAME ": %s: Driver is currently removed by the system",
+				__func__);
+		ret = POLLHUP;
+		goto out;
+	}
 	/* Have some data to read ? */
 	spin_lock_irqsave(&ch_ctx->lock, flags);
 	if (trace_ctx->hangup) {
