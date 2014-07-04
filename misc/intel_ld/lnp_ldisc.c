@@ -142,6 +142,7 @@ static void reset_buffer_flags(struct tty_struct *tty)
 	lbf_ldisc->read_head = lbf_ldisc->read_cnt = lbf_ldisc->read_tail
 			= 0;
 	spin_unlock(&lbf_ldisc->tx_lock);
+	tty->receive_room = RECEIVE_ROOM;
 	lbf_update_set_room(tty, 0);
 	check_unthrottle(tty);
 
@@ -283,7 +284,6 @@ static void lbf_ldisc_flush_buffer(struct tty_struct *tty)
 	unsigned long flags;
 	pr_info("-> %s\n", __func__);
 	reset_buffer_flags(tty);
-	lbf_update_set_room(tty, 0);
 
 	if (tty->link) {
 		spin_lock_irqsave(&tty->ctrl_lock, flags);
@@ -488,11 +488,12 @@ static inline int select_proto(int type)
  * Arguments : tty pointer to associated tty instance data
  lbf_uart : Disc data for tty
  chnl_id : id to either BT or FMR
- * Return Type: void
+ * Return Type: int
  */
-static void st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
+static int st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 {
 	unsigned int i = 0;
+	int ret = 0;
 	int chnl_id = LBF_BT;
 	unsigned char *buff;
 	unsigned int opcode = 0;
@@ -500,7 +501,7 @@ static void st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 
 	if (unlikely(lbf_uart == NULL || lbf_uart->rx_skb == NULL)) {
 		pr_info(" No channel registered, no data to send?");
-		return;
+		return ret;
 	}
 	buff = &lbf_uart->rx_skb->data[0];
 	count = lbf_uart->rx_skb->len;
@@ -539,6 +540,8 @@ static void st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 					priv_data, lbf_uart->rx_skb) != 0))
 					pr_info("proto stack %d recv failed"
 						, chnl_id);
+				else
+					ret = lbf_uart->rx_skb->len;
 			}
 		}
 	else
@@ -589,6 +592,8 @@ static void st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 	lbf_uart->rx_count = 0;
 	lbf_uart->rx_chnl = 0;
 	lbf_uart->bytes_pending = 0;
+
+	return ret;
 }
 
 /* lbf_ldisc_fw_download_init()
@@ -692,13 +697,14 @@ static inline int st_check_data_len(struct lbf_uart *lbf_uart, int len)
 static void lbf_update_set_room(struct tty_struct *tty, signed int cnt)
 {
 	struct lbf_uart *lbf_uart = (struct lbf_uart *) tty->disc_data;
-
-	spin_lock(&lbf_uart->tx_update_lock);
-	int left = tty->receive_room + cnt;
+	int left;
 	int old_left;
 
+	spin_lock(&lbf_uart->tx_update_lock);
+	left = tty->receive_room + cnt;
+
 	if (left < 0)
-		tty->receive_room = 0;
+		left = 0;
 	old_left = tty->receive_room;
 	tty->receive_room = left;
 	spin_unlock(&lbf_uart->tx_update_lock);
@@ -748,7 +754,7 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 	unsigned short payload_len = 0;
 	int len = 0, type = 0, i = 0;
 	unsigned char *plen;
-	int rcv_count = count;
+	int st_ret = 0;
 	struct lbf_uart *lbf_uart = (struct lbf_uart *) tty->disc_data;
 	unsigned long flags;
 
@@ -760,6 +766,9 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 		pr_info(" received null from TTY ");
 		return;
 	}
+
+	lbf_update_set_room(tty, (-1)*count);
+
 	spin_lock_irqsave(&lbf_uart->rx_lock, flags);
 
 	pr_info("-> %s count: %d lbf_uart->rx_state: %ld\n", __func__ , count,
@@ -853,7 +862,7 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				pr_info("\n---------Complete pkt received-----"
 						"--------\n");
 				lbf_uart->rx_state = LBF_W4_H4_HDR;
-				st_send_frame(tty, lbf_uart);
+				st_ret = st_send_frame(tty, lbf_uart);
 				lbf_uart->bytes_pending = 0;
 				lbf_uart->rx_count = 0;
 				lbf_uart->rx_skb = NULL;
@@ -861,20 +870,18 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				lbf_uart->bytes_pending = pkt_status;
 				count = 0;
 			}
+
+			if (st_ret > 0)
+				lbf_update_set_room(tty, st_ret);
 			continue;
 
-
 		} /* end of switch rx_state*/
+
 	} /* end of while*/
 
 	spin_unlock_irqrestore(&lbf_uart->rx_lock, flags);
 
-	lbf_update_set_room(tty, (-1)*rcv_count);
-
-
-
 	if (waitqueue_active(&lbf_uart->read_wait)) {
-		pr_info("-> %s waitqueue_active\n", __func__);
 		wake_up_interruptible(&lbf_uart->read_wait);
 	}
 
