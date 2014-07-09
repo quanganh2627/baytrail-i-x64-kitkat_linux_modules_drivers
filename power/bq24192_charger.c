@@ -1269,18 +1269,15 @@ static inline int bq24192_enable_charger(
 {
 	int ret = 0;
 
-	/*stop charger for throttle state 3, by putting it in HiZ mode*/
-	if (chip->cntl_state == 0x3) {
-		ret = bq24192_reg_read_modify(chip->client,
+	ret = bq24192_reg_read_modify(chip->client,
 			BQ24192_INPUT_SRC_CNTL_REG,
-				INPUT_SRC_CNTL_EN_HIZ, true);
+				INPUT_SRC_CNTL_EN_HIZ, !val);
 
-		if (ret < 0)
-			dev_warn(&chip->client->dev,
+	if (ret < 0)
+		dev_warn(&chip->client->dev,
 				"Input src cntl write failed\n");
-		else
-			ret = bq24192_enable_charging(chip, val);
-	}
+	else
+		ret = bq24192_enable_charging(chip, val);
 
 	dev_warn(&chip->client->dev, "%s:%d %d\n", __func__, __LINE__, val);
 
