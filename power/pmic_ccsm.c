@@ -1454,6 +1454,27 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 
 	if (int_reg & CHRGRIRQ1_SVBUSDET_MASK) {
 		if (mask) {
+			/* This is to handle the scenario where a connect event
+			 * is received with already connect-status for USB.
+			 * Previous disconnect event could have been missed due
+			 * to synchronization issues of low-supply fault or
+			 * late update to SCHRGRIRQ1_SVBUSDET
+			 */
+			if (chc.vbus_connect_status) {
+				int rmv_mask = 0;
+
+				dev_info(chc.dev, "Previous USB VBUS removal not received\n");
+				dev_info(chc.dev, "USB VBUS removal forced. Notifying OTG driver\n");
+				if (chc.is_internal_usb_phy
+						&& !chc.otg_mode_enabled)
+					handle_internal_usbphy_notifications(rmv_mask);
+				else {
+					atomic_notifier_call_chain(&chc.otg->notifier,
+							USB_EVENT_VBUS, &rmv_mask);
+					chc.otg_mode_enabled = false;
+				}
+			}
+
 			dev_info(chc.dev,
 				"USB VBUS Detected. Notifying OTG driver\n");
 			chc.vbus_connect_status = true;
