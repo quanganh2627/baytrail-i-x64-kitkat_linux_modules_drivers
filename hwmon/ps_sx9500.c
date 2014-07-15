@@ -262,15 +262,17 @@ static int sx9500_enable(struct sx9500_data *sx9500)
 		/*enable cs2 sensor*/
 		ret = sx9500_read(sx9500, SX9500_CPS_CTRL0_REG, &val);
 		if (ret < 0)
-			return ret;
+			goto out;
 		ret = sx9500_write(sx9500, SX9500_CPS_CTRL0_REG, val | 0x4);
 		if (ret < 0)
-			return ret;
+			goto out;
 
 		enable_irq(sx9500->irq);
 
 		sx9500->enabled = 1;
 	}
+
+out:
 	mutex_unlock(&sx9500->lock);
 	return ret;
 }
@@ -287,14 +289,15 @@ static int sx9500_disable(struct sx9500_data *sx9500)
 		/*disable all sensor pins*/
 		ret = sx9500_read(sx9500, SX9500_CPS_CTRL0_REG, &val);
 		if (ret < 0)
-			return ret;
+			goto out;
 		ret = sx9500_write(sx9500, SX9500_CPS_CTRL0_REG, val & 0xf0);
 		if (ret < 0)
-			return ret;
+			goto out;
 
 		disable_irq(sx9500->irq);
 		sx9500->enabled = 0;
 	}
+out:
 	mutex_unlock(&sx9500->lock);
 	return ret;
 }
