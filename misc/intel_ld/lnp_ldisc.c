@@ -31,59 +31,56 @@
 #include <linux/skbuff.h>
 #include <linux/lbf_ldisc.h>
 #include <linux/poll.h>
+#include <linux/interrupt.h>
 #include <linux/gpio.h>
 #include <linux/platform_device.h>
+#include <linux/irq.h>
+#include <linux/pm_runtime.h>
+#include <asm/intel-mid.h>
+#include <asm/intel_mid_hsu.h>
 
 #define RECEIVE_ROOM 4096
 
+struct bcm_bt_lpm_platform_data {
+	int gpio_wake;          /* CPU -> BCM wakeup gpio */
+	int gpio_host_wake;     /* BCM -> CPU wakeup gpio */
+	int int_host_wake;      /* BCM -> CPU wakeup irq */
+	int gpio_enable;        /* GPIO enable/disable BT/FM */
+	int port;               /* UART port to use with BT/FM */
+};
 
-/*------ Forward Declaration-----*/
-struct sk_buff *lbf_dequeue(void);
-static int lbf_tty_write(struct tty_struct *tty, const unsigned char *data,
-				int count);
-static void lbf_enqueue(struct sk_buff *skb);
-static void bt_rfkill_set_power(unsigned long blocked);
-static void lbf_update_set_room(struct tty_struct *tty, signed int cnt);
-static void lbf_ldisc_fw_download_complete(unsigned long);
-static int lbf_ldisc_fw_download_init(void);
-static unsigned int lbf_ldisc_get_read_cnt(void);
+DECLARE_WAIT_QUEUE_HEAD(waitFordxexit);
+DECLARE_WAIT_QUEUE_HEAD(waitFord0exit);
 
-static struct st_proto_s lbf_st_proto[6] = {
-		{ .chnl_id = INVALID, /* ACL */
-		.hdr_len = INVALID, .offset_len_in_hdr = INVALID,
-				.len_size = INVALID, .reserve = INVALID, },
-		{ .chnl_id = INVALID, /* ACL */
-		.hdr_len = INVALID, .offset_len_in_hdr = INVALID,
-				.len_size = INVALID, .reserve = INVALID, },
-		{ .chnl_id = HCI_ACLDATA_PKT, /* ACL */
-		.hdr_len = HCI_ACL_HDR_SIZE, .offset_len_in_hdr = 3,
-				.len_size = 2, .reserve = 8, },
-		{ .chnl_id = HCI_SCODATA_PKT, /* SCO */
-		.hdr_len = HCI_SCO_HDR_SIZE, .offset_len_in_hdr = 3,
-				.len_size = 1, .reserve = 8, },
-		{ .chnl_id = HCI_EVENT_PKT, /* HCI Events */
-		.hdr_len = HCI_EVENT_HDR_SIZE, .offset_len_in_hdr = 2,
-				.len_size = 1, .reserve = 8, },
-		{ .chnl_id = HCI_EVENT_PKT, /* HCI Events */
-		.hdr_len = HCI_EVENT_HDR_SIZE, .offset_len_in_hdr = 2,
-				.len_size = 1, .reserve = 8, }, };
+struct intel_bt_lpm {
 
-struct lbf_q_tx {
-	struct sk_buff_head txq, tx_waitq;
-	struct sk_buff *tx_skb;
-	spinlock_t lock;
-	struct mutex tx_wakeup;
-	unsigned long tx_state;
-	struct mutex writelock;
-	int tbusy;
-	int woke_up;
-	struct mutex fwdownloadlock;
-	struct tty_struct *tty;
-	struct work_struct tx_wakeup_work;
-} lbf_q_tx;
-
-static struct lbf_q_tx *lbf_tx;
-static struct fm_ld_drv_register *fm;
+	unsigned int gpio_host_wake;
+	unsigned int int_host_wake;
+	unsigned int bt_module_state;
+	unsigned int fm_module_state;
+	unsigned int bt_fmr_state;
+	unsigned int module_refcount;
+	int dx_packet_pending;
+	int d0_packet_pending;
+	unsigned int gpio_enable_bt;
+	int host_wake;
+	int bt_wake;
+	int lpm_enable;
+	struct mutex lpmtxlock;
+	struct mutex rxref_lock;
+	struct mutex txref_lock;
+	struct mutex lpmenable;
+	struct mutex devicest_lock;
+	struct mutex host_wake_lock;
+	struct mutex idleupdatelock;
+	struct mutex lpm_modulestate;
+	int tx_refcount;
+	int device_state;
+	struct platform_device *pdev;
+	int rx_refcount;
+	struct device *tty_dev;
+	int port;
+} intel_lbf_lpm;
 
 
 struct lbf_uart {
@@ -115,10 +112,91 @@ struct lbf_uart {
 
 };
 
-struct bcm_bt_lpm {
-	unsigned int gpio_enable_bt;
-	struct device *tty_dev;
-} bt_lpm;
+struct lbf_q_tx {
+	struct sk_buff_head txq, tx_waitq;
+	struct sk_buff *tx_skb;
+	spinlock_t lock;
+	struct mutex writelock;
+	struct mutex fwdownloadlock;
+	struct work_struct tx_wakeup_work;
+	struct mutex tx_wakeup;
+	int tbusy;
+	int woke_up;
+	struct tty_struct *tty;
+};
+
+enum {
+	MODULE_INVALID,
+	MODULE_FM,
+	MODULE_BT,
+};
+
+enum {
+	HIGH,
+	LOW
+};
+
+enum ioctl_status {
+	DO_FW_DL,
+	DO_STACK_INIT,
+	FW_FAILED,
+	FW_SUCCESS
+};
+
+#define DX_HCI_CMD_SIZE	4
+#define D0_HCI_CMD_SIZE	1
+#define WAKEUP_RSP_SIZE	3
+
+
+struct st_proto_s {
+	unsigned char chnl_id;
+	unsigned char hdr_len;
+	unsigned char offset_len_in_hdr;
+	unsigned char len_size;
+	unsigned char reserve;
+};
+
+/*------ Forward Declaration-----*/
+struct sk_buff *lbf_dequeue(void);
+static int lbf_tty_write(struct tty_struct *tty, const unsigned char *data,
+				int count);
+static void lbf_enqueue(struct sk_buff *skb);
+static void bt_rfkill_set_power(unsigned long blocked);
+static void lbf_update_set_room(struct tty_struct *tty, signed int cnt);
+static void lbf_ldisc_fw_download_complete(unsigned long);
+static void activate_irq_handler(void);
+static int lbf_ldisc_fw_download_init(void);
+static int lpm_tx_update(int module);
+static int enqueue_dx_packet(uint8_t *hci_cmd, int size);
+static void lbf_ldisc_lpm_enable_cleanup(void);
+static int intel_bt_lpm_init(struct platform_device *pdev);
+static void lbf_tx_wakeup(struct lbf_uart *lbf_uart);
+static unsigned int lbf_ldisc_get_read_cnt(void);
+
+static int wait_dx_exit(void);
+
+static struct st_proto_s lbf_st_proto[6] = {
+		{ .chnl_id = PM_PKT, /* PM_PACKET */
+		.hdr_len = HCI_EVENT_HDR_SIZE, .offset_len_in_hdr = 2,
+				.len_size = 1, .reserve = 8, },
+		{ .chnl_id = INVALID, /* ACL */
+		.hdr_len = INVALID, .offset_len_in_hdr = INVALID,
+				.len_size = INVALID, .reserve = INVALID, },
+		{ .chnl_id = HCI_ACLDATA_PKT, /* ACL */
+		.hdr_len = HCI_ACL_HDR_SIZE, .offset_len_in_hdr = 3,
+				.len_size = 2, .reserve = 8, },
+		{ .chnl_id = HCI_SCODATA_PKT, /* SCO */
+		.hdr_len = HCI_SCO_HDR_SIZE, .offset_len_in_hdr = 3,
+				.len_size = 1, .reserve = 8, },
+		{ .chnl_id = HCI_EVENT_PKT, /* HCI Events */
+		.hdr_len = HCI_EVENT_HDR_SIZE, .offset_len_in_hdr = 2,
+				.len_size = 1, .reserve = 8, },
+		{ .chnl_id = HCI_EVENT_PKT, /* HCI Events */
+		.hdr_len = HCI_EVENT_HDR_SIZE, .offset_len_in_hdr = 2,
+				.len_size = 1, .reserve = 8, }, };
+
+
+
 
 /* Static variable */
 
@@ -126,12 +204,461 @@ static int fw_isregister;
 static int fw_download_state;
 static unsigned int lbf_ldisc_running = INVALID;
 static int bt_enable_state = DISABLE;
+static bool int_handler_enabled;
+
+static struct lbf_q_tx *lbf_tx;
+static struct fm_ld_drv_register *fm;
+/*Dx  Entry Request  form host*/
+static uint8_t hci_dx_request[] = {0xF1, 0x01, 0x01, 0x01}; /*Wake Enabled*/
+static uint8_t hci_controlerwake_req_rsp[] = {0xF1, 0x03, 0x00}; /*Wake Enabled response*/
+static uint8_t hci_dx_wake[] = {0xF0}; /*Wakeup BT packet - HIGH*/
+
+
+/* set_device_state
+ *
+ * set the device state.
+ *
+ * Arguments:
+ * state to set
+ *
+ * Return Value:
+ * void
+ */
+
+
+static inline void set_device_state(unsigned int state)
+{
+	mutex_lock(&intel_lbf_lpm.devicest_lock);
+	intel_lbf_lpm.device_state = state;
+	mutex_unlock(&intel_lbf_lpm.devicest_lock);
+	pr_info("%s:device_st: %d\n", __func__, intel_lbf_lpm.device_state);
+}
+
+/* get_device_state
+ *
+ * get the device state.
+ *
+ * Arguments:
+ * void
+ *
+ * Return Value:
+ * device state
+ */
+
+static inline unsigned int get_device_state(void)
+{
+	unsigned int device_st;
+	mutex_lock(&intel_lbf_lpm.devicest_lock);
+	device_st = intel_lbf_lpm.device_state;
+	mutex_unlock(&intel_lbf_lpm.devicest_lock);
+	pr_info("%s:device_st: %d\n", __func__, device_st);
+	return device_st;
+}
+
+/* set_device_state
+ *
+ * set the bt fmr state.
+ *
+ * Arguments:
+ * void
+ *
+ * Return Value:
+ * void
+ */
+
+static inline void set_bt_fmr_state(void)
+{
+	mutex_lock(&intel_lbf_lpm.lpm_modulestate);
+	if (!intel_lbf_lpm.bt_module_state && !intel_lbf_lpm.fm_module_state)
+		intel_lbf_lpm.bt_fmr_state = IDLE;
+	else
+		intel_lbf_lpm.bt_fmr_state = ACTIVE;
+	mutex_unlock(&intel_lbf_lpm.lpm_modulestate);
+	pr_info("%s:bt_fmr_state: %d\n", __func__, intel_lbf_lpm.bt_fmr_state);
+}
+
+/* get_device_state
+ *
+ * get the bt and fmr  state.
+ *
+ * Arguments:
+ * void
+ *
+ * Return Value:
+ * module state
+ */
+
+static inline int get_bt_fmr_state(void)
+{
+	int bt_fmr_state;
+	mutex_lock(&intel_lbf_lpm.lpm_modulestate);
+	bt_fmr_state = intel_lbf_lpm.bt_fmr_state;
+	mutex_unlock(&intel_lbf_lpm.lpm_modulestate);
+	pr_info("%s:bt_fmr_state: %d\n", __func__, bt_fmr_state);
+	return bt_fmr_state;
+}
+
+/* hsu_enable
+ *
+ * acquire the hsu for Tx & Rx
+ *
+ * Arguments:
+ * tty_dev
+ *
+ * Return Value:
+ * void
+ */
+static void hsu_enable(struct device *tty)
+{
+	pr_info("%s\n", __func__);
+	pm_runtime_get_sync(tty);
+}
+
+/* hsu_disable
+ *
+ * release the hsu
+ *
+ * Arguments:
+ * tty_dev
+ *
+ * Return Value:
+ * void
+ */
+
+static void hsu_disable(struct device *tty)
+{
+	pr_info("%s\n", __func__);
+	pm_runtime_put(tty);
+}
+
+/* set_host_wake_state
+ *
+ * set the host wake state.
+ *
+ * Arguments:
+ * host_wake state
+ *
+ * Return Value:
+ * void
+ */
+
+static void set_host_wake_state(int host_wake)
+{
+	mutex_lock(&intel_lbf_lpm.host_wake_lock);
+	intel_lbf_lpm.host_wake = host_wake;
+	mutex_unlock(&intel_lbf_lpm.host_wake_lock);
+}
+
+/* get_tx_ref_count
+ *
+ * get the tx reference count.
+ *
+ * Arguments:
+ * void
+ *
+ * Return Value:
+ * tx reference count
+ */
+
+static inline int get_tx_ref_count(void)
+{
+	int ref_count;
+	mutex_lock(&intel_lbf_lpm.txref_lock);
+	ref_count = intel_lbf_lpm.tx_refcount;
+	mutex_unlock(&intel_lbf_lpm.txref_lock);
+	pr_info("%s:TX_ref_coun: %d\n", __func__, intel_lbf_lpm.tx_refcount);
+
+	return ref_count;
+}
+
+/* get_rx_ref_count
+ *
+ * get the rx reference count.
+ *
+ * Arguments:
+ * void
+ *
+ * Return Value:
+ * rx reference count
+ */
+static inline int get_rx_ref_count(void)
+{
+	int ref_count;
+	mutex_lock(&intel_lbf_lpm.rxref_lock);
+	ref_count = intel_lbf_lpm.rx_refcount;
+	mutex_unlock(&intel_lbf_lpm.rxref_lock);
+	pr_info("%s:rx_ref_coun: %d\n", __func__, intel_lbf_lpm.rx_refcount);
+
+	return ref_count;
+}
+
+/* set_rx_ref_count
+ *
+ * set the rx reference count.
+ *
+ * Arguments:
+ * count
+ *
+ * Return Value:
+ * void
+ */
+
+static inline void set_tx_ref_count(signed int count)
+{
+	mutex_lock(&intel_lbf_lpm.txref_lock);
+	intel_lbf_lpm.tx_refcount = intel_lbf_lpm.tx_refcount + count;
+	mutex_unlock(&intel_lbf_lpm.txref_lock);
+	pr_info("%s:Tx_ref_coun: %d\n", __func__, intel_lbf_lpm.tx_refcount);
+
+}
+
+/* set_tx_ref_count
+ *
+ * set the tx reference count.
+ *
+ * Arguments:
+ * count
+ *
+ * Return Value:
+ * void
+ */
+
+static inline void set_rx_ref_count(signed int count)
+{
+	mutex_lock(&intel_lbf_lpm.rxref_lock);
+	intel_lbf_lpm.rx_refcount = intel_lbf_lpm.rx_refcount + count;
+	mutex_unlock(&intel_lbf_lpm.rxref_lock);
+	pr_info("%s:rx_ref_coun: %d\n", __func__, intel_lbf_lpm.rx_refcount);
+
+}
+
+/* get_host_wake_state
+ *
+ * get the host wake state.
+ *
+ * Arguments:
+ * void
+ *
+ * Return Value:
+ * host_wake state
+ */
+
+static inline int get_host_wake_state(void)
+{
+	int host_wake;
+	mutex_lock(&intel_lbf_lpm.host_wake_lock);
+	host_wake = intel_lbf_lpm.host_wake;
+	mutex_unlock(&intel_lbf_lpm.host_wake_lock);
+
+	return host_wake;
+}
+
+/* update_host_wake_locked
+ *
+ * update the host_wake_locked
+ *
+ * Arguments:
+ * host_wake state
+ *
+ * Return Value:
+ * void
+ */
+
+static void update_host_wake_locked(int host_wake)
+{
+	int ret;
+	if (host_wake == intel_lbf_lpm.host_wake)
+		return;
+
+	set_host_wake_state(host_wake);
+
+	if (host_wake) {
+		WARN_ON(!intel_lbf_lpm.tty_dev);
+		if (!get_rx_ref_count()) {
+			hsu_enable(intel_lbf_lpm.tty_dev);
+			set_rx_ref_count(1);
+		}
+		if (!get_tx_ref_count()) {
+			set_tx_ref_count(1);
+			hsu_enable(intel_lbf_lpm.tty_dev);
+		}
+		set_device_state(D0);
+		ret = enqueue_dx_packet(hci_controlerwake_req_rsp,
+			WAKEUP_RSP_SIZE);
+		if (ret > 0)
+			lbf_tx_wakeup(NULL);
+	} else {
+
+try_again:
+		if (get_device_state() == D0)
+			lbf_tx_wakeup(NULL);
+		if (get_device_state() == D2_TO_D0) {
+			ret = wait_dx_exit();
+			goto try_again;
+		} else
+			pr_info(" Ignore");
+
+	}
+}
+
+/* irqreturn_t host_wake_isr
+ *
+ * callback called when irq is received
+ *
+ * Arguments:
+ *
+ * Return Value:
+ * irqreturn_t
+ */
+
+static irqreturn_t host_wake_isr(int irq, void *dev)
+{
+	int host_wake;
+
+	host_wake = gpio_get_value(intel_lbf_lpm.gpio_host_wake);
+
+	pr_debug("%s: lpm %s\n", __func__, host_wake ? "off" : "on");
+
+	irq_set_irq_type(irq, host_wake ? IRQF_TRIGGER_FALLING :
+							IRQF_TRIGGER_RISING);
+
+	if (!intel_lbf_lpm.tty_dev) {
+		intel_lbf_lpm.host_wake = host_wake;
+		return IRQ_HANDLED;
+	}
+
+	update_host_wake_locked(host_wake);
+
+	return IRQ_HANDLED;
+}
+
+
+/* activate_irq_handler
+ *
+ * Activaes the irq and registers the irq handler
+ *
+ * Arguments:
+ * void
+ * Return Value:
+ * void
+ */
+
+static void activate_irq_handler(void)
+{
+	int ret;
+
+	pr_debug("%s\n", __func__);
+
+	ret = request_irq(intel_lbf_lpm.int_host_wake, host_wake_isr,
+				IRQF_TRIGGER_RISING, "bt_host_wake", NULL);
+
+	if (ret < 0) {
+		pr_err("Error lpm request IRQ");
+		gpio_free(intel_lbf_lpm.gpio_host_wake);
+	}
+}
+
+/* intel_bt_lpm_init
+ *
+ * Activaes the irq and registers the irq handler
+ *
+ * Arguments:
+ * platform device
+ * Return Value:
+ * status of lpm initialization
+ */
+
+static int intel_bt_lpm_init(struct platform_device *pdev)
+{
+	int ret = 0;
+	struct device *tty_dev;
+
+	if (intel_lbf_lpm.gpio_host_wake < 0) {
+		pr_err("Error intel_lbf_lpm.gpio_host_wake\n");
+		return -ENODEV;
+	}
+
+	ret = irq_set_irq_wake(intel_lbf_lpm.int_host_wake, 1);
+	if (ret < 0) {
+		pr_err("Error lpm set irq IRQ");
+		gpio_free(intel_lbf_lpm.gpio_host_wake);
+		return ret;
+	}
+
+	tty_dev = intel_mid_hsu_set_wake_peer(intel_lbf_lpm.port,
+			NULL/*intel_bt_lpm_wake_peer*/);
+	if (!tty_dev) {
+		pr_err("Error no tty dev");
+		gpio_free(intel_lbf_lpm.gpio_host_wake);
+		return -ENODEV;
+	}
+
+	intel_lbf_lpm.tty_dev = tty_dev;
+
+	if (!int_handler_enabled) {
+		int_handler_enabled = true;
+		activate_irq_handler();
+	}
+	return 0;
+}
+
+/* check_unthrottle
+ *
+ * Unthrottle the tty buffer
+ *
+ * Arguments:
+ * tty structure
+ * Return Value:
+ * void
+ */
 
 static inline void check_unthrottle(struct tty_struct *tty)
 {
 	if (tty->count)
 		tty_unthrottle(tty);
 }
+
+/* send_d0_dx_packet
+ *
+ * send Dx request packet
+ *
+ * Arguments:
+ * void
+ * Return Value:
+ * status of Dx Request
+ */
+
+static int send_d0_dx_packet(void)
+{
+	int len;
+	int ret = 0;
+	pr_info("-> %s\n", __func__);
+	if (lbf_tx->tx_skb == NULL && !(skb_queue_len(&lbf_tx->txq)) &&
+		!get_bt_fmr_state() && !get_host_wake_state() &&
+			(get_device_state() == D0)) {
+		len = lbf_tty_write((void *) lbf_tx->tty, hci_dx_request,
+			DX_HCI_CMD_SIZE);
+		if (len != DX_HCI_CMD_SIZE) {
+			ret = enqueue_dx_packet(&hci_dx_request[len],
+					(DX_HCI_CMD_SIZE - len));
+			intel_lbf_lpm.dx_packet_pending =
+				(DX_HCI_CMD_SIZE - len);
+		} else
+			set_device_state(D0_TO_D2);
+	}
+	pr_info("<- %s\n", __func__);
+	return ret;
+}
+
+/* reset_buffer_flags
+ *
+ * Resets the st driver's buffer
+ *
+ * Arguments:
+ * void
+ * Return Value:
+ * void
+ */
 
 static void reset_buffer_flags(struct tty_struct *tty)
 {
@@ -148,7 +675,77 @@ static void reset_buffer_flags(struct tty_struct *tty)
 
 }
 
-int lbf_tx_wakeup(struct lbf_uart *lbf_uart)
+/* dx_pending_packet
+ *
+ * Handles if Dx packet couldnot be sent in one go
+ *
+ * Arguments:
+ * len
+ * Return Value:
+ * void
+ */
+
+static void dx_pending_packet(int len)
+{
+	if (intel_lbf_lpm.dx_packet_pending == len) {
+		intel_lbf_lpm.dx_packet_pending = 0;
+		set_device_state(D0_TO_D2);
+	} else
+		intel_lbf_lpm.dx_packet_pending =
+			intel_lbf_lpm.dx_packet_pending - len;
+
+}
+
+/* d0_pending_packet
+ *
+ * Handles if D0 packet couldnot be sent in one go
+ *
+ * Arguments:
+ * len
+ * Return Value:
+ * void
+ */
+
+static void d0_pending_packet(int len)
+{
+	if (intel_lbf_lpm.d0_packet_pending == len) {
+		intel_lbf_lpm.d0_packet_pending = 0;
+		set_device_state(D2_TO_D0);
+	} else
+		intel_lbf_lpm.d0_packet_pending =
+			intel_lbf_lpm.d0_packet_pending - len;
+
+}
+
+/* pending_dx_packet
+ *
+ * checks for Dx pending packet and update the dx pending packet
+ *
+ * Arguments:
+ * len
+ * Return Value:
+ * void
+ */
+
+static inline void pending_dx_packet(int len)
+{
+	if (intel_lbf_lpm.dx_packet_pending)
+		dx_pending_packet(len);
+	if (intel_lbf_lpm.d0_packet_pending)
+		d0_pending_packet(len);
+}
+
+/* lbf_tx_wakeup
+ *
+ * wakes up and does Tx operation
+ *
+ * Arguments:
+ * Driver's internal structure
+ * Return Value:
+ * void
+ */
+
+static void lbf_tx_wakeup(struct lbf_uart *lbf_uart)
 {
 	struct sk_buff *skb;
 	int len = 0;
@@ -158,9 +755,9 @@ int lbf_tx_wakeup(struct lbf_uart *lbf_uart)
 	if (lbf_tx->tbusy) {
 		lbf_tx->woke_up = 1;
 		mutex_unlock(&lbf_tx->tx_wakeup);
-		return len;
+		return;
 	}
-	lbf_tx->tbusy = 1; //busy.
+	lbf_tx->tbusy = 1; /* tx write is busy.*/
 
 check_again:
 	lbf_tx->woke_up = 0;
@@ -173,6 +770,8 @@ check_again:
 			set_bit(TTY_DO_WRITE_WAKEUP, &lbf_tx->tty->flags);
 			len = lbf_tty_write((void *) lbf_tx->tty, skb->data,
 					skb->len);
+			if (intel_lbf_lpm.lpm_enable == ENABLE)
+				pending_dx_packet(len);
 			skb_pull(skb, len);
 
 			if (skb->len) {
@@ -189,25 +788,14 @@ check_again:
 	if (lbf_tx->woke_up) {
 		goto check_again;
 	}
-	lbf_tx->tbusy = 0; // Done with Tx.
+	if (intel_lbf_lpm.lpm_enable == ENABLE)
+		send_d0_dx_packet();
+	lbf_tx->tbusy = 0; /* Done with Tx.*/
 	mutex_unlock(&lbf_tx->tx_wakeup);
 
+
 	pr_info("<- %s\n", __func__);
 
-
-	return len;
-}
-
-/* This is the internal write function - a wrapper
- * to tty->ops->write
- */
-int lbf_tty_write(struct tty_struct *tty, const unsigned char *data, int count)
-{
-	int len;
-	pr_info("-> %s\n", __func__);
-	len = tty->ops->write(tty, data, count);
-	pr_info("<- %s\n", __func__);
-	return  len;
 }
 
 static void lbf_tx_wakeup_work(struct work_struct *work)
@@ -215,15 +803,40 @@ static void lbf_tx_wakeup_work(struct work_struct *work)
 	lbf_tx_wakeup(NULL);
 }
 
-long lbf_write(struct sk_buff *skb)
+
+/* This is the internal write function - a wrapper
+ * to tty->ops->write
+ */
+int lbf_tty_write(struct tty_struct *tty, const unsigned char *data, int count)
 {
-	long len = skb->len;
+	struct lbf_uart *lbf_uart;
+	lbf_uart = tty->disc_data;
+	return lbf_uart->tty->ops->write(tty, data, count);
+}
+
+static long lbf_write(struct sk_buff *skb)
+{
+	long len = 0;
+	int ret = 0;
 	pr_info("-> %s\n", __func__);
 
-	lbf_enqueue(skb);
-	lbf_tx_wakeup(NULL);
+	print_hex_dump(KERN_DEBUG, "<FMR out<", DUMP_PREFIX_NONE, 16, 1, skb->data,
+			skb->len, 0);
+
+	if (intel_lbf_lpm.lpm_enable == ENABLE)
+		ret = lpm_tx_update(MODULE_FM);
+	/*ST to decide where to enqueue the skb */
+	if (!ret) {
+
+		lbf_enqueue(skb);
+		/* wake up */
+		len = skb->len;
+		lbf_tx_wakeup(NULL);
+	}
+
 	pr_info("<- %s\n", __func__);
 
+	/* return number of bytes written */
 	return len;
 }
 
@@ -372,7 +985,8 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	tty->disc_data = lbf_uart;
 	lbf_uart->tty = tty;
 	lbf_tx->tty = tty;
-
+	skb_queue_head_init(&lbf_tx->txq);
+	skb_queue_head_init(&lbf_tx->tx_waitq);
 	/* don't do an wakeup for now */
 	clear_bit(TTY_DO_WRITE_WAKEUP, &tty->flags);
 
@@ -391,11 +1005,9 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	}
 
 	tty->receive_room = RECEIVE_ROOM;
-
-	skb_queue_head_init(&lbf_tx->txq);
-	skb_queue_head_init(&lbf_tx->tx_waitq);
 	spin_lock_init(&lbf_uart->rx_lock);
 	spin_lock_init(&lbf_tx->lock);
+
 	mutex_init(&lbf_tx->tx_wakeup);
 	INIT_WORK(&lbf_tx->tx_wakeup_work, lbf_tx_wakeup_work);
 	spin_lock_init(&lbf_uart->tx_lock);
@@ -404,9 +1016,16 @@ static int lbf_ldisc_open(struct tty_struct *tty)
 	mutex_init(&lbf_tx->writelock);
 	mutex_init(&lbf_tx->fwdownloadlock);
 
-	init_waitqueue_head(&lbf_uart->read_wait);
+	mutex_init(&intel_lbf_lpm.lpmenable);
+	mutex_init(&intel_lbf_lpm.lpm_modulestate);
 	mutex_init(&lbf_uart->atomic_read_lock);
+
+
+	init_waitqueue_head(&lbf_uart->read_wait);
+
 	lbf_ldisc_running = 1;
+	intel_lbf_lpm.device_state = D0;
+	fw_download_state = 0;
 	/* Flush any pending characters in the driver and line discipline. */
 	reset_buffer_flags(tty);
 
@@ -429,12 +1048,19 @@ static void lbf_ldisc_close(struct tty_struct *tty)
 {
 	struct lbf_uart *lbf_uart = (void *) tty->disc_data;
 	tty->disc_data = NULL; /* Detach from the tty */
+
 	pr_info("-> %s\n", __func__);
+	
+	if (intel_lbf_lpm.lpm_enable == ENABLE &&
+		intel_lbf_lpm.module_refcount > 0) {
+		intel_lbf_lpm.module_refcount = 0;
+		lbf_ldisc_lpm_enable_cleanup();
+		intel_lbf_lpm.lpm_enable = DISABLE;
+	}
 
 	skb_queue_purge(&lbf_tx->txq);
 	skb_queue_purge(&lbf_tx->tx_waitq);
 	lbf_uart->rx_count = 0;
-	fw_download_state = 0;
 	lbf_uart->rx_state = LBF_W4_H4_HDR;
 
 	kfree_skb(lbf_uart->rx_skb);
@@ -446,6 +1072,7 @@ static void lbf_ldisc_close(struct tty_struct *tty)
 	kfree(lbf_tx);
 	kfree(lbf_uart);
 }
+
 
 /* lbf_ldisc_wakeup()
  *
@@ -463,10 +1090,10 @@ static void lbf_ldisc_wakeup(struct tty_struct *tty)
 
 	clear_bit(TTY_DO_WRITE_WAKEUP, &lbf_uart->tty->flags);
 
-	/*lbf_tx_wakeup(NULL);*/
 	schedule_work(&lbf_tx->tx_wakeup_work);
 
 	pr_info("<- %s\n", __func__);
+
 
 }
 
@@ -486,15 +1113,14 @@ static inline int select_proto(int type)
  * push the skb received to relevant
  * protocol stacks
  * Arguments : tty pointer to associated tty instance data
- lbf_uart : Disc data for tty
- chnl_id : id to either BT or FMR
+ * lbf_uart : Disc data for tty
  * Return Type: int
  */
 static int st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 {
 	unsigned int i = 0;
 	int ret = 0;
-	int chnl_id = LBF_BT;
+	int chnl_id = MODULE_BT;
 	unsigned char *buff;
 	unsigned int opcode = 0;
 	unsigned int count = 0;
@@ -503,7 +1129,16 @@ static int st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 		pr_info(" No channel registered, no data to send?");
 		return ret;
 	}
+
 	buff = &lbf_uart->rx_skb->data[0];
+	/*TODO: Modularize this*/
+	if (lbf_uart->rx_skb->data[0] == LPM_PKT) {
+		if (lbf_uart->rx_skb->data[1] == TX_HOST_NOTIFICATION)
+			if (lbf_uart->rx_skb->data[3] == IDLE)
+				update_host_wake_locked(IDLE);
+				goto lpm_packet;
+	}
+
 	count = lbf_uart->rx_skb->len;
 	STREAM_TO_UINT16(opcode, buff);
 	pr_info("opcode : 0x%x event code: 0x%x registered", opcode,
@@ -520,20 +1155,20 @@ static int st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 		case FMR_SET_AUDIO:
 		case FMR_TOP_READ:
 		case FMR_TOP_WRITE:
-			chnl_id = LBF_FM;
-			pr_info("Its FM event ");
+			chnl_id = MODULE_FM;
+			pr_info("Its FM event\n");
 			break;
 		default:
-			chnl_id = LBF_BT;
-			pr_info("Its BT event ");
+			chnl_id = MODULE_BT;
+			pr_info("Its BT event\n");
 			break;
 		}
 	}
 	if (HCI_INTERRUPT_EVENT == lbf_uart->rx_skb->data[1]
 			&& (lbf_uart->rx_skb->data[3] == FMR_DEBUG_EVENT))
-		chnl_id = LBF_FM;
+		chnl_id = MODULE_FM;
 
-	if (chnl_id == LBF_FM) {
+	if (chnl_id == MODULE_FM) {
 		if (likely(fm)) {
 			if (likely(fm->fm_cmd_handler != NULL)) {
 				if (unlikely(fm->fm_cmd_handler(fm->
@@ -546,10 +1181,11 @@ static int st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 		}
 	else
 		pr_info("fm is NULL ");
-	} else if (chnl_id == LBF_BT) {
+	} else if (chnl_id == MODULE_BT) {
 		pr_info(" Added in buffer inside count %d readhead %d read_cnt: %d\n", count
 			, lbf_uart->read_head, lbf_uart->read_cnt);
 		spin_lock(&lbf_uart->tx_lock);
+
 		i = min3((N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_cnt),
 				N_INTEL_LDISC_BUF_SIZE - lbf_uart->read_head,
 				(int)lbf_uart->rx_skb->len);
@@ -562,7 +1198,7 @@ static int st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 		lbf_uart->read_cnt += i;
 		spin_unlock(&lbf_uart->tx_lock);
 		count = count - i;
-		pr_info("count: %d, i:%d read_cnt:%d\n", count, i, lbf_uart->read_cnt);
+		pr_info("count: %d , written:%d read_cnt:%d", count, i, lbf_uart->read_cnt);
 
 		if (unlikely(count)) {
 			pr_info(" Added in buffer inside count %d readhead %d\n"
@@ -580,9 +1216,10 @@ static int st_send_frame(struct tty_struct *tty, struct lbf_uart *lbf_uart)
 			(lbf_uart->read_head + i) & (N_INTEL_LDISC_BUF_SIZE-1);
 			lbf_uart->read_cnt += i;
 			spin_unlock(&lbf_uart->tx_lock);
-			pr_info("count: %d , i:%d read_cnt:%d\n", count, i, lbf_uart->read_cnt);
 		}
 	}
+
+lpm_packet:
 
 	if (lbf_uart->rx_skb) {
 		kfree_skb(lbf_uart->rx_skb);
@@ -620,6 +1257,394 @@ static int lbf_ldisc_fw_download_init(void)
 	return ret;
 }
 
+/* wait_dx_exit()
+ * wait until Dx to D0 transition is completed
+ * Return Type: status
+ * Dx wake status
+ */
+
+static int wait_dx_exit(void)
+{
+	while (!intel_lbf_lpm.bt_wake) {
+		DEFINE_WAIT(wait);
+
+		prepare_to_wait(&waitFordxexit, &wait, TASK_INTERRUPTIBLE);
+
+		if (!intel_lbf_lpm.bt_wake)
+			schedule();
+
+		finish_wait(&waitFordxexit, &wait);
+
+		if (signal_pending(current))
+			return -ERESTARTSYS;
+
+	}
+
+	return 0;
+}
+
+/* wait_d0_exit()
+ * wait until D0 to Dx transition is completed
+ * Return Type: status
+ * D0 exit status
+ */
+
+static int wait_d0_exit(void)
+{
+	while (intel_lbf_lpm.bt_wake) {
+		DEFINE_WAIT(wait);
+
+		prepare_to_wait(&waitFord0exit, &wait, TASK_INTERRUPTIBLE);
+
+		if (intel_lbf_lpm.bt_wake)
+			schedule();
+
+		finish_wait(&waitFord0exit, &wait);
+
+		if (signal_pending(current))
+			return -ERESTARTSYS;
+
+	}
+
+	return 0;
+}
+
+/* enqueue_dx_packet()
+ * Enqueue the Dx packet
+ * Return Type: status
+ * enqueue status
+ */
+
+static int enqueue_dx_packet(uint8_t *hci_cmd, int size)
+{
+	struct sk_buff *skb;
+	pr_info("--> send_dx_packet: SKIP");
+
+	skb = alloc_skb(size, GFP_ATOMIC);
+	if (!skb)
+		return -ENOMEM;
+
+	memcpy(skb_put(skb, size), hci_cmd, size);
+	lbf_enqueue(skb);
+	return 0;
+}
+
+/* send_d0_packet()
+ * Send the D0 packet
+ * Return Type: status
+ * sending the d0 packet sending status
+ */
+
+static int send_d0_packet(void)
+{
+	int len;
+
+	len = lbf_tty_write((void *) lbf_tx->tty, hci_dx_wake,
+			D0_HCI_CMD_SIZE);
+	if (len != D0_HCI_CMD_SIZE) {
+		len = enqueue_dx_packet(&hci_dx_wake[len],
+				(D0_HCI_CMD_SIZE - len));
+		intel_lbf_lpm.d0_packet_pending = (D0_HCI_CMD_SIZE - len);
+	} else
+		set_device_state(D2_TO_D0);
+
+	return len;
+}
+
+/* lpm_tx_update()
+ * update the device and module states on tx  being received
+ * Return Type: status
+ * D0 packet sending status
+ */
+
+static int lpm_tx_update(int module)
+{
+	struct lbf_uart *lbf_ldisc;
+	int ret = 0;
+	pr_info("-> %s\n", __func__);
+
+	lbf_ldisc = (struct lbf_uart *) lbf_tx->tty->disc_data;
+
+	mutex_lock(&intel_lbf_lpm.lpmtxlock);
+
+	mutex_lock(&intel_lbf_lpm.lpm_modulestate);
+
+	switch (module) {
+	case  MODULE_FM:
+		pr_info("<- fm_module_state:1\n");
+		if (intel_lbf_lpm.fm_module_state == ACTIVE)
+			goto exit;
+		intel_lbf_lpm.fm_module_state = ACTIVE;
+		break;
+	case MODULE_BT:
+		pr_info("<- bt_module_state:1\n");
+		if (intel_lbf_lpm.bt_module_state == ACTIVE)
+			goto exit;
+		intel_lbf_lpm.bt_module_state = ACTIVE;
+		break;
+	}
+
+	mutex_unlock(&intel_lbf_lpm.lpm_modulestate);
+	set_bt_fmr_state();
+
+check_refcount:
+	if ((get_bt_fmr_state() == IDLE) && (get_device_state() == D2 || get_device_state() == D3)) {
+
+		if (!get_tx_ref_count()) {
+			set_tx_ref_count(1);
+			WARN_ON(!intel_lbf_lpm.tty_dev);
+			hsu_enable(intel_lbf_lpm.tty_dev);
+		}
+
+		ret = send_d0_packet();
+		if (ret > 0)
+			ret = wait_dx_exit();
+		else
+			pr_info("Error sending D0 packet\n");
+
+
+	} else if (get_device_state() == D0_TO_D2) {
+
+			ret = wait_d0_exit();
+			goto check_refcount;
+	}
+
+	mutex_unlock(&intel_lbf_lpm.lpmtxlock);
+	return ret;
+
+exit:
+	mutex_unlock(&intel_lbf_lpm.lpm_modulestate);
+	mutex_unlock(&intel_lbf_lpm.lpmtxlock);
+	pr_info("-> %s After unlock intel_lbf_lpm.lpmtxlock\n", __func__);
+	return ret;
+}
+
+/* lbf_ldisc_lpm_enable_cleanup()
+ * Reset all the device and module states
+ * Return Type: void
+ */
+
+static void lbf_ldisc_lpm_enable_cleanup(void)
+{
+	pr_info("-> %s\n", __func__);
+
+	if (get_rx_ref_count()) {
+		hsu_disable(intel_lbf_lpm.tty_dev);
+		set_rx_ref_count(-1);
+	}
+	if (get_tx_ref_count()) {
+		hsu_disable(intel_lbf_lpm.tty_dev);
+		set_tx_ref_count(-1);
+	}
+
+	if (intel_lbf_lpm.gpio_host_wake > 0) {
+		free_irq(intel_lbf_lpm.int_host_wake, NULL);
+		gpio_free(intel_lbf_lpm.gpio_host_wake);
+		pr_info("<-Freeing the GPIO%s\n", __func__);
+	}
+
+	pr_info("<- %s\n", __func__);
+
+}
+
+/* lbf_ldisc_lpm_enable_init()
+ * Initializzes all the device and module states
+ * Return Type: void
+ */
+
+static void lbf_ldisc_lpm_enable_init(void)
+{
+	pr_info("-> %s\n", __func__);
+
+	if (!get_rx_ref_count()) {
+		hsu_enable(intel_lbf_lpm.tty_dev);
+		set_rx_ref_count(1);
+	}
+	if (!get_tx_ref_count()) {
+		set_tx_ref_count(1);
+		hsu_enable(intel_lbf_lpm.tty_dev);
+	}
+	set_device_state(D0);
+
+	intel_lbf_lpm.bt_wake = HIGH;
+	intel_lbf_lpm.host_wake = HIGH;
+	intel_lbf_lpm.bt_module_state = IDLE;
+	intel_lbf_lpm.fm_module_state = IDLE;
+	intel_lbf_lpm.bt_fmr_state = IDLE;
+
+	pr_info("<- %s\n", __func__);
+}
+
+
+/* lbf_ldisc_lpm_enable()
+ * IOCTL to enable LPM in st driver
+ * Return Type: int
+ * status of LPM initialization
+ */
+
+static int lbf_ldisc_lpm_enable(unsigned long arg)
+{
+	int ret = -EINVAL;
+	struct bcm_bt_lpm_platform_data *pdata = NULL;
+	pr_info("-> %s\n", __func__);
+
+
+	mutex_lock(&intel_lbf_lpm.lpmenable);
+
+	if (arg == ENABLE) {
+		++intel_lbf_lpm.module_refcount;
+		pr_info("-> %s module refcount: %d\n", __func__, intel_lbf_lpm.module_refcount);
+		if (arg == intel_lbf_lpm.lpm_enable) {
+			mutex_unlock(&intel_lbf_lpm.lpmenable);
+			return 0;
+		}
+
+		mutex_init(&intel_lbf_lpm.devicest_lock);
+		mutex_init(&intel_lbf_lpm.host_wake_lock);
+		mutex_init(&intel_lbf_lpm.lpmtxlock);
+		mutex_init(&intel_lbf_lpm.idleupdatelock);
+		mutex_init(&intel_lbf_lpm.rxref_lock);
+		mutex_init(&intel_lbf_lpm.txref_lock);
+
+		if (intel_lbf_lpm.pdev != NULL)
+			pdata = intel_lbf_lpm.pdev->dev.platform_data;
+		else {
+			ret = -EINVAL;
+			goto err_platform_pdata_invalid;
+		}
+
+		if (pdata != NULL) {
+			if (!gpio_is_valid(pdata->gpio_host_wake)) {
+				pr_err("%s: gpio not valid\n", __func__);
+				ret = -EINVAL;
+				goto err_gpio_hostwake_invalid;
+			}
+		} else {
+				ret = -EINVAL;
+				goto err_pdata_invalid;
+		}
+
+
+		intel_lbf_lpm.gpio_host_wake = pdata->gpio_host_wake;
+		intel_lbf_lpm.int_host_wake = pdata->int_host_wake;
+
+		ret = gpio_request(intel_lbf_lpm.gpio_host_wake, intel_lbf_lpm.pdev->name);
+		if (ret < 0) {
+			pr_err("%s: Unable to request gpio %d\n",
+						__func__, intel_lbf_lpm.gpio_host_wake);
+			ret = -EINVAL;
+			goto err_gpio_host_wake_req;
+		}
+
+		ret = gpio_direction_input(intel_lbf_lpm.gpio_host_wake);
+		if (ret < 0) {
+			pr_err("%s: Unable to set direction for gpio %d\n", __func__,
+								intel_lbf_lpm.gpio_host_wake);
+			ret = -EINVAL;
+			goto err_gpio_host_wake_dir;
+		}
+
+		pr_info("%s: gpio_enable=%d, gpio_host_wake=%d\n",
+								__func__,
+								intel_lbf_lpm.gpio_enable_bt,
+								intel_lbf_lpm.gpio_host_wake);
+		int_handler_enabled = false;
+
+		ret = intel_bt_lpm_init(intel_lbf_lpm.pdev);
+		if (ret)
+			goto err_lpm_init;
+
+		intel_lbf_lpm.lpm_enable = ENABLE;
+		intel_lbf_lpm.rx_refcount = 0;
+		intel_lbf_lpm.tx_refcount = 0;
+		get_rx_ref_count();
+		get_tx_ref_count();
+
+		pr_info("LPM enabled success\n");
+	} else {
+
+		--intel_lbf_lpm.module_refcount;
+		if (!intel_lbf_lpm.module_refcount) {
+			lbf_ldisc_lpm_enable_cleanup();
+			intel_lbf_lpm.lpm_enable = DISABLE;
+		}
+	}
+
+	mutex_unlock(&intel_lbf_lpm.lpmenable);
+	pr_info("<- %s\n", __func__);
+
+	return ret;
+
+err_lpm_init:
+err_gpio_host_wake_dir:
+	gpio_free(intel_lbf_lpm.gpio_host_wake);
+err_gpio_host_wake_req:
+err_platform_pdata_invalid:
+err_pdata_invalid:
+err_gpio_hostwake_invalid:
+
+	mutex_unlock(&intel_lbf_lpm.lpmenable);
+	return ret;
+}
+
+/* lbf_ldisc_lpm_idle()
+ * IOCTL to send module IDLE State from userspace
+ * Return Type: void
+ */
+
+static int lbf_ldisc_lpm_idle(unsigned long arg)
+{
+	int ret = -1;
+
+	return 0; /* To enabled pm runtime only*/
+
+	mutex_lock(&intel_lbf_lpm.idleupdatelock);
+	mutex_lock(&intel_lbf_lpm.lpm_modulestate);
+
+	switch (arg) {
+	case  MODULE_FM:
+		intel_lbf_lpm.fm_module_state = IDLE;
+		break;
+	case MODULE_BT:
+		intel_lbf_lpm.bt_module_state = IDLE;
+		break;
+	}
+
+	mutex_unlock(&intel_lbf_lpm.lpm_modulestate);
+
+
+	set_bt_fmr_state();
+
+try_again:
+	if (get_device_state() == D0)
+		lbf_tx_wakeup(NULL);
+	else if ((get_device_state() == D2_TO_D0)) {
+		ret = wait_dx_exit();
+		goto try_again;
+	}
+
+	mutex_unlock(&intel_lbf_lpm.idleupdatelock);
+	pr_info("-> %s After unlock intel_lbf_lpm.idleupdatelock\n", __func__);
+	return 0;
+}
+
+/* lbf_ldisc_hostwake()
+ * IOCTL to send hostwake from userspace
+ * Return Type: void
+ */
+
+static void lbf_ldisc_hostwake(unsigned long arg)
+{
+	switch (arg) {
+	case ENABLE:
+		update_host_wake_locked(arg);
+		break;
+	case DISABLE:
+		update_host_wake_locked(arg);
+		break;
+	}
+}
+
 /* lbf_ldisc_fw_download_complete()
  * unlock the Mutex to unblock the IOCTL on 2nd call
  * Return Type: void
@@ -636,6 +1661,41 @@ static void lbf_ldisc_fw_download_complete(unsigned long arg)
 	mutex_unlock(&lbf_tx->fwdownloadlock);
 }
 
+/* st_wakeup_packet_processing()
+ * Processes all the LPM packet
+ * Return Type: void
+ */
+
+static void st_wakeup_packet_processing(struct lbf_uart *lbf_uart)
+{
+	if (lbf_uart->rx_skb->data[0] == 0xF1) {
+		switch (lbf_uart->rx_skb->data[1]) {
+		case ACK_RSP:
+			WARN_ON(!intel_lbf_lpm.tty_dev);
+			if (get_tx_ref_count()) {
+				set_tx_ref_count(-1);
+				hsu_disable(intel_lbf_lpm.tty_dev);
+			}
+			wake_up_interruptible(&waitFord0exit);
+			if (get_rx_ref_count()) {
+				set_rx_ref_count(-1);
+				hsu_disable(intel_lbf_lpm.tty_dev);
+			}
+			set_device_state(D2);
+			break;
+		case WAKE_UP_RSP:
+			pr_info("st_check_data_len: WAKE_UP_RSP\n");
+			intel_lbf_lpm.bt_wake = HIGH;
+			set_device_state(D0);
+			wake_up_interruptible(&waitFordxexit);
+			if (!get_tx_ref_count()) {
+				set_tx_ref_count(1);
+				hsu_enable(intel_lbf_lpm.tty_dev);
+			}
+		}
+	}
+
+}
 /* st_check_data_len()
  * push the skb received to relevant
  * protocol stacks
@@ -654,7 +1714,11 @@ static inline int st_check_data_len(struct lbf_uart *lbf_uart, int len)
 		 * has zero length payload. So, ask ST CORE to
 		 * forward the packet to protocol driver (BT/FM/GPS)
 		 */
-		st_send_frame(lbf_uart->tty, lbf_uart);
+		 if (intel_lbf_lpm.lpm_enable == ENABLE) {
+			st_wakeup_packet_processing(lbf_uart);
+			goto pm_packet;
+		} else
+			st_send_frame(lbf_uart->tty, lbf_uart);
 
 	} else if (len > room) {
 		/* Received packet's payload length is larger.
@@ -675,6 +1739,7 @@ static inline int st_check_data_len(struct lbf_uart *lbf_uart, int len)
 
 	/* Change LDISC state to continue to process next
 	 * packet */
+pm_packet:
 	lbf_uart->rx_state = LBF_W4_H4_HDR;
 	lbf_uart->rx_skb = NULL;
 	lbf_uart->rx_count = 0;
@@ -704,7 +1769,7 @@ static void lbf_update_set_room(struct tty_struct *tty, signed int cnt)
 	left = tty->receive_room + cnt;
 
 	if (left < 0)
-		left = 0;
+		tty->receive_room = 0;
 	old_left = tty->receive_room;
 	tty->receive_room = left;
 	spin_unlock(&lbf_uart->tx_update_lock);
@@ -759,8 +1824,8 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 	unsigned long flags;
 
 	pr_info("-> %s\n", __func__);
-	/*print_hex_dump(KERN_DEBUG, ">in>", DUMP_PREFIX_NONE, 16, 1, cp, count,
-			0);*/
+	print_hex_dump(KERN_DEBUG, ">in>", DUMP_PREFIX_NONE, 16, 1, cp, count,
+			0);
 	ptr = (unsigned char *) cp;
 	if (unlikely(ptr == NULL) || unlikely(lbf_uart == NULL)) {
 		pr_info(" received null from TTY ");
@@ -795,15 +1860,19 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				continue;
 			}
 			switch (*ptr) {
-			case LL_SLEEP_ACK:
+			case LPM_PKT:
 				pr_debug("PM packet");
-				continue;
-			case LL_WAKE_UP_ACK:
-				pr_debug("PM packet");
+				lbf_uart->rx_state = LBF_W4_PKT_HDR;
+				lbf_uart->rx_chnl = PM_PKT;
+				lbf_uart->rx_count =
+				lbf_st_proto[lbf_uart->rx_chnl].hdr_len;
+
 				continue;
 			default:
 				type = *ptr;
 				proto = select_proto(type);
+				if (type == LPM_PKT)
+					proto = 0;
 				if (proto != INVALID) {
 					lbf_uart->rx_skb = alloc_skb(1700,
 						GFP_ATOMIC);
@@ -871,17 +1940,16 @@ static void lbf_ldisc_receive(struct tty_struct *tty, const u8 *cp, char *fp,
 				count = 0;
 			}
 
-			if (st_ret > 0)
-				lbf_update_set_room(tty, st_ret);
+			lbf_update_set_room(tty, st_ret);
 			continue;
 
 		} /* end of switch rx_state*/
-
 	} /* end of while*/
 
 	spin_unlock_irqrestore(&lbf_uart->rx_lock, flags);
 
 	if (waitqueue_active(&lbf_uart->read_wait)) {
+		pr_info("-> %s waitqueue_active\n", __func__);
 		wake_up_interruptible(&lbf_uart->read_wait);
 	}
 
@@ -912,10 +1980,22 @@ static int lbf_ldisc_ioctl(struct tty_struct *tty, struct file *file,
 	pr_info("-> %s\n", __func__);
 	switch (cmd) {
 	case BT_FW_DOWNLOAD_INIT:
+		pr_info("BT_FW_DOWNLOAD_INIT");
 		err = lbf_ldisc_fw_download_init();
 		break;
 	case BT_FW_DOWNLOAD_COMPLETE:
 		lbf_ldisc_fw_download_complete(arg);
+		break;
+	case BT_FMR_LPM_ENABLE:
+	{	pr_info("BT_FMR_LPM_ENABLE\n");
+		lbf_ldisc_lpm_enable(arg);
+	}
+		break;
+	case BT_FMR_IDLE:
+		lbf_ldisc_lpm_idle(arg);
+		break;
+	case BT_HOST_WAKE:
+		lbf_ldisc_hostwake(arg);
 		break;
 	default:
 		err = n_tty_ioctl_helper(tty, file, cmd, arg);
@@ -961,6 +2041,17 @@ static int copy_from_read_buf(struct tty_struct *tty,
 	return n;
 }
 
+/* lbf_ldisc_get_read_cnt()
+ *
+ * Gets the read count available currently
+ *
+ * Arguments:
+ *
+ * void
+ *
+ * Return Value: number of bytes available to be copied to user space
+ *
+ */
 static unsigned int lbf_ldisc_get_read_cnt(void)
 {
 	int read_cnt = 0;
@@ -1039,8 +2130,6 @@ static ssize_t lbf_ldisc_read(struct tty_struct *tty, struct file *file,
 	__set_current_state(TASK_RUNNING);
 	remove_wait_queue(&lbf_uart->read_wait, &lbf_uart->wait);
 
-
-
 	size = b - buf;
 	if (size)
 		retval = size;
@@ -1071,11 +2160,12 @@ static ssize_t lbf_ldisc_write(struct tty_struct *tty, struct file *file,
 {
 	struct sk_buff *skb = alloc_skb(count + 1, GFP_ATOMIC);
 	int len = 0;
-
+	int ret = 0;
 	pr_info("-> %s\n", __func__);
 
+
 	print_hex_dump(KERN_DEBUG, "<BT<", DUMP_PREFIX_NONE, 16, 1, data,
-			count, 0);
+		count, 0);
 
 	if (!skb)
 		return -ENOMEM;
@@ -1083,9 +2173,13 @@ static ssize_t lbf_ldisc_write(struct tty_struct *tty, struct file *file,
 	memcpy(skb_put(skb, count), data, count);
 	len = count;
 
-	lbf_enqueue(skb);
+	if (intel_lbf_lpm.lpm_enable == ENABLE)
+		ret = lpm_tx_update(MODULE_BT);
 
-	lbf_tx_wakeup(NULL);
+	if (!ret) {
+		lbf_enqueue(skb);
+		lbf_tx_wakeup(NULL);
+	}
 
 	pr_info("<- %s\n", __func__);
 	return len;
@@ -1156,9 +2250,12 @@ static void lbf_ldisc_set_termios(struct tty_struct *tty, struct ktermios *old)
 }
 
 
+
+
 static int intel_bluetooth_pdata_probe(struct platform_device *pdev)
 {
 	struct bcm_bt_lpm_platform_data *pdata = pdev->dev.platform_data;
+	intel_lbf_lpm.pdev = pdev;
 	pr_info("%s\n", __func__);
 	if (pdata == NULL) {
 		pr_err("Cannot register bcm_bt_lpm drivers, pdata is NULL\n");
@@ -1170,7 +2267,8 @@ static int intel_bluetooth_pdata_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	bt_lpm.gpio_enable_bt = pdata->gpio_enable;
+	intel_lbf_lpm.gpio_enable_bt = pdata->gpio_enable;
+	intel_lbf_lpm.port = pdata->port;
 	return 0;
 }
 
@@ -1178,27 +2276,26 @@ static void bt_rfkill_set_power(unsigned long blocked)
 {
 	pr_info("%s blocked: %lu\n", __func__, blocked);
 	if (ENABLE == blocked) {
-		gpio_set_value(bt_lpm.gpio_enable_bt, 1);
+		gpio_set_value(intel_lbf_lpm.gpio_enable_bt, 1);
 		pr_err("%s: turn BT on\n", __func__);
 		bt_enable_state = ENABLE;
+		if (intel_lbf_lpm.lpm_enable == ENABLE)
+			lbf_ldisc_lpm_enable_init();
 	} else if (DISABLE == blocked) {
-		gpio_set_value(bt_lpm.gpio_enable_bt, 0);
+		gpio_set_value(intel_lbf_lpm.gpio_enable_bt, 0);
 		pr_err("%s: turn BT off\n", __func__);
 		bt_enable_state = DISABLE;
 	}
 }
 
 
-static int intel_lpm_bluetooth_probe(struct platform_device *pdev)
+static int intel_bluetooth_probe(struct platform_device *pdev)
 {
 	int default_state = 0;	/* off */
 	int ret = 0;
 
 	pr_info("%s\n", __func__);
-	if (pdev == NULL)
-		pr_err("%s pdev NULL", __func__);
-	else
-		bt_lpm.tty_dev = &pdev->dev;
+
 
 	ret = intel_bluetooth_pdata_probe(pdev);
 
@@ -1207,39 +2304,42 @@ static int intel_lpm_bluetooth_probe(struct platform_device *pdev)
 		goto err_data_probe;
 	}
 
-	ret = gpio_request(bt_lpm.gpio_enable_bt, pdev->name);
+	ret = gpio_request(intel_lbf_lpm.gpio_enable_bt, pdev->name);
 	if (ret < 0) {
 		pr_err("%s: Unable to request gpio %d\n", __func__,
-				bt_lpm.gpio_enable_bt);
+				intel_lbf_lpm.gpio_enable_bt);
 		goto err_gpio_enable_req;
 	}
 
-	ret = gpio_direction_output(bt_lpm.gpio_enable_bt, 0);
+	ret = gpio_direction_output(intel_lbf_lpm.gpio_enable_bt, 0);
 	if (ret < 0) {
 		pr_err("%s: Unable to set int direction for gpio %d\n",
-			__func__, bt_lpm.gpio_enable_bt);
+			__func__, intel_lbf_lpm.gpio_enable_bt);
 		goto err_gpio_enable_dir;
 	}
-
-	pr_err("OFF : %s: gpio_enable=%d\n", __func__, bt_lpm.gpio_enable_bt);
 
 	bt_rfkill_set_power(default_state);
 
 	return ret;
 
+
 err_gpio_enable_dir:
-	gpio_free(bt_lpm.gpio_enable_bt);
+	gpio_free(intel_lbf_lpm.gpio_enable_bt);
 err_gpio_enable_req:
 err_data_probe:
 	return ret;
 }
 
-static int intel_lpm_bluetooth_remove(struct platform_device *pdev)
+static int intel_bluetooth_remove(struct platform_device *pdev)
 {
 	pr_err("%s\n", __func__);
-	gpio_free(bt_lpm.gpio_enable_bt);
+	gpio_free(intel_lbf_lpm.gpio_enable_bt);
+	if (intel_lbf_lpm.gpio_host_wake > 0)
+		gpio_free(intel_lbf_lpm.gpio_host_wake);
 	return 0;
 }
+
+
 
 /*Line discipline op*/
 static struct tty_ldisc_ops lbf_ldisc = {
@@ -1259,8 +2359,8 @@ static struct tty_ldisc_ops lbf_ldisc = {
 };
 
 static struct platform_driver intel_bluetooth_platform_driver = {
-	.probe = intel_lpm_bluetooth_probe,
-	.remove = intel_lpm_bluetooth_remove,
+	.probe = intel_bluetooth_probe,
+	.remove = intel_bluetooth_remove,
 	.suspend = NULL,
 	.resume = NULL,
 	.driver = {
