@@ -86,6 +86,8 @@
 /* 100mA value definition for setting the inlimit in bq24261 */
 #define USBINPUTICC100VAL	100
 
+#define OHM_MULTIPLIER		10
+
 /* Type definitions */
 static void pmic_bat_zone_changed(void);
 static void pmic_battery_overheat_handler(bool);
@@ -695,15 +697,16 @@ static void pmic_get_bat_zone(int *bat_zone)
 static void pmic_bat_zone_changed(void)
 {
 	int retval;
-	int cur_zone;
+	int cur_zone, temp = 0;
 	u16 addr = 0;
 	u8 data = 0;
 	struct power_supply *psy_bat;
 	int vendor_id;
 
 	pmic_get_bat_zone(&cur_zone);
-	dev_info(chc.dev, "Battery Zone changed. Current zone is %d\n",
-			cur_zone);
+	pmic_get_battery_pack_temp(&temp);
+	dev_info(chc.dev, "Battery Zone changed. Current zone:%d, temp:%d\n",
+			cur_zone, temp);
 
 	/* if current zone is the top and bottom zones then report OVERHEAT
 	 */
@@ -847,6 +850,79 @@ static inline int update_zone_cv(int zone, u8 reg_val)
 	return pmic_write_tt(addr_cv, reg_val);
 }
 
+/**
+ * get_scove_tempzone_val - get tempzone register val for a particular zone
+ * @adc_val: adc_value passed for zone temp
+ * @temp: zone temperature
+ *
+ * Returns temp zone alert value
+ */
+static u16 get_scove_tempzone_val(u16 resi_val, int temp)
+{
+	u8 cursel = 0, hys = 0;
+	u16 trsh = 0, count = 0, bsr_num = 0;
+	u16 adc_thold = 0, tempzone_val = 0;
+	s16 hyst = 0;
+	int retval;
+
+	/* multiply to convert into Ohm*/
+	resi_val *= OHM_MULTIPLIER;
+
+	/* CUR = max(floor(log2(round(ADCNORM/2^5)))-7,0)
+	 * TRSH = round(ADCNORM/(2^(4+CUR)))
+	 * HYS = if(∂ADCNORM>0 then max(round(∂ADCNORM/(2^(7+CUR))),1) else 0
+	 */
+
+	/*
+	 * while calculating the CUR[2:0], instead of log2
+	 * do a BSR (bit scan reverse) since we are dealing with integer values
+	 */
+	bsr_num = resi_val;
+	bsr_num /= (1 << 5);
+
+	while (bsr_num >>= 1)
+		count++;
+
+	/* cursel = max((count - 7), 0);
+	 * Clamp cursel to 3-bit value
+	 */
+	cursel = clamp_t(s8, (count-7), 0, 7);
+
+	/* calculate the TRSH[8:0] to be programmed */
+	trsh = ((resi_val) / (1 << (4 + cursel)));
+
+	/* calculate HYS[3:0] */
+	/* add the temp hysteresis depending upon the zones */
+	if (temp <= 0 || temp >= 60)
+		temp += 1;
+	else
+		temp += 2;
+
+	/* retrieve the resistance corresponding to temp with hysteresis */
+	retval = CONVERT_TEMP_TO_ADC(temp, (int *)&adc_thold);
+	if (unlikely(retval)) {
+		dev_err(chc.dev,
+			"Error converting temperature for zone\n");
+		return retval;
+	}
+
+	/* multiply to convert into Ohm*/
+	adc_thold *= OHM_MULTIPLIER;
+
+	hyst = (resi_val - adc_thold);
+
+	if (hyst > 0)
+		hys = max((hyst / (1 << (7 + cursel))), 1);
+	else
+		hys = 0;
+	/* Clamp hys to 4-bit value */
+	hys = clamp_t(u8, hys, 0, 15);
+
+	tempzone_val = (hys << 12) | (cursel << 9) | trsh;
+
+	return tempzone_val;
+}
+
 static inline int update_zone_temp(int zone, u16 adc_val)
 {
 	int ret;
@@ -862,32 +938,6 @@ static inline int update_zone_temp(int zone, u16 adc_val)
 			offset_zone += 1;
 
 		addr_tzone = THRMZN4H_ADDR_SC - (2 * offset_zone);
-
-		/*
-		 * Override the adc values received from the LUT with the
-		 * values received from the PMIC hatdware team. SC pmic gets
-		 * 12-bit of ADC results however only 9-bits of the values can
-		 * be programmed into the temperature zone registers.
-		 */
-		switch (zone) {
-		case 0:
-			adc_val = THRMZN4_SC_ADCVAL;
-			break;
-		case 1:
-			adc_val = THRMZN3_SC_ADCVAL;
-			break;
-		case 2:
-			adc_val = THRMZN2_SC_ADCVAL;
-			break;
-		case 3:
-			adc_val = THRMZN1_SC_ADCVAL;
-			break;
-		case 4:
-			adc_val = THRMZN0_SC_ADCVAL;
-			break;
-		default:
-			dev_err(chc.dev, "no ADC default values\n");
-		}
 	} else {
 		dev_err(chc.dev, "%s: invalid vendor id %X\n", __func__, vendor_id);
 		return -EINVAL;
@@ -1648,12 +1698,15 @@ end:
 
 	return IRQ_HANDLED;
 }
+
 static int pmic_init(void)
 {
 	int ret = 0, i, temp_mon_ranges;
 	u16 adc_val;
 	u8 reg_val;
+	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 	struct ps_pse_mod_prof *bcprof = chc.actual_bcprof;
+
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
 			BATT_TEMP_NR_RNG);
 	for (i = 0; i < temp_mon_ranges; ++i) {
@@ -1665,6 +1718,18 @@ static int pmic_init(void)
 				"Error converting temperature for zone %d!!\n",
 				i);
 			return ret;
+		}
+
+		if (vendor_id == SHADYCOVE_VENDORID) {
+			/* Values obtained from lookup-table are resistance values.
+			 * Convert these to raw adc-codes
+			 */
+			adc_val = get_scove_tempzone_val(adc_val,
+					bcprof->temp_mon_range[i].temp_up_lim);
+			dev_info(chc.dev,
+					"adc-val:%x configured for temp:%d\n",
+					adc_val,
+					bcprof->temp_mon_range[i].temp_up_lim);
 		}
 
 		ret = update_zone_temp(i, adc_val);
@@ -1707,6 +1772,14 @@ static int pmic_init(void)
 				dev_err(chc.dev,
 					"Error converting low lim temp!!\n");
 				return ret;
+			}
+
+			if (vendor_id == SHADYCOVE_VENDORID) {
+				adc_val = get_scove_tempzone_val(adc_val,
+						bcprof->temp_low_lim);
+				dev_info(chc.dev,
+					"adc-val:%x configured for temp:%d\n",
+					adc_val, bcprof->temp_low_lim);
 			}
 
 			ret = update_zone_temp(i+1, adc_val);
