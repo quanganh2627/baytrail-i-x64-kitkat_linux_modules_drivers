@@ -907,7 +907,6 @@ int pmic_set_cc(int new_cc)
 	struct ps_pse_mod_prof *bcprof = chc.actual_bcprof;
 	struct ps_pse_mod_prof *r_bcprof = chc.runtime_bcprof;
 	int temp_mon_ranges;
-	int new_cc1;
 	int ret;
 	int i, cur_zone;
 	u8 reg_val = 0;
@@ -923,17 +922,15 @@ int pmic_set_cc(int new_cc)
 			BATT_TEMP_NR_RNG);
 
 	for (i = 0; i < temp_mon_ranges; ++i) {
-		new_cc1 = min_t(int, new_cc,
-				bcprof->temp_mon_range[i].full_chrg_cur);
 
-		if (new_cc1 != r_bcprof->temp_mon_range[i].full_chrg_cur) {
+		if (new_cc != r_bcprof->temp_mon_range[i].full_chrg_cur) {
 			if (chc.pdata->cc_to_reg) {
-				chc.pdata->cc_to_reg(new_cc1, &reg_val);
+				chc.pdata->cc_to_reg(new_cc, &reg_val);
 				ret = update_zone_cc(i, reg_val);
 				if (unlikely(ret))
 					return ret;
 			}
-			r_bcprof->temp_mon_range[i].full_chrg_cur = new_cc1;
+			r_bcprof->temp_mon_range[i].full_chrg_cur = new_cc;
 		}
 	}
 
@@ -1270,6 +1267,7 @@ static int get_charger_type(void)
 static void handle_internal_usbphy_notifications(int mask)
 {
 	struct power_supply_cable_props cap = {0};
+	struct ps_pse_mod_prof *bcprof = chc.actual_bcprof;
 	bool hvdcp_chgr = false;
 
 	if (mask) {
@@ -1290,9 +1288,14 @@ static void handle_internal_usbphy_notifications(int mask)
 			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_ACA_DOCK))
 		cap.ma = 1500;
 
-	dev_info(chc.dev, "Notifying OTG ev:%d, evt:%d, chrg_type:%d, mA:%d\n",
+	if ((cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_DCP)
+		&& (bcprof->turbo_chg > 0))
+			cap.ma = chc.pdata->max_inlmt;
+
+	dev_info(chc.dev,
+		"Notifying OTG ev:%d, evt:%d, chrg_type:%d, mA:%d, turbo:%d\n",
 			USB_EVENT_CHARGER, cap.chrg_evt, cap.chrg_type,
-			cap.ma);
+			cap.ma, bcprof->turbo_chg);
 	atomic_notifier_call_chain(&chc.otg->notifier,
 			USB_EVENT_CHARGER, &cap);
 
@@ -1740,6 +1743,7 @@ static inline void print_ps_pse_mod_prof(struct ps_pse_mod_prof *bcprof)
 	int i, temp_mon_ranges;
 
 	dev_info(chc.dev, "ChrgProf: batt_id:%s\n", bcprof->batt_id);
+	dev_info(chc.dev, "ChrgProf: turbo_chg:%u\n", bcprof->turbo_chg);
 	dev_info(chc.dev, "ChrgProf: battery_type:%u\n", bcprof->battery_type);
 	dev_info(chc.dev, "ChrgProf: capacity:%u\n", bcprof->capacity);
 	dev_info(chc.dev, "ChrgProf: voltage_max:%u\n", bcprof->voltage_max);
@@ -1822,6 +1826,7 @@ static void set_pmic_batt_prof(struct ps_pse_mod_prof *new_prof,
 	}
 
 	strcpy(&(new_prof->batt_id[0]), &(bprof->batt_id[0]));
+	new_prof->turbo_chg = bprof->turbo_chg;
 	new_prof->battery_type = bprof->battery_type;
 	new_prof->capacity = bprof->capacity;
 	new_prof->voltage_max =  bprof->voltage_max;
@@ -1994,6 +1999,8 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 			kfree(chc.sfi_bcprof);
 			return -ENOMEM;
 		}
+
+
 
 		chc.runtime_bcprof = kzalloc(sizeof(struct ps_pse_mod_prof),
 					GFP_KERNEL);
