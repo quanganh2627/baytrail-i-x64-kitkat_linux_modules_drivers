@@ -268,22 +268,19 @@ struct mcd_base_info *modem_ctrl_get_dev_data(struct platform_device *pdev)
  *  mdm_ctrl_get_device_info - Create platform and modem data.
  *  @drv: Reference to the driver structure
  *  @pdev: Reference to platform device data
- *  @nb_mdms: number of modems
  *
  *  Platform are build from SFI table data.
  */
-void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
-			      struct platform_device *pdev,
-			      int nb_mdms)
+int mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
+			      struct platform_device *pdev)
 {
-	drv->all_pdata = modem_ctrl_get_dev_data(pdev);
+	int ret = 0;
 
-	if (!drv->all_pdata) {
-		int i;
-		for (i = 0; i < nb_mdms; i++)
-			drv->mdm[i].is_mdm_ctrl_disabled = true;
-		pr_info(DRVNAME ": Disabling driver. No known device\n");
-	}
+	drv->all_pdata = modem_ctrl_get_dev_data(pdev);
+	if (!drv->all_pdata)
+		ret = -1;
+
+	return ret;
 }
 
 /**

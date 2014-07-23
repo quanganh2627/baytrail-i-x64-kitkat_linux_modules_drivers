@@ -768,8 +768,8 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	int i;
 	char name[25];
 
-	pr_err(DRVNAME ": probing mdm_ctrl\n");
-	/* Allocate modem struct data */
+	pr_info(DRVNAME ": probing mdm_ctrl\n");
+
 	new_drv = kzalloc(sizeof(struct mdm_ctrl), GFP_KERNEL);
 	if (!new_drv) {
 		pr_err(DRVNAME ": Out of memory(new_drv)\n");
@@ -777,7 +777,20 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 		goto out;
 	}
 
+	/* Pre-initialisation: Retrieve platform device data.
+	 * For ACPI platforms, this function shall be called before
+	 * get_nb_mdms. Otherwise, the number of modem is not known.
+	 *
+	 * new_drv will contain all modem specifics data such as cpu name,
+	 * pmic and enabling of early power mode */
+	if (mdm_ctrl_get_device_info(new_drv, pdev)) {
+		pr_err(DRVNAME ": failed to retrieve platform data\n");
+		ret = -ENODEV;
+		goto free_drv;
+	}
+
 	new_drv->nb_mdms = get_nb_mdms();
+	pr_info(DRVNAME ": number of modems: %d\n", new_drv->nb_mdms);
 
 	/* Register the device */
 	ret = alloc_chrdev_region(&new_drv->tdev, 0, new_drv->nb_mdms,
@@ -803,12 +816,6 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 		ret = -EIO;
 		goto del_cdev;
 	}
-
-	/* Pre-initialisation: Retrieve platform device data */
-	mdm_ctrl_get_device_info(new_drv, pdev, new_drv->nb_mdms);
-
-	/* HERE new_drv variable must contain all modem specifics
-	   (cpu name, pmic, early power on/off) */
 
 	new_drv->mdm = kzalloc(sizeof(struct mdm_info) * new_drv->nb_mdms,
 				GFP_KERNEL);
@@ -892,7 +899,6 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 
  del_class:
 	class_destroy(new_drv->class);
-	kfree(new_drv->all_pdata);
 
  del_cdev:
 	cdev_del(&new_drv->cdev);
@@ -901,6 +907,7 @@ static int mdm_ctrl_module_probe(struct platform_device *pdev)
 	unregister_chrdev_region(new_drv->tdev, 1);
 
  free_drv:
+	kfree(new_drv->all_pdata);
 	kfree(new_drv);
 
  out:

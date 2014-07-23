@@ -138,8 +138,8 @@ inline int mdm_ctrl_get_reset_ongoing(struct mdm_ctrl *drv);
 inline void mdm_ctrl_set_state(struct mdm_info *mdm, int state);
 inline int mdm_ctrl_get_state(struct mdm_info *mdm);
 
-void mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
-		struct platform_device *pdev, int nb_mdms);
+int mdm_ctrl_get_device_info(struct mdm_ctrl *drv,
+		struct platform_device *pdev);
 int mdm_ctrl_get_modem_data(struct mdm_ctrl *drv, int minor);
 
 void mdm_ctrl_set_mdm_cpu(struct mdm_info *mdm);
