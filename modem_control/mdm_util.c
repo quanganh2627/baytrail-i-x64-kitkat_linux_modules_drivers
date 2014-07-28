@@ -129,6 +129,7 @@ void mdm_ctrl_set_mdm_cpu(struct mdm_info *mdm)
 		pdata->cpu.get_irq_rst = get_gpio_irq_rst;
 		pdata->cpu.get_gpio_rst = get_gpio_rst;
 		pdata->cpu.get_gpio_pwr = get_gpio_pwr;
+		pdata->cpu.get_gpio_on = get_gpio_on;
 		break;
 	case BOARD_NGFF:
 		pdata->mdm.init = mcd_mdm_init;

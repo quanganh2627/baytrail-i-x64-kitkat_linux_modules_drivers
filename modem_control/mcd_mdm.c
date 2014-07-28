@@ -36,6 +36,10 @@
 
 #include <linux/mdm_ctrl.h>
 
+#ifndef UNREFERENCED_PARAMETER
+#define UNREFERENCED_PARAMETER(param) (param) = (param)
+#endif
+
 /*****************************************************************************
  *
  * Modem Power/Reset functions
@@ -54,8 +58,9 @@ int mcd_mdm_init(void *data)
  *  - Set to HIGH the PWRDWN_N to switch ON the modem
  *  - Set to HIGH the RESET_BB_N
  *  - Do a pulse on ON1
+ *  - Do a pulse on ON KEY for Modem 2230
  */
-int mcd_mdm_cold_boot(void *data, int rst, int pwr_on)
+int mcd_mdm_cold_boot(void *data, int rst, int pwr_on, int on_key)
 {
 	struct mdm_ctrl_mdm_data *mdm_data = data;
 
@@ -69,6 +74,9 @@ int mcd_mdm_cold_boot(void *data, int rst, int pwr_on)
 	gpio_set_value(pwr_on, 1);
 	usleep_range(mdm_data->on_duration, mdm_data->on_duration);
 	gpio_set_value(pwr_on, 0);
+
+	/* currently on_key is only used by Modem2230 */
+	UNREFERENCED_PARAMETER(on_key);
 
 	return 0;
 }
@@ -153,7 +161,13 @@ int mcd_mdm_cold_boot_ngff(void *data, int rst, int pwr_on)
 	return 0;
 }
 
-int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on)
+/**
+ *  mcd_mdm_cold_boot_2230 - Perform a cold boot boot for modem 2230
+ *  @drv: Reference to the driver structure
+ *
+ *  - TODO: update time between toggling ON_KEY and POWER_ON
+ */
+int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on, int on_key)
 {
 	struct mdm_ctrl_mdm_data *mdm_data = data;
 
@@ -171,6 +185,12 @@ int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on)
 	/* Toggle POWER_ON */
 	usleep_range(100000, 100000);
 	gpio_set_value(pwr_on, 1);
+
+	/* Toggle ON_KEY */
+	usleep_range(1000*1000, 1000*1000);
+	gpio_set_value(on_key, 1);
+	usleep_range(1000*1000, 1000*1000);
+	gpio_set_value(on_key, 0);
 
 	return 0;
 }
