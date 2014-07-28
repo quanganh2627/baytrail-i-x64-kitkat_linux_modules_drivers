@@ -190,7 +190,7 @@ static int mdm_ctrl_power_off(struct mdm_info *mdm)
 	void *cpu_data = mdm->pdata->cpu_data;
 	void *pmic_data = mdm->pdata->pmic_data;
 
-	int rst;
+	int rst, pwr_on;
 
 	pr_info(DRVNAME ": Power OFF requested");
 
@@ -201,7 +201,8 @@ static int mdm_ctrl_power_off(struct mdm_info *mdm)
 	mdm_ctrl_set_state(mdm, MDM_CTRL_STATE_OFF);
 
 	rst = cpu->get_gpio_rst(cpu_data);
-	if (mdm_ops->power_off(mdm_data, rst)) {
+	pwr_on = cpu->get_gpio_pwr(cpu_data);
+	if (mdm_ops->power_off(mdm_data, rst, pwr_on)) {
 		pr_err(DRVNAME ": Error MDM power-OFF.");
 		ret = -1;
 		goto end;

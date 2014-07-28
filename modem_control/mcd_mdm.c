@@ -108,7 +108,7 @@ int mcd_mdm_warm_reset(void *data, int rst)
  *  - Set to low the ON1
  *  - Write the PMIC reg
  */
-int mcd_mdm_power_off(void *data, int rst)
+int mcd_mdm_power_off(void *data, int rst, int pwr_on)
 {
 	struct mdm_ctrl_mdm_data *mdm_data = data;
 
@@ -119,6 +119,8 @@ int mcd_mdm_power_off(void *data, int rst)
 	usleep_range(mdm_data->pre_pwr_down_delay,
 		     mdm_data->pre_pwr_down_delay);
 
+	/* Here POWER ON is not used except for Modem2230 */
+	UNREFERENCED_PARAMETER(pwr_on);
 	return 0;
 }
 
@@ -176,7 +178,7 @@ int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on, int on_key)
 
 	/* Toggle the POWER_ON */
 	usleep_range(mdm_data->pre_on_delay, mdm_data->pre_on_delay);
-	gpio_set_value(pwr_on, 0);
+	gpio_set_value_cansleep(pwr_on, 0);
 
 	/* Toggle RESET_BB_N */
 	usleep_range(mdm_data->on_duration, mdm_data->on_duration);
@@ -184,13 +186,36 @@ int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on, int on_key)
 
 	/* Toggle POWER_ON */
 	usleep_range(100000, 100000);
-	gpio_set_value(pwr_on, 1);
+	gpio_set_value_cansleep(pwr_on, 1);
 
 	/* Toggle ON_KEY */
 	usleep_range(1000*1000, 1000*1000);
 	gpio_set_value(on_key, 1);
 	usleep_range(1000*1000, 1000*1000);
 	gpio_set_value(on_key, 0);
+
+	return 0;
+}
+
+/**
+ *  mcd_mdm_power_off_2230 - Perform a power off for modem 2230
+ *  @drv: Reference to the driver structure
+ *
+ *  - Set to LOW the PWRDWN_N
+ *  - Set to LOW the PWR ON pin
+ */
+int mcd_mdm_power_off_2230(void *data, int rst, int pwr_on)
+{
+	struct mdm_ctrl_mdm_data *mdm_data = data;
+
+	/* Set the RESET_BB_N to 0 */
+	gpio_set_value(rst, 0);
+
+	/* Wait before doing the pull down battery on */
+	usleep_range(mdm_data->pre_pwr_down_delay,
+		mdm_data->pre_pwr_down_delay);
+
+	gpio_set_value_cansleep(pwr_on, 0);
 
 	return 0;
 }
