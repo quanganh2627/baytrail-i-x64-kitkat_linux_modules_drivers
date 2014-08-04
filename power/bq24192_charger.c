@@ -1272,7 +1272,7 @@ static inline int bq24192_enable_charger(
 
 	ret = bq24192_reg_read_modify(chip->client,
 			BQ24192_INPUT_SRC_CNTL_REG,
-				INPUT_SRC_CNTL_EN_HIZ, val);
+				INPUT_SRC_CNTL_EN_HIZ, !val);
 
 	if (ret < 0)
 		dev_warn(&chip->client->dev,
