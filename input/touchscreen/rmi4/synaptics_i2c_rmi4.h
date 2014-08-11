@@ -153,6 +153,7 @@ struct rmi4_device_info {
  * @i2c_client: pointer for i2c client
  * @board: constant pointer for touch platform data
  * @rmi4_page_mutex: mutex for rmi4 page
+ * @rmi4_suspend_mutex: mutex for event reporting in suspend and irq
  * @current_page: variable for integer
  * @number_of_interrupt_register: interrupt registers count
  * @fn01_ctrl_base_addr: control base address for fn01
@@ -173,6 +174,7 @@ struct rmi4_data {
 	struct input_dev	*input_key_dev;
 	struct i2c_client	*i2c_client;
 	struct mutex		rmi4_page_mutex;
+	struct mutex 		rmi4_report_mutex;
 	unsigned int		number_of_interrupt_register;
 	u16		        fn01_ctrl_base_addr;
 	u16		        fn01_query_base_addr;

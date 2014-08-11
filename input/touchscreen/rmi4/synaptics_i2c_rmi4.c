@@ -480,6 +480,7 @@ int rmi4_touchpad_f12_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 
 	data = (struct synaptics_rmi4_f12_finger_data *)f12_data->buffer;
 
+	mutex_lock(&pdata->rmi4_report_mutex);
 	pdata->touch_counter++;
 	for (finger = 0; finger < fingers_supported; finger++) {
 		finger_data = data + finger;
@@ -522,6 +523,7 @@ int rmi4_touchpad_f12_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 
 	/* sync after groups of events */
 	input_sync(pdata->input_ts_dev);
+	mutex_unlock(&pdata->rmi4_report_mutex);
 
 	return touch_count;
 }
@@ -2002,6 +2004,7 @@ void rmi4_suspend(struct rmi4_data *pdata)
 	if (pdata->regulator)
 		regulator_disable(pdata->regulator);
 
+	mutex_lock(&pdata->rmi4_report_mutex);
 	/* swipe all the touch points before suspend */
 	for (i = 0; i < MAX_FINGERS; i++) {
 		if (pdata->finger_status[i] == F11_PRESENT) {
@@ -2014,6 +2017,7 @@ void rmi4_suspend(struct rmi4_data *pdata)
 	}
 	if (need_sync)
 		input_sync(pdata->input_ts_dev);
+	mutex_unlock(&pdata->rmi4_report_mutex);
 
 	pdata->touch_counter = 0;
 	pdata->key_counter = 0;
@@ -2516,6 +2520,7 @@ static int rmi4_probe(struct i2c_client *client,
 	rmi4_data->irq			= client->irq;
 
 	mutex_init(&(rmi4_data->rmi4_page_mutex));
+	mutex_init(&rmi4_data->rmi4_report_mutex);
 
 	retval = rmi4_config_gpio(rmi4_data);
 	if (retval < 0) {
