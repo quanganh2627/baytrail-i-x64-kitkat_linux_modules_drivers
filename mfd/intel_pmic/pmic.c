@@ -54,6 +54,32 @@ struct device *intel_mid_pmic_dev(void)
 	return pmic->dev;
 }
 
+int intel_mid_pmic_read_multi(int reg, u8 len, u8 *buf)
+{
+	int ret;
+
+	if (!pmic)
+		return -EIO;
+	mutex_lock(&pmic->io_lock);
+	ret = pmic->readmul(reg, len, buf);
+	mutex_unlock(&pmic->io_lock);
+	return ret;
+}
+EXPORT_SYMBOL(intel_mid_pmic_read_multi);
+
+int intel_mid_pmic_write_multi(int reg, u8 len, u8 *buf)
+{
+	int ret;
+
+	if (!pmic)
+		return -EIO;
+	mutex_lock(&pmic->io_lock);
+	ret = pmic->writemul(reg, len, buf);
+	mutex_unlock(&pmic->io_lock);
+	return ret;
+}
+EXPORT_SYMBOL(intel_mid_pmic_write_multi);
+
 int intel_mid_pmic_readb(int reg)
 {
 	int ret;
@@ -512,23 +538,50 @@ struct file_operations addr_fops = {
     .write = pmic_addr_write,
 };
 
+static char special_reg[] = {0xBC, 0xE2, 0xE0, 0xBA, 0x56, 0x58, 0x5A, 0x78, 0x7A, 0x7C, 0xA0};
+
+static int reg_is_special(char reg)
+{
+	int i, sum;
+	sum = sizeof(special_reg);
+	for(i = 0; i < sum; i++)
+		if (reg == special_reg[i])
+			return true;
+	return false;
+}
 static int pmic_all_show(struct seq_file *seq, void *v)
 {
 	int i = 0, j = 0;
 	int ret = 0;
+	u8 buf[2];
 	for (i = 0; i < PMIC_NUM_REG; ++i) {
 		pmic_reg = i;
-		for (j = 0; j < NR_RETRY_CNT; j++) {
-			ret = intel_mid_pmic_readb(pmic_reg);
-			if (ret == -EAGAIN || ret == -ETIMEDOUT)
-				continue;
-			else
-				break;
-		}
-		if (ret < 0)
-			dev_dbg(pmic->dev, "pmic_reg read err:%d\n", ret);
+		if (reg_is_special(pmic_reg)){
+			for (j = 0; j < NR_RETRY_CNT; j++) {
+				ret = intel_mid_pmic_read_multi(pmic_reg, 2, buf);
+				if (ret == -EAGAIN || ret == -ETIMEDOUT)
+					continue;
+				else
+					break;
 
-		seq_printf(seq, "0x%x=0x%x\n", pmic_reg, ret);
+			}
+			if (ret < 0)
+				dev_dbg(pmic->dev, "pmic_reg multi read err:%d\n", ret);
+			seq_printf(seq, "0x%x=0x%x\n", pmic_reg, buf[0]);
+			seq_printf(seq, "0x%x=0x%x\n", pmic_reg + 1, buf[1]);
+			i++;
+		} else {
+			for (j = 0; j < NR_RETRY_CNT; j++) {
+				ret = intel_mid_pmic_readb(pmic_reg);
+				if (ret == -EAGAIN || ret == -ETIMEDOUT)
+					continue;
+				else
+					break;
+			}
+			if (ret < 0)
+				dev_dbg(pmic->dev, "pmic_reg read err:%d\n", ret);
+			seq_printf(seq, "0x%x=0x%x\n", pmic_reg, ret);
+		}
 	}
 
     return 0;
