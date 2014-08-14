@@ -2474,6 +2474,7 @@ static int rmi4_probe(struct i2c_client *client,
 		dev_err(&client->dev,
 			"%s: Couldn't allocate memory for test coverage\n",
 			__func__);
+		retval = -ENOMEM;
 		goto err_rmi4_tc;
 	}
 #endif
