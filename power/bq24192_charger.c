@@ -286,6 +286,7 @@ struct bq24192_chip {
 	bool online;
 	bool present;
 	bool sfttmr_expired;
+	bool is_otg_present;
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -1769,6 +1770,7 @@ static void bq24192_otg_evt_worker(struct work_struct *work)
 				evt->is_enable);
 
 		mutex_lock(&chip->event_lock);
+		chip->is_otg_present = evt->is_enable;
 		ret = bq24192_turn_otg_vbus(chip, evt->is_enable);
 		mutex_unlock(&chip->event_lock);
 
@@ -2270,7 +2272,6 @@ static int bq24192_resume(struct device *dev)
 {
 	struct bq24192_chip *chip = dev_get_drvdata(dev);
 	int ret;
-
 	if (chip->irq > 0) {
 		ret = request_threaded_irq(chip->irq,
 				bq24192_irq_isr, bq24192_irq_thread,
@@ -2285,6 +2286,17 @@ static int bq24192_resume(struct device *dev)
 				chip->irq);
 		}
 	}
+	/*
+	* Make sure we enable 5 volt boost mode
+	* in case of otg device connect
+	*/
+	mutex_lock(&chip->event_lock);
+	if (chip->is_otg_present) {
+		ret = bq24192_turn_otg_vbus(chip, true);
+		if (ret < 0)
+			dev_err(&chip->client->dev, "VBUS ON FAILED:\n");
+	}
+	mutex_unlock(&chip->event_lock);
 	dev_dbg(&chip->client->dev, "bq24192 resume\n");
 	return 0;
 }
