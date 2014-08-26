@@ -791,7 +791,7 @@ int ia_handle_frame(struct psh_ia_priv *psh_ia_data, void *dbuf, int size)
 			psh_err("Unmatched CMD_ACK recevied, %d(EXP: %d)\n",
 					cmd_ack->cmd_id,
 					psh_ia_data->cmd_ack->cmd_id);
-		return 0;
+		break;
 	case RESP_BIST_RESULT:
 		break;
 	case RESP_DEBUG_MSG:
