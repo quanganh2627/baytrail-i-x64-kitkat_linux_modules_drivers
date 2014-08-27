@@ -47,12 +47,19 @@
 #include "psh_ia_common.h"
 #include <asm/intel_mid_rpmsg.h>
 #include <asm/intel-mid.h>
+#include <linux/kct.h>
 
 #ifdef VPROG2_SENSOR
 #include <asm/intel_scu_ipcutil.h>
 #endif
 
 #define APP_IMR_SIZE (1024 * 256)
+
+static bool disable_psh_recovery = false;
+static bool force_psh_recovery = false;
+
+module_param(disable_psh_recovery, bool, S_IRUGO);
+module_param(force_psh_recovery, bool, S_IRUGO | S_IWUSR);
 
 enum {
 	imr_allocate = 0,
@@ -70,7 +77,11 @@ struct psh_plt_priv {
 	struct loop_buffer lbuf;
 };
 
+
+
 static int psh_recovery = 0;
+
+
 
 int do_psh_recovery(struct psh_ia_priv *psh_ia_data)
 {
@@ -78,7 +89,8 @@ int do_psh_recovery(struct psh_ia_priv *psh_ia_data)
 			(struct psh_plt_priv *)psh_ia_data->platform_priv;
 	int ret = 0;
 
-	psh_debug("do PSH Recovery, please wait ... \n");
+	psh_err("PSH Recovery started, please wait ... \n");
+
 	psh_recovery = 1;
 	/* set to D0 state */
 	pm_runtime_get_sync(plt_priv->dev);
@@ -97,8 +109,19 @@ int do_psh_recovery(struct psh_ia_priv *psh_ia_data)
 		psh_err("failed to setup ddr during psh recovery\n");
 		goto f_out;
 	}
+	else {
+		psh_err("PSH recovery done \n");
+	}
+
 
 f_out:
+	/* Report recovery event in crashtool*/
+	/* Replace CT_ADDITIONAL_APLOG with
+	CT_ADDITIONAL_FWMSG|CT_ADDITIONAL_APLOG once online log is working */
+
+	kct_log(CT_EV_CRASH, "PSH", "RECOVERY", 0, "", "", "", "", "", "",
+		"", CT_ADDITIONAL_FWMSG | CT_ADDITIONAL_APLOG);
+
 	pm_runtime_put(plt_priv->dev);
 	psh_recovery = 0;
 
@@ -193,10 +216,17 @@ f_out:
 	if (ch == PSH2IA_CHANNEL0 && cmd->cmd_id == CMD_RESET)
 		intel_psh_ipc_enable_irq();
 
-	if (ret && (psh_recovery == 0))
-	{
-		if (do_psh_recovery(psh_ia_data))
-			psh_err("PSH Recovery failed\n");
+	
+	if (!disable_psh_recovery) {
+		if ((ret && (psh_recovery == 0)) || (force_psh_recovery))
+		{
+			if (force_psh_recovery) {
+				psh_err("forced PSH recovery\n");
+				force_psh_recovery = 0;
+			}
+			if (do_psh_recovery(psh_ia_data))
+				psh_err("PSH recovery failed\n");
+		}
 	}
 
 	return ret;
