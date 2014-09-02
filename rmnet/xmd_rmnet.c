@@ -352,7 +352,7 @@ static void rmnet_xmit_tx_retry(struct work_struct *work)
 	struct rmnet_private *p = container_of(work, struct rmnet_private, tx_wk);
 
 	while (0 >= ret && time_before_eq(jiffies, p->dev->trans_start + tio)) {
-		msleep(1);
+		msleep(100);
 
 		mutex_lock(&p->tty_lock);
 		if (p->tty && p->tty->ops && p->tty->ops->write && p->skb){
@@ -448,7 +448,11 @@ static int rmnet_xmit(struct sk_buff *skb, struct net_device *dev)
 		if(0 >= ret){
 			pr_info("rmnet_xmit wrtie fail on %s with reason: %d\n",dev->name,ret);
 			netif_stop_queue(dev);
-			p->stats.tx_dropped++;
+			if(p->skb != NULL)
+				pr_warn("p->skb != NULL\n");
+			p->skb = skb;
+			queue_work(rmnet_wq, &(p->tx_wk));
+			return NETDEV_TX_OK;
 		}else{
 			p->stats.tx_packets++;
 			p->stats.tx_bytes += skb->len;
