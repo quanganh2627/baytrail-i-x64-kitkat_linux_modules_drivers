@@ -975,6 +975,9 @@ static int emmc_ipanic(struct notifier_block *this, unsigned long event,
 		emmc_ipanic_write_loginfo(emmc, log);
 		log++;
 	}
+	/* Writeback invalidation to ensure that CPU flush cache into DRAM */
+	asm("cli;wbinvd;sti");
+
 	pr_info("Panic log data written done!\n");
 
 	ipanic_dumper.active = 0;
