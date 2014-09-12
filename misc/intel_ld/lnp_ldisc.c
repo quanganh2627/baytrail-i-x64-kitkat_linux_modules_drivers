@@ -1980,16 +1980,59 @@ static int lbf_ldisc_ioctl(struct tty_struct *tty, struct file *file,
 	pr_info("-> %s\n", __func__);
 	switch (cmd) {
 	case BT_FW_DOWNLOAD_INIT:
-		pr_info("BT_FW_DOWNLOAD_INIT");
+		pr_info("BT_FW_DOWNLOAD_INIT\n");
 		err = lbf_ldisc_fw_download_init();
 		break;
 	case BT_FW_DOWNLOAD_COMPLETE:
 		lbf_ldisc_fw_download_complete(arg);
 		break;
 	case BT_FMR_LPM_ENABLE:
-	{	pr_info("BT_FMR_LPM_ENABLE\n");
+		pr_info("BT_FMR_LPM_ENABLE\n");
 		lbf_ldisc_lpm_enable(arg);
+		break;
+	case BT_FMR_IDLE:
+		lbf_ldisc_lpm_idle(arg);
+		break;
+	case BT_HOST_WAKE:
+		lbf_ldisc_hostwake(arg);
+		break;
+	default:
+		err = n_tty_ioctl_helper(tty, file, cmd, arg);
 	}
+	pr_info("<- %s\n", __func__);
+	return err;
+}
+
+/* lbf_ldisc_compat_ioctl()
+ *
+ * Process IOCTL system call for the tty device.
+ *
+ * Arguments:
+ *
+ * tty pointer to tty instance data
+ * file pointer to open file object for device
+ * cmd IOCTL command code
+ * arg argument for IOCTL call (cmd dependent)
+ *
+ * Return Value: Command dependent
+ */
+static int lbf_ldisc_compat_ioctl(struct tty_struct *tty, struct file *file,
+		unsigned int cmd, unsigned long arg)
+{
+
+	int err = 0;
+	pr_info("-> %s\n", __func__);
+	switch (cmd) {
+	case BT_FW_DOWNLOAD_INIT:
+		pr_info("BT_FW_DOWNLOAD_INIT\n");
+		err = lbf_ldisc_fw_download_init();
+		break;
+	case BT_FW_DOWNLOAD_COMPLETE:
+		lbf_ldisc_fw_download_complete(arg);
+		break;
+	case BT_FMR_LPM_ENABLE:
+		pr_info("BT_FMR_LPM_ENABLE\n");
+		lbf_ldisc_lpm_enable(arg);
 		break;
 	case BT_FMR_IDLE:
 		lbf_ldisc_lpm_idle(arg);
@@ -2350,6 +2393,7 @@ static struct tty_ldisc_ops lbf_ldisc = {
 	.read = lbf_ldisc_read,
 	.write = lbf_ldisc_write,
 	.ioctl = lbf_ldisc_ioctl,
+	.compat_ioctl = lbf_ldisc_compat_ioctl,
 	.poll = lbf_ldisc_poll,
 	.receive_buf = lbf_ldisc_receive,
 	.write_wakeup = lbf_ldisc_wakeup,
