@@ -964,6 +964,12 @@ static int bq24192_turn_otg_vbus(struct bq24192_chip *chip, bool votg_on)
 					"TIMER enable failed %s\n", __func__);
 				goto i2c_write_fail;
 			}
+
+			/* Clear HIZ mode before OTG mode is enabled */
+			ret = bq24192_clear_hiz(chip);
+			if (ret < 0)
+				dev_warn(&chip->client->dev, "HiZ clear failed:\n");
+
 			/* Configure the charger in OTG mode */
 			if ((chip->chip_type == BQ24296) ||
 				(chip->chip_type == BQ24297))
@@ -1769,10 +1775,8 @@ static void bq24192_otg_evt_worker(struct work_struct *work)
 			"%s:%d state=%d\n", __FILE__, __LINE__,
 				evt->is_enable);
 
-		mutex_lock(&chip->event_lock);
 		chip->is_otg_present = evt->is_enable;
 		ret = bq24192_turn_otg_vbus(chip, evt->is_enable);
-		mutex_unlock(&chip->event_lock);
 
 		if (ret < 0)
 			dev_err(&chip->client->dev, "VBUS ON FAILED:\n");
