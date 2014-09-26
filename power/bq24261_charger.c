@@ -264,6 +264,7 @@ struct bq24261_charger {
 	int max_temp;
 	int min_temp;
 	int revision;
+	int cc_limit_max;
 	enum bq24261_chrgr_stat chrgr_stat;
 	bool online;
 	bool present;
@@ -1100,6 +1101,9 @@ static int bq24261_usb_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_MIN_TEMP:
 		chip->min_temp = val->intval;
 		break;
+	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX:
+		chip->cc_limit_max = val->intval;
+		break;
 	default:
 		ret = -ENODATA;
 	}
@@ -1163,7 +1167,7 @@ static int bq24261_usb_get_property(struct power_supply *psy,
 		val->intval = chip->cntl_state;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX:
-		val->intval = chip->pdata->num_throttle_states;
+		val->intval = chip->cc_limit_max;
 		break;
 	case POWER_SUPPLY_PROP_MODEL_NAME:
 		val->strval = chip->model_name;
