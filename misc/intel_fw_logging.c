@@ -514,6 +514,7 @@ static bool fw_error_found(bool use_legacytype, int *only_sculog)
 
 		if (log_buffer[FABRIC_ERR_SIGNATURE_IDX1] !=
 			FABERR_INDICATOR1) {
+			pr_info("fw_error_found: no faberr indicator\n");
 			return false;
 		}
 
