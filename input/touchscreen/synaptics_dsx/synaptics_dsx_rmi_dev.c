@@ -671,7 +671,7 @@ static int rmidev_init_device(struct synaptics_rmi4_data *rmi4_data)
 {
 	int retval;
 	dev_t dev_no;
-	unsigned char attr_count;
+	int attr_count;
 	struct rmidev_data *dev_data;
 	struct device *device_ptr;
 	const struct synaptics_dsx_board_data *bdata =
