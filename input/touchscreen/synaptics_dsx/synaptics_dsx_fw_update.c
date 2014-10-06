@@ -923,6 +923,12 @@ static enum flash_area fwu_go_nogo(void)
 
 		strptr += 2;
 		firmware_id = kzalloc(MAX_FIRMWARE_ID_LEN, GFP_KERNEL);
+		if (!firmware_id) {
+			dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Fail to alloc firmware id\n",
+				__func__);
+			goto exit;
+		}
 		while (strptr[index] >= '0' && strptr[index] <= '9') {
 			firmware_id[index] = strptr[index];
 			index++;

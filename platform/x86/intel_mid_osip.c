@@ -381,6 +381,7 @@ static struct reboot_target osip_reboot_target = {
 #define OSIP_MAX_CMDLINE_SECTOR ((OSIP_MAX_CMDLINE_SIZE >> 9) + 1)
 
 /* Size used by signature is not the same for valleyview */
+#define OSIP_SIGNATURE_SIZE_MDFLD	0x1E0
 #define OSIP_SIGNATURE_SIZE 		0x2D8
 #define OSIP_VALLEYVIEW_SIGNATURE_SIZE 	0x400
 
@@ -452,7 +453,11 @@ int open_cmdline(struct inode *i, struct file *f)
 	if (!(p->attribute & 1))
 		/* even number: signed add size of signature header. */
 #ifdef CONFIG_INTEL_SCU_IPC
+#ifdef CONFIG_X86_MDFLD
+		p->cmdline += OSIP_SIGNATURE_SIZE_MDFLD;
+#else
 		p->cmdline += OSIP_SIGNATURE_SIZE;
+#endif
 #else
 		p->cmdline += OSIP_VALLEYVIEW_SIGNATURE_SIZE;
 #endif

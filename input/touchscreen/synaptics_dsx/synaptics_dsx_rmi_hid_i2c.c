@@ -200,7 +200,11 @@ static int generic_read(struct i2c_client *client, unsigned short length)
 		}
 	};
 
-	check_buffer(&buffer.read, &buffer.read_size, length);
+	retval = check_buffer(&buffer.read, &buffer.read_size, length);
+	if (retval) {
+		dev_err(&client->dev, "%s: check_buffer error\n", __func__);
+		return retval;
+	}
 	msg[0].buf = buffer.read;
 
 	retval = do_i2c_transfer(client, msg);
@@ -358,7 +362,12 @@ static int switch_to_rmi(struct synaptics_rmi4_data *rmi4_data)
 
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	check_buffer(&buffer.write, &buffer.write_size, 11);
+	retval = check_buffer(&buffer.write, &buffer.write_size, 11);
+	if (retval) {
+		mutex_unlock(&rmi4_data->rmi4_io_ctrl_mutex);
+		dev_err(&i2c->dev, "%s: check_buffer error\n", __func__);
+		return retval;
+	}
 
 	/* set rmi mode */
 	buffer.write[0] = hid_dd.command_register_index & MASK_8BIT;
@@ -388,7 +397,11 @@ static int check_report_mode(struct synaptics_rmi4_data *rmi4_data)
 
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	check_buffer(&buffer.write, &buffer.write_size, 7);
+	retval = check_buffer(&buffer.write, &buffer.write_size, 7);
+	if (retval) {
+		dev_err(&i2c->dev, "%s: check_buffer error\n", __func__);
+		goto exit;
+	}
 
 	buffer.write[0] = hid_dd.command_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.command_register_index >> 8;
@@ -436,7 +449,9 @@ static int hid_i2c_init(struct synaptics_rmi4_data *rmi4_data)
 
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	check_buffer(&buffer.write, &buffer.write_size, 6);
+	retval = check_buffer(&buffer.write, &buffer.write_size, 6);
+	if (retval)
+		goto exit;
 
 	/* read device descriptor */
 	buffer.write[0] = bdata->device_descriptor_addr & MASK_8BIT;
@@ -535,8 +550,13 @@ static int synaptics_rmi4_i2c_read(struct synaptics_rmi4_data *rmi4_data,
 recover:
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	check_buffer(&buffer.write, &buffer.write_size,
+	retval = check_buffer(&buffer.write, &buffer.write_size,
 			hid_dd.output_report_max_length + 2);
+	if (retval) {
+		mutex_unlock(&rmi4_data->rmi4_io_ctrl_mutex);
+		dev_err(&i2c->dev, "%s: check_buffer error\n", __func__);
+		return retval;
+	}
 	msg[0].buf = buffer.write;
 	buffer.write[0] = hid_dd.output_register_index & MASK_8BIT;
 	buffer.write[1] = hid_dd.output_register_index >> 8;
@@ -549,7 +569,14 @@ recover:
 	buffer.write[8] = length & MASK_8BIT;
 	buffer.write[9] = length >> 8;
 
-	check_buffer(&buffer.read, &buffer.read_size, length + 4);
+	retval = check_buffer(&buffer.read, &buffer.read_size, length + 4);
+	if (retval) {
+		dev_err(&i2c->dev, "%s: check_buffer error\n", __func__);
+		mutex_unlock(&rmi4_data->rmi4_io_ctrl_mutex);
+		if (buffer.write_size)
+			kfree(buffer.write);
+		return retval;
+	}
 	msg[1].buf = buffer.read;
 
 	retval = do_i2c_transfer(i2c, &msg[0]);
@@ -616,7 +643,12 @@ static int synaptics_rmi4_i2c_write(struct synaptics_rmi4_data *rmi4_data,
 recover:
 	mutex_lock(&rmi4_data->rmi4_io_ctrl_mutex);
 
-	check_buffer(&buffer.write, &buffer.write_size, msg_length);
+	retval = check_buffer(&buffer.write, &buffer.write_size, msg_length);
+	if (retval) {
+		mutex_unlock(&rmi4_data->rmi4_io_ctrl_mutex);
+		dev_err(&i2c->dev, "%s: check_buffer error\n", __func__);
+		return retval;
+	}
 	msg[0].len = msg_length;
 	msg[0].buf = buffer.write;
 	buffer.write[0] = hid_dd.output_register_index & MASK_8BIT;

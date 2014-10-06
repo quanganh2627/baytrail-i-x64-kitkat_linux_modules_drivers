@@ -973,6 +973,12 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 		/* Start checking from the highest bit */
 		temp = extra_data->data15_size - 1; /* Highest byte */
+		if (temp >= ((F12_FINGERS_TO_SUPPORT + 7) / 8)) {
+			dev_err(rmi4_data->pdev->dev.parent,
+				"%s: wrong number of fingers %d\n",
+				__func__, extra_data->data15_size);
+			return 0;
+		}
 		finger = (fingers_to_process - 1) % 8; /* Highest bit */
 		do {
 			if (extra_data->data15_data[temp] & (1 << finger))
@@ -1483,6 +1489,12 @@ static int synaptics_rmi4_f11_init(struct synaptics_rmi4_data *rmi4_data,
 	fhandler->fn_number = fd->fn_number;
 	fhandler->num_of_data_sources = fd->intr_src_count;
 	fhandler->extra = kmalloc(sizeof(*extra_data), GFP_KERNEL);
+	if (!fhandler->extra) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Fail to alloc extra data\n",
+				__func__);
+		return -ENOMEM;
+	}
 	extra_data = (struct synaptics_rmi4_f11_extra_data *)fhandler->extra;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
@@ -2994,7 +3006,7 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 #endif
 {
 	int retval;
-	unsigned char attr_count;
+	int attr_count;
 	struct synaptics_rmi4_data *rmi4_data;
 	const struct synaptics_dsx_hw_interface *hw_if;
 	const struct synaptics_dsx_board_data *bdata;

@@ -1471,6 +1471,7 @@ static int bq24261_handle_irq(struct bq24261_charger *chip, u8 stat_reg)
 		switch (stat_reg & BQ24261_FAULT_MASK) {
 		case BQ24261_VOVP:
 			chip->chrgr_health = POWER_SUPPLY_HEALTH_OVERVOLTAGE;
+			chip->is_charger_enabled = false;
 			schedule_delayed_work(&chip->exception_mon_work,
 					EXCEPTION_MONITOR_DELAY);
 			dev_err(&client->dev, "Charger OVP Fault\n");
