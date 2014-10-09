@@ -47,6 +47,31 @@ struct device *intel_mid_pmic_dev(void)
 	return pmic->dev;
 }
 
+int intel_mid_pmic_read_multi(int reg, u8 len, u8 *buf)
+{
+	int ret;
+
+	if (!pmic)
+		return -EIO;
+	mutex_lock(&pmic->io_lock);
+	ret = pmic->readmul(reg, len, buf);
+	mutex_unlock(&pmic->io_lock);
+	return ret;
+}
+EXPORT_SYMBOL(intel_mid_pmic_read_multi);
+
+int intel_mid_pmic_write_multi(int reg, u8 len, u8 *buf)
+{
+	int ret;
+
+	if (!pmic)
+		return -EIO;
+	mutex_lock(&pmic->io_lock);
+	ret = pmic->writemul(reg, len, buf);
+	mutex_unlock(&pmic->io_lock);
+	return ret;
+}
+
 int intel_mid_pmic_readb(int reg)
 {
 	int ret;

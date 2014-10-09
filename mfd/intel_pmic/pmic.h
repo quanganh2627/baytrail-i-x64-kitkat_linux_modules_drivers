@@ -46,6 +46,8 @@ struct intel_mid_pmic {
 	int (*init)(void);
 	int (*readb)(int);
 	int (*writeb)(int, u8);
+	int (*readmul)(int, u8, u8*);
+	int (*writemul)(int, u8, u8*);
 #define PMIC_IRQREG_MASK	0
 #define PMIC_IRQREG_STATUS	1
 #define PMIC_IRQREG_ACK		2
