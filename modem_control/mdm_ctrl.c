@@ -74,16 +74,10 @@ static void mdm_ctrl_handle_hangup(struct work_struct *work)
 static int mdm_ctrl_cold_boot(struct mdm_info *mdm)
 {
 	int ret = 0;
+	int cflash_delay;
 
 	struct mdm_ops *mdm_ops = &mdm->pdata->mdm;
-	struct cpu_ops *cpu = &mdm->pdata->cpu;
-	struct pmic_ops *pmic = &mdm->pdata->pmic;
-
 	void *mdm_data = mdm->pdata->modem_data;
-	void *cpu_data = mdm->pdata->cpu_data;
-	void *pmic_data = mdm->pdata->pmic_data;
-
-	int rst, pwr_on, cflash_delay, on_key;
 
 	pr_warn(DRVNAME ": Cold boot requested");
 
@@ -93,22 +87,11 @@ static int mdm_ctrl_cold_boot(struct mdm_info *mdm)
 	/* AP request => just ignore the modem reset */
 	atomic_set(&mdm->rst_ongoing, 1);
 
-	rst = cpu->get_gpio_rst(cpu_data);
-	pwr_on = cpu->get_gpio_pwr(cpu_data);
-	on_key = cpu->get_gpio_on(cpu_data);
 	cflash_delay = mdm_ops->get_cflash_delay(mdm_data);
 
-	/* @TODO: remove this */
-	if (mdm->pdata->mdm_ver != MODEM_2230) {
-		if (pmic->power_on_mdm(pmic_data)) {
-			pr_err(DRVNAME ": Error PMIC power-ON.");
-			ret = -1;
-			goto end;
-		}
-	}
-
-	if (mdm_ops->power_on(mdm_data, rst, pwr_on, on_key)) {
-		pr_err(DRVNAME ": Error MDM power-ON.");
+	/* Execute the modem power on sequence */
+	if (mdm_ops->power_on(mdm)) {
+		pr_err(DRVNAME ": Error on power on.");
 		ret = -1;
 		goto end;
 	}
@@ -181,16 +164,7 @@ static int mdm_ctrl_flashing_warm_reset(struct mdm_info *mdm)
 static int mdm_ctrl_power_off(struct mdm_info *mdm)
 {
 	int ret = 0;
-
 	struct mdm_ops *mdm_ops = &mdm->pdata->mdm;
-	struct cpu_ops *cpu = &mdm->pdata->cpu;
-	struct pmic_ops *pmic = &mdm->pdata->pmic;
-
-	void *mdm_data = mdm->pdata->modem_data;
-	void *cpu_data = mdm->pdata->cpu_data;
-	void *pmic_data = mdm->pdata->pmic_data;
-
-	int rst, pwr_on;
 
 	pr_info(DRVNAME ": Power OFF requested");
 
@@ -200,21 +174,11 @@ static int mdm_ctrl_power_off(struct mdm_info *mdm)
 	/* Set the modem state to OFF */
 	mdm_ctrl_set_state(mdm, MDM_CTRL_STATE_OFF);
 
-	rst = cpu->get_gpio_rst(cpu_data);
-	pwr_on = cpu->get_gpio_pwr(cpu_data);
-	if (mdm_ops->power_off(mdm_data, rst, pwr_on)) {
+	if (mdm_ops->power_off(mdm)) {
 		pr_err(DRVNAME ": Error MDM power-OFF.");
 		ret = -1;
-		goto end;
 	}
-	if (mdm->pdata->mdm_ver != MODEM_2230) {
-		if (pmic->power_off_mdm(pmic_data)) {
-			pr_err(DRVNAME ": Error PMIC power-OFF.");
-			ret = -1;
-			goto end;
-		}
-	}
-end:
+
 	return ret;
 }
 
@@ -493,6 +457,10 @@ long mdm_ctrl_dev_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 			/* The modem family must be set first */
 			mcd_set_mdm(mdm->pdata, cfg.type);
 			mdm->pdata->board_type = cfg.board;
+			/* Set the power on method */
+			mdm->pdata->pwr_on_ctrl = cfg.pwr_on;
+			/* Set the usb hub control */
+			mdm->pdata->usb_hub_ctrl = cfg.usb_hub;
 
 			mdm_ctrl_set_mdm_cpu(mdm);
 			mcd_finalize_cpu_data(mdm->pdata);
