@@ -641,6 +641,9 @@ static irqreturn_t tco_irq_handler(int irq, void *arg)
 	iTCO_wdt_keepalive();
 
 	trigger_all_cpu_backtrace();
+
+	/* Let the watchdog reset the board */
+	panic_timeout = 0;
 	panic("Kernel Watchdog");
 
 	/* This code should not be reached */
