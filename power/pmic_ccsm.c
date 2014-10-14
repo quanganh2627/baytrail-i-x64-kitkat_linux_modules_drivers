@@ -1523,6 +1523,7 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 							USB_EVENT_VBUS, &rmv_mask);
 					chc.otg_mode_enabled = false;
 				}
+				msleep(50);
 			}
 
 			dev_info(chc.dev,
