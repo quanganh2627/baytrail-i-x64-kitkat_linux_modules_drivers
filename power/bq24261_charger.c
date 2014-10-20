@@ -51,7 +51,7 @@
 
 #define CHRG_TERM_WORKER_DELAY (30 * HZ)
 #define EXCEPTION_MONITOR_DELAY (60 * HZ)
-#define WDT_RESET_DELAY (15 * HZ)
+#define WDT_RESET_DELAY (5 * HZ)
 
 /* BQ24261 registers */
 #define BQ24261_STAT_CTRL0_ADDR		0x00

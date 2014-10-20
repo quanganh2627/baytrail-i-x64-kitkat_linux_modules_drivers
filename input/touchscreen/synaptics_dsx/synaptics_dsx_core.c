@@ -973,7 +973,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 
 		/* Start checking from the highest bit */
 		temp = extra_data->data15_size - 1; /* Highest byte */
-		if (temp >= ((F12_FINGERS_TO_SUPPORT + 7) / 8)) {
+		if (temp < 0 || temp >= ((F12_FINGERS_TO_SUPPORT + 7) / 8)) {
 			dev_err(rmi4_data->pdev->dev.parent,
 				"%s: wrong number of fingers %d\n",
 				__func__, extra_data->data15_size);
@@ -1741,6 +1741,12 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 	fhandler->fn_number = fd->fn_number;
 	fhandler->num_of_data_sources = fd->intr_src_count;
 	fhandler->extra = kmalloc(sizeof(*extra_data), GFP_KERNEL);
+	if (!fhandler->extra) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Fail to alloc extra data\n",
+				__func__);
+		return -ENOMEM;
+	}
 	extra_data = (struct synaptics_rmi4_f12_extra_data *)fhandler->extra;
 	size_of_2d_data = sizeof(struct synaptics_rmi4_f12_finger_data);
 
@@ -1749,7 +1755,7 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 			query_5.data,
 			sizeof(query_5.data));
 	if (retval < 0)
-		return retval;
+		goto out;
 
 	ctrl_8_offset = query_5.ctrl0_is_present +
 			query_5.ctrl1_is_present +
@@ -1791,7 +1797,7 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 			ctrl_23.data,
 			sizeof(ctrl_23.data));
 	if (retval < 0)
-		return retval;
+		goto out;
 
 	/* Maximum number of fingers supported */
 	fhandler->num_of_data_points = min(ctrl_23.max_reported_objects,
@@ -1805,14 +1811,14 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 			&size_of_query8,
 			sizeof(size_of_query8));
 	if (retval < 0)
-		return retval;
+		goto out;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			fhandler->full_addr.query_base + 8,
 			query_8.data,
 			size_of_query8);
 	if (retval < 0)
-		return retval;
+		goto out;
 
 	/* Determine the presence of the Data0 register */
 	extra_data->data1_offset = query_8.data0_is_present;
@@ -1849,14 +1855,14 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 	retval = synaptics_rmi4_f12_set_enables(rmi4_data,
 			fhandler->full_addr.ctrl_base + ctrl_28_offset);
 	if (retval < 0)
-		return retval;
+		goto out;
 
 	retval = synaptics_rmi4_reg_read(rmi4_data,
 			fhandler->full_addr.ctrl_base + ctrl_8_offset,
 			ctrl_8.data,
 			sizeof(ctrl_8.data));
 	if (retval < 0)
-		return retval;
+		goto out;
 
 	/* Maximum x and y */
 	rmi4_data->sensor_max_x =
@@ -1890,7 +1896,18 @@ static int synaptics_rmi4_f12_init(struct synaptics_rmi4_data *rmi4_data,
 	/* Allocate memory for finger data storage space */
 	fhandler->data_size = num_of_fingers * size_of_2d_data;
 	fhandler->data = kmalloc(fhandler->data_size, GFP_KERNEL);
+	if (!fhandler->data) {
+		dev_err(rmi4_data->pdev->dev.parent,
+				"%s: Fail to alloc data\n",
+				__func__);
+		retval = -ENOMEM;
+		goto out;
+	}
 
+	return retval;
+out:
+	kfree(fhandler->extra);
+	fhandler->extra = NULL;
 	return retval;
 }
 

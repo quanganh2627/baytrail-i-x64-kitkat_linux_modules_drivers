@@ -113,12 +113,14 @@ void mdm_ctrl_set_mdm_cpu(struct mdm_info *mdm)
 	switch (board_type) {
 	case BOARD_AOB:
 		pdata->mdm.init = mcd_mdm_init;
-		if (mdm->pdata->mdm_ver == MODEM_2230)
+		if (mdm->pdata->mdm_ver == MODEM_2230) {
 			pdata->mdm.power_on = mcd_mdm_cold_boot_2230;
-		else
+			pdata->mdm.power_off = mcd_mdm_power_off_2230;
+		} else {
 			pdata->mdm.power_on = mcd_mdm_cold_boot;
+			pdata->mdm.power_off = mcd_mdm_power_off;
+		}
 		pdata->mdm.warm_reset = mcd_mdm_warm_reset;
-		pdata->mdm.power_off = mcd_mdm_power_off;
 		pdata->mdm.cleanup = mcd_mdm_cleanup;
 		pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
 		pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
@@ -129,6 +131,7 @@ void mdm_ctrl_set_mdm_cpu(struct mdm_info *mdm)
 		pdata->cpu.get_irq_rst = get_gpio_irq_rst;
 		pdata->cpu.get_gpio_rst = get_gpio_rst;
 		pdata->cpu.get_gpio_pwr = get_gpio_pwr;
+		pdata->cpu.get_gpio_on = get_gpio_on;
 		break;
 	case BOARD_NGFF:
 		pdata->mdm.init = mcd_mdm_init;

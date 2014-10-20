@@ -841,7 +841,7 @@ static void dlp_tty_wait_until_sent(struct tty_struct *tty, int timeout)
  */
 static void dlp_tty_close(struct tty_struct *tty, struct file *filp)
 {
-	struct dlp_channel *ch_ctx = (struct dlp_channel *)tty->driver_data;
+	struct dlp_channel *ch_ctx = NULL;
 	int need_cleanup = 0;
 	if (tty) {
 		need_cleanup = (tty->count == 1);
@@ -853,6 +853,7 @@ static void dlp_tty_close(struct tty_struct *tty, struct file *filp)
 		if (need_cleanup)
 			tty->flow_stopped = 1;
 
+		ch_ctx = (struct dlp_channel *)tty->driver_data;
 		if (filp && ch_ctx) {
 			struct dlp_tty_context *tty_ctx = ch_ctx->ch_data;
 			if (&tty_ctx->tty_prt)
