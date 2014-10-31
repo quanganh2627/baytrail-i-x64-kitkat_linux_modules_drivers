@@ -874,11 +874,8 @@ static int program_timers(struct bq24192_chip *chip, int wdt_duration,
 	/* Program the time with duration passed */
 	ret |=  wdt_duration;
 
-	/* Enable/Disable the safety timer */
-	if (sfttmr_enable)
-		ret |= CHRG_TIMER_EXP_CNTL_EN_TIMER;
-	else
-		ret &= ~CHRG_TIMER_EXP_CNTL_EN_TIMER;
+	/* Disable the safety timer for MTBF test. */
+	ret &= ~CHRG_TIMER_EXP_CNTL_EN_TIMER;
 
 	/* Program the TIMER CTRL register */
 	ret = bq24192_write_reg(chip->client,
