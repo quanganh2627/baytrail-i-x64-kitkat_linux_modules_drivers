@@ -992,7 +992,7 @@ static int synaptics_rmi4_f12_abs_report(struct synaptics_rmi4_data *rmi4_data,
 			}
 
 			fingers_to_process--;
-		} while (fingers_to_process);
+		} while (fingers_to_process && temp >= 0);
 
 		dev_dbg(rmi4_data->pdev->dev.parent,
 			"%s: Number of fingers to process = %d\n",
