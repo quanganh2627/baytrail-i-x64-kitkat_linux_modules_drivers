@@ -1860,6 +1860,8 @@ static int dlp_driver_probe(struct device *dev)
 
 		dlp_drv.channels_hsi[i].edlp_channel = i;
 	}
+	/* By default, associate trace channel to edlp channel 4 */
+	dlp_drv.channels_hsi[hsi_ch[DLP_CHANNEL_TRACE]].edlp_channel = DLP_CHANNEL_TRACE;
 
 	/* HSI client events callback  */
 	dlp_drv.ehandler = dlp_hsi_ehandler;
