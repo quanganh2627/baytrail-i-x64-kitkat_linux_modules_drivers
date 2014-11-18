@@ -2245,22 +2245,19 @@ static int sensor_parse_config(int num, struct sensor_config *configs)
 }
 
 static struct sensor_config_image *sensor_image;
-static int sensor_general_start(int start)
+static int sensor_general_attached;
+static int start_method;
+static void sensor_firmware_cb(const struct firmware *fw_entry, void *ctx)
 {
 	int ret;
-	const struct firmware *fw_entry;
 
-	/*request config image*/
-	ret = request_firmware(&fw_entry,
-		GENERAL_SENSOR_FIRMWARE, &general_sensor_device);
-	if (ret) {
-		printk(KERN_ERR "Fail to request firmware %s\n",
-				GENERAL_SENSOR_FIRMWARE);
-		return ret;
+	if (!fw_entry) {
+		printk(KERN_ERR "Fail to request sensor firmware\n");
+		return;
 	}
 
 	sensor_image = (struct sensor_config_image *)fw_entry->data;
-	if (start != SG_FORCE_START &&
+	if (start_method != SG_FORCE_START &&
 		(sensor_image->flags & SG_FLAGS_BOOT_DISABLE)) {
 		ret = -EINVAL;
 		goto out;
@@ -2286,15 +2283,22 @@ static int sensor_general_start(int start)
 		printk(KERN_ERR "Fail to parse config image\n");
 		kfree(sensor_image);
 		sensor_image = NULL;
-	}
-
+	} else
+		sensor_general_attached = 1;
 out:
 	release_firmware(fw_entry);
-	fw_entry = NULL;
-	return ret;
+	return;
 }
 
-static int sensor_general_attached;
+static int sensor_general_start(int start)
+{
+	start_method = start;
+	return request_firmware_nowait(THIS_MODULE, true,
+			GENERAL_SENSOR_FIRMWARE,
+			&general_sensor_device, GFP_KERNEL, NULL,
+			sensor_firmware_cb);
+}
+
 static ssize_t sensor_general_start_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -2308,9 +2312,6 @@ static ssize_t sensor_general_start_store(struct device *dev,
 		ret = sensor_general_start(val);
 		if (ret)
 			printk(KERN_ERR "Fail to start general sensor\n");
-		else
-			sensor_general_attached = 1;
-
 	} else if (sensor_general_attached && !val) {
 		printk(KERN_DEBUG "[%d]%s, unattach general sensor driver\n",
 						__LINE__, __func__);
