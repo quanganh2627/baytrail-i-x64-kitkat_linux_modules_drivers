@@ -191,7 +191,7 @@ int mcd_mdm_cold_boot_2230(void *data, int rst, int pwr_on, int on_key)
 	/* Toggle ON_KEY */
 	usleep_range(1000*1000, 1000*1000);
 	gpio_set_value(on_key, 1);
-	usleep_range(1000*1000, 1000*1000);
+	usleep_range(150000, 150000);
 	gpio_set_value(on_key, 0);
 
 	return 0;

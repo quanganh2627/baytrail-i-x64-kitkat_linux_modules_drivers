@@ -31,6 +31,16 @@ static struct intel_mid_pmic *pmic_i2c;
 #define I2C_ADDR_SHIFT		8
 #define I2C_REG_MASK		0xFF
 
+static int pmic_i2c_read_multi_byte(int reg, u8 len, u8 *buf)
+{
+	return i2c_smbus_read_i2c_block_data(pmic_i2c_client, reg, len, buf);
+}
+
+static int pmic_i2c_write_multi_byte(int reg, u8 len, u8 *buf)
+{
+	return i2c_smbus_write_i2c_block_data(pmic_i2c_client, reg, len, buf);
+}
+
 static int pmic_i2c_readb(int reg)
 {
 
@@ -93,6 +103,8 @@ static int pmic_i2c_probe(struct i2c_client *i2c,
 	pmic_i2c->pmic_int_gpio = acpi_get_gpio_by_index(pmic_i2c->dev, 0, NULL);
 	pmic_i2c->readb	= pmic_i2c_readb;
 	pmic_i2c->writeb= pmic_i2c_writeb;
+	pmic_i2c->readmul = pmic_i2c_read_multi_byte;
+	pmic_i2c->writemul = pmic_i2c_write_multi_byte;
 	return intel_pmic_add(pmic_i2c);
 }
 
