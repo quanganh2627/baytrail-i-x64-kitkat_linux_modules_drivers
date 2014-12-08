@@ -137,7 +137,7 @@ void mdm_ctrl_set_mdm_cpu(struct mdm_info *mdm)
 		pdata->mdm.init = mcd_mdm_init;
 		pdata->mdm.power_on = mcd_mdm_cold_boot_ngff;
 		pdata->mdm.warm_reset = mcd_mdm_warm_reset;
-		pdata->mdm.power_off = mcd_mdm_power_off;
+		pdata->mdm.power_off = mcd_mdm_power_off_ngff;
 		pdata->mdm.cleanup = mcd_mdm_cleanup;
 		pdata->mdm.get_wflash_delay = mcd_mdm_get_wflash_delay;
 		pdata->mdm.get_cflash_delay = mcd_mdm_get_cflash_delay;
