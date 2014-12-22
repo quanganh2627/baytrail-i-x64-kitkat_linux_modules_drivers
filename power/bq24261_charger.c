@@ -44,6 +44,8 @@
 
 #include <asm/intel_scu_ipc.h>
 
+#define NR_RETRY_CNT    3
+
 #define DEV_NAME "bq24261_charger"
 #define DEV_MANUFACTURER "TI"
 #define MODEL_NAME_SIZE 8
@@ -382,9 +384,16 @@ static inline void bq24261_sfty_tmr_to_reg(int tmr, u8 *regval)
 
 static inline int bq24261_read_reg(struct i2c_client *client, u8 reg)
 {
-	int ret;
+	int ret, i;
 
-	ret = i2c_smbus_read_byte_data(client, reg);
+	for (i = 0; i < NR_RETRY_CNT; i++) {
+		ret = i2c_smbus_read_byte_data(client, reg);
+		if (ret == -EAGAIN || ret == -ETIMEDOUT)
+			continue;
+		else
+			break;
+	}
+
 	if (ret < 0)
 		dev_err(&client->dev, "Error(%d) in reading reg %d\n", ret,
 			reg);
@@ -542,9 +551,16 @@ static void bq24261_debugfs_exit(void)
 
 static inline int bq24261_write_reg(struct i2c_client *client, u8 reg, u8 data)
 {
-	int ret;
+	int ret, i;
 
-	ret = i2c_smbus_write_byte_data(client, reg, data);
+	for (i = 0; i < NR_RETRY_CNT; i++) {
+		ret = i2c_smbus_write_byte_data(client, reg, data);
+		if (ret == -EAGAIN || ret == -ETIMEDOUT)
+			continue;
+		else
+			break;
+	}
+
 	if (ret < 0)
 		dev_err(&client->dev, "Error(%d) in writing %d to reg %d\n",
 			ret, data, reg);
